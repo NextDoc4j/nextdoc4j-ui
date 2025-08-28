@@ -25,8 +25,8 @@ const key = computed(() => {
   return Object.keys(securitySchemes)[0] ?? '';
 });
 const value = ref(tokenStore.token);
-const handleToken = (e: null | string) => {
-  tokenStore.setToken(e);
+const handleToken = (value: null | string) => {
+  tokenStore.setToken(value);
   refresh();
 };
 </script>
@@ -45,10 +45,16 @@ const handleToken = (e: null | string) => {
           {{ securitySchemes[key].in ?? 'header' }}
         </ElDescriptionsItem>
         <ElDescriptionsItem label="参数值" label-align="center">
-          <ElInput placeholder="请输入" v-model="value" @change="handleToken" />
+          <ElInput
+            placeholder="请输入"
+            v-model.trim="value"
+            @change="handleToken"
+          />
         </ElDescriptionsItem>
         <ElDescriptionsItem>
-          <ElButton type="primary" @click="handleToken(null)">注销</ElButton>
+          <ElButton type="primary" @click.passive="handleToken(null)">
+            注销
+          </ElButton>
         </ElDescriptionsItem>
       </ElDescriptions>
     </ElCard>
