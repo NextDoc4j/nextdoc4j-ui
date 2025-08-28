@@ -267,8 +267,9 @@ const handleTest = () => {
 };
 
 onBeforeMount(() => {
-  const [group, tag, operationId] = (route.name as string).split('-') ?? [];
+  const [group, tag, operationId] = (route.name as string).split('*') ?? [];
   apiInfo.value = apiStore.searchPathData(group, tag, operationId);
+
   activeNames.value = Object.keys(apiInfo.value.responses)[0];
 });
 defineExpose({

@@ -48,7 +48,7 @@ export const fetchMenuListAsync: () => Promise<
   Object.keys(tagGroups).forEach((key: string) => {
     const children = tagGroups[key]?.map((api) => {
       return {
-        name: `all-${key}-${api.operationId}`,
+        name: `all*${key}*${api.operationId}`,
         path: `/document/all/${key}/${api.operationId}`,
         meta: {
           title: api.summary,
@@ -61,7 +61,7 @@ export const fetchMenuListAsync: () => Promise<
     }) as RouteRecordStringComponent<string>[];
     accessRoutes.push({
       component: '/views/document/index.vue',
-      name: `all-${key}`,
+      name: `all*${key}`,
       meta: {
         title: key,
       },
@@ -72,7 +72,7 @@ export const fetchMenuListAsync: () => Promise<
   Object.keys(components?.schemas ?? {}).forEach((key: string) => {
     entries.push({
       component: '/views/entity/index.vue',
-      name: `all-${key}`,
+      name: `all*${key}`,
       meta: {
         title: key,
         keepAlive: true,
@@ -101,7 +101,7 @@ export const fetchMenuListAsync: () => Promise<
           Object.keys(tagGroups).forEach((key: string) => {
             const children = tagGroups[key]?.map((api) => {
               return {
-                name: `${tag}-${key}-${api.operationId}`,
+                name: `${tag}*${key}*${api.operationId}`,
                 path: `/document/${tag}/${key}/${api.operationId}`,
                 meta: {
                   title: api.summary,
@@ -133,7 +133,7 @@ export const fetchMenuListAsync: () => Promise<
           });
           const entityGroup: RouteRecordStringComponent<string> = {
             component: '/views/entity/index.vue',
-            name: `entity-${tag}`,
+            name: `entity*${tag}`,
             path: `/entity/${tag}`,
             meta: {
               title: name,
@@ -146,7 +146,7 @@ export const fetchMenuListAsync: () => Promise<
             }
             entityGroup.children.push({
               component: '/views/entity/index.vue',
-              name: `${tag}-${key}`,
+              name: `${tag}*${key}`,
               path: `/entity/${tag}/${key}`,
               meta: {
                 title: key,

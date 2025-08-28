@@ -366,7 +366,7 @@ defineExpose({});
 
 <template>
   <Splitpanes class="default-theme max-h-[88vh]" horizontal>
-    <Pane class="flex flex-col">
+    <Pane :size="70" class="flex flex-col">
       <ElSpace class="mb-4 px-4 pt-5 font-medium">
         <ElIcon @click="handleClose" class="cursor-pointer">
           <SvgCloseIcon />
@@ -461,7 +461,7 @@ defineExpose({});
         </ElTabs>
       </div>
     </Pane>
-    <Pane :min-size="10" :max-size="60">
+    <Pane :size="30" :min-size="10" :max-size="60">
       <div class="flex h-full w-full flex-col">
         <div class="mb-4 flex justify-between px-4 pt-2">
           <span class="font-medium">返回结果</span>

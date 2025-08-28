@@ -14,7 +14,7 @@ const apiStore = useApiStore();
 const treeData = ref();
 const fold = ref(false);
 onBeforeMount(() => {
-  const [, entityName] = (route.name as string).split('-') ?? [];
+  const [, entityName] = (route.name as string).split('*') ?? [];
   if (entityName) {
     entityInfo.value = {
       name: entityName,
