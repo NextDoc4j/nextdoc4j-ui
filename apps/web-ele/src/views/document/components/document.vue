@@ -320,7 +320,7 @@ defineExpose({
               <div
                 v-for="item in parametersInPath"
                 :key="item.name"
-                class="index-node"
+                class="index-node pb-6 last:pb-0"
               >
                 <div class="flex items-center justify-items-start">
                   <span class="property-name">
@@ -358,7 +358,7 @@ defineExpose({
                   class="color-[#667085] font-400 mt-2"
                   v-html="item.description"
                 ></div>
-                <div class="mt-2 flex flex-nowrap items-center">
+                <div class="mt-1 flex flex-nowrap items-center">
                   <span class="index-key">示例值:</span>
                   <span class="index-value">{{ item.example }}</span>
                 </div>
@@ -372,7 +372,7 @@ defineExpose({
               <div
                 v-for="item in parametersInQuery"
                 :key="item.name"
-                class="index-node"
+                class="index-node pb-6"
               >
                 <div class="flex items-center justify-items-start">
                   <span class="property-name">
@@ -415,7 +415,7 @@ defineExpose({
                   <span v-if="item.required" class="index-required">必需</span>
                   <span v-else class="index-optional">可选</span>
                 </div>
-                <div class="mt-2 flex flex-nowrap items-center">
+                <div class="flex flex-nowrap items-center">
                   <span
                     v-if="item.schema.minLength !== undefined"
                     class="index-value"
@@ -432,7 +432,7 @@ defineExpose({
                   v-html="item.description"
                 ></div>
                 <template v-if="item.schema.enum">
-                  <div class="mt-2 flex flex-nowrap items-start">
+                  <div class="mt-1 flex flex-nowrap items-start">
                     <span class="index-key">枚举值:</span>
                     <span
                       v-for="value in item.schema.enum"
@@ -443,7 +443,7 @@ defineExpose({
                     </span>
                   </div>
                 </template>
-                <div class="mt-2 flex flex-nowrap items-center">
+                <div class="mt-1 flex flex-nowrap items-center">
                   <span class="index-key">示例值:</span>
                   <span class="index-value">{{ item.example }}</span>
                 </div>
