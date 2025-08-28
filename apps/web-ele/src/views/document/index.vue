@@ -65,8 +65,10 @@ const handleClose = () => {
   width: 100%;
   max-width: 800px;
 
-  .index-node-wrap:first-child .index-node {
-    @apply pt-0;
+  & > .index-node-wrap:first-child {
+    & > .index-node {
+      @apply pt-0;
+    }
   }
 
   .index-node {
