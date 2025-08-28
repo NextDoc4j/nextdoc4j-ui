@@ -1,0 +1,131 @@
+// OpenAPI相关类型定义
+export interface SwaggerConfig {
+  configUrl: string;
+  urls: Array<{
+    name: string;
+    url: string;
+  }>;
+}
+export type Paths = Record<string, PathItem>;
+
+export interface OpenAPISpec {
+  openapi: string;
+  info: {
+    description?: string;
+    title: string;
+    version: string;
+  };
+  paths: Paths;
+  components?: {
+    schemas?: Record<string, SchemaObject>;
+  };
+}
+
+export interface PathItem {
+  [method: string]: OperationObject;
+}
+
+export interface OperationObject {
+  tags?: string[];
+  summary?: string;
+  description?: string;
+  operationId?: string;
+  parameters?: ParameterObject[];
+  requestBody?: RequestBodyObject;
+  responses?: Record<string, ResponseObject>;
+}
+
+export interface RequestBody {
+  description?: string;
+  content: {
+    [key: string]: {
+      schema: Schema;
+    };
+  };
+  required?: boolean;
+}
+
+export interface Response {
+  description: string;
+  content?: {
+    [key: string]: {
+      schema: Schema;
+    };
+  };
+}
+
+export interface Schema {
+  type?: string;
+  format?: string;
+  enum?: string[];
+  properties?: Record<string, Schema>;
+  items?: Schema;
+  $ref?: string;
+  description?: string;
+  required?: string[];
+  example?: any;
+  allOf?: Schema[];
+}
+
+// 添加树节点类型定义
+export interface TreeNode {
+  key: string;
+  title: string;
+  type?: string;
+  description?: string;
+  children?: TreeNode[];
+}
+
+// 添加参数对象类型定义
+export interface ParameterObject {
+  name: string;
+  in: 'cookie' | 'header' | 'path' | 'query';
+  description?: string;
+  required?: boolean;
+  schema: SchemaObject;
+  example?: any;
+}
+
+// 添加请求体对象类型定义
+export interface RequestBodyObject {
+  description?: string;
+  content: {
+    [key: string]: {
+      schema: SchemaObject;
+    };
+  };
+  required?: boolean;
+}
+
+// 添加响应对象类型定义
+export interface ResponseObject {
+  description: string;
+  content?: {
+    [key: string]: {
+      schema: SchemaObject;
+    };
+  };
+  schema?: SchemaObject;
+}
+
+// 添加 Schema 对象类型定义
+export interface SchemaObject {
+  type?: string;
+  format?: string;
+  enum?: any[];
+  properties?: Record<string, SchemaObject>;
+  items?: SchemaObject;
+  $ref?: string;
+  description?: string;
+  required?: string[];
+  example?: any;
+  title?: string;
+}
+
+export type Method = 'delete' | 'get' | 'patch' | 'post' | 'put';
+
+export type PathMenuItem = OperationObject & {
+  method: Method;
+  path: string;
+  security: any[];
+};

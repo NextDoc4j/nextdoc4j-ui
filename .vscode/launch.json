@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/launchsettings.json",
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "chrome",
+      "name": "Nextdoc4j",
+      "request": "launch",
+      "url": "http://localhost:5777",
+      "env": { "NODE_ENV": "development" },
+      "sourceMaps": true,
+      "webRoot": "${workspaceFolder}/apps/web-ele"
+    }
+  ]
+}
