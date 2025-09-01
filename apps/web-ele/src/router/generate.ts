@@ -16,31 +16,8 @@ export const fetchMenuListAsync: () => Promise<
     all: {},
   };
   const accessRoutes: RouteRecordStringComponent<string>[] = [];
-  const access = [
-    {
-      name: 'all',
-      path: '/document/all',
-      component: '/views/document/index.vue',
-      meta: {
-        title: '所有接口',
-      },
-      redirect:
-        accessRoutes.length > 0 ? accessRoutes[0]?.path : '/document/all',
-      children: accessRoutes,
-    },
-  ];
+
   const entries: RouteRecordStringComponent<string>[] = [];
-  const accessEntries: RouteRecordStringComponent<string>[] = [
-    {
-      name: 'entries',
-      path: '/entity/all',
-      component: '/views/entity/index.vue',
-      meta: {
-        title: '所有实体',
-      },
-      children: entries,
-    },
-  ];
   const { data } = await getOpenAPI();
   const { paths, components } = data;
   const tagGroups = apiByTag(paths);
@@ -70,6 +47,19 @@ export const fetchMenuListAsync: () => Promise<
       children,
     });
   });
+  const access = [
+    {
+      name: 'all',
+      path: '/document/all',
+      component: '/views/document/index.vue',
+      meta: {
+        title: '所有接口',
+      },
+      redirect:
+        accessRoutes.length > 0 ? accessRoutes[0]?.path : '/document/all',
+      children: accessRoutes,
+    },
+  ];
   Object.keys(components?.schemas ?? {}).forEach((key: string) => {
     entries.push({
       component: '/views/entity/index.vue',
@@ -81,6 +71,17 @@ export const fetchMenuListAsync: () => Promise<
       path: `/entity/all/${key}`,
     });
   });
+  const accessEntries: RouteRecordStringComponent<string>[] = [
+    {
+      name: 'entries',
+      path: '/entity/all',
+      component: '/views/entity/index.vue',
+      meta: {
+        title: '所有实体',
+      },
+      children: entries,
+    },
+  ];
   const { data: config } = await getOpenAPIConfig();
   const { urls } = config;
   if (urls) {

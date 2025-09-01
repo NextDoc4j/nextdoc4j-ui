@@ -31,10 +31,12 @@ onBeforeMount(() => {
     <h4 class="mt-4 text-sm">{{ entityInfo.description }}</h4>
     <table class="entity-table">
       <thead>
-        <th width="20%">属性名</th>
-        <th width="25%">类型</th>
-        <th width="20%">示例</th>
-        <th width="35%">描述</th>
+        <tr>
+          <th width="20%">属性名</th>
+          <th width="25%">类型</th>
+          <th width="20%">示例</th>
+          <th width="35%">描述</th>
+        </tr>
       </thead>
       <tbody>
         <entityTr v-if="!fold" :tree-data="treeData" />
