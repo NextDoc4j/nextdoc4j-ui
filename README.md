@@ -6,7 +6,7 @@
 
 基于 Vue 3 + TypeScript + Vite 构建，深度整合 SpringDoc，完美替代 Swagger UI
 
-[在线演示](https://demo.dockit4j.top/) | [文档](https://docs.dockit4j.com) | [后端项目](https://gitee.com/nextdoc4j/nextdoc4j)
+[在线演示](https://demo.dockit4j.top/) | [文档](https://docs.dockit4j.top) | [后端项目](https://gitee.com/nextdoc4j/nextdoc4j)
 
 </div>
 
@@ -74,7 +74,7 @@ pnpm build
 ```
 nextdoc4j-ui/
 ├── apps/
-│   └── web-ele/              # 主应用（Electron版本）
+│   └── web-ele/              # 主应用
 ├── packages/
 │   ├── @core/                # 核心功能包
 │   ├── constants/            # 常量定义
@@ -116,7 +116,6 @@ nextdoc4j-ui/
 - **框架**: Vue 3 + TypeScript
 - **构建工具**: Vite
 - **包管理**: pnpm + Monorepo (Turbo)
-- **桌面应用**: Electron (web-ele)
 - **UI 组件**: 基于 Vben Admin
 - **状态管理**: Pinia
 - **路由**: Vue Router 4
