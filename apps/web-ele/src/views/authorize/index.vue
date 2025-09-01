@@ -20,7 +20,7 @@ const tokenStore = useTokenStore();
 const { refresh } = useRefresh();
 const {
   components: { securitySchemes },
-} = apiStore.swaggerConfig;
+} = apiStore.openApi;
 const key = computed(() => {
   return Object.keys(securitySchemes)[0] ?? '';
 });

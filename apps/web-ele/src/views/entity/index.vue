@@ -18,7 +18,7 @@ onBeforeMount(() => {
   if (entityName) {
     entityInfo.value = {
       name: entityName,
-      ...apiStore.swaggerConfig.components.schemas[entityName],
+      ...apiStore.openApi?.components.schemas[entityName],
     };
   }
   const data = processSchema(entityInfo.value);

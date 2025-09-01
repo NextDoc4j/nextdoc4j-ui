@@ -24,6 +24,8 @@ export const fetchMenuListAsync: () => Promise<
       meta: {
         title: '所有接口',
       },
+      redirect:
+        accessRoutes.length > 0 ? accessRoutes[0]?.path : '/document/all',
       children: accessRoutes,
     },
   ];
@@ -56,7 +58,6 @@ export const fetchMenuListAsync: () => Promise<
           keepAlive: true,
         },
         component: '/views/document/index.vue',
-        parent: '/all',
       };
     }) as RouteRecordStringComponent<string>[];
     accessRoutes.push({
@@ -124,12 +125,16 @@ export const fetchMenuListAsync: () => Promise<
           });
           access.push({
             name: tag,
-            path: `/${tag}`,
+            path: `/document/${tag}`,
             component: '/views/document/index.vue',
             meta: {
               title: name,
             },
             children: accessRoutes,
+            redirect:
+              accessRoutes.length > 0
+                ? accessRoutes[0]?.path
+                : `/document/${tag}`,
           });
           const entityGroup: RouteRecordStringComponent<string> = {
             component: '/views/entity/index.vue',
@@ -159,7 +164,7 @@ export const fetchMenuListAsync: () => Promise<
   }
 
   return new Promise((resolve) => {
-    useApiStore().initConfig(allPath, data);
+    useApiStore().initConfig(allPath, data, config);
     resolve([
       {
         name: 'document',
@@ -183,7 +188,7 @@ export const fetchMenuListAsync: () => Promise<
   });
 };
 
-const apiByTag = (paths: Paths) => {
+export const apiByTag = (paths: Paths) => {
   const tagGroups: Record<string, PathMenuItem[]> = {};
   // 按tag分组
   Object.entries(paths).forEach(([path, methods]: [string, any]) => {

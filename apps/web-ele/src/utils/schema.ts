@@ -8,8 +8,8 @@ export function resolveSchema(
   resolvedRefs: Set<string> = new Set(),
 ): any {
   if (!schema) return null;
-  const { swaggerConfig } = useApiStore();
-  if (!swaggerConfig) return null;
+  const { openApi } = useApiStore();
+  if (!openApi) return null;
   try {
     // 处理引用
     if (schema.$ref) {
@@ -18,7 +18,7 @@ export function resolveSchema(
         return { type: 'ref', title: ref };
       }
 
-      const resolved = swaggerConfig.components?.schemas?.[ref];
+      const resolved = openApi.components?.schemas?.[ref];
 
       if (!resolved) {
         return { type: 'unknown', title: ref };

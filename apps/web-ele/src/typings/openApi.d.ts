@@ -11,14 +11,39 @@ export type Paths = Record<string, PathItem>;
 export interface OpenAPISpec {
   openapi: string;
   info: {
+    contact: {
+      email: string;
+      name: string;
+      url: string;
+    };
     description?: string;
+    license: {
+      name: string;
+    };
     title: string;
     version: string;
   };
   paths: Paths;
-  components?: {
-    schemas?: Record<string, SchemaObject>;
+  components: {
+    schemas: Record<string, SchemaObject>;
   };
+  'x-nextdoc4j': {
+    brand?: {
+      footerText?: string;
+      logo?: string;
+      title?: string;
+    };
+    markdown?: MarkDownDes[];
+  };
+}
+
+interface MarkDownDes {
+  content: string;
+  contentLength: string;
+  displayName: string;
+  filename: string;
+  group: string;
+  lastModified: string;
 }
 
 export interface PathItem {

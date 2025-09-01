@@ -1,3 +1,5 @@
+import type { OpenAPISpec, SwaggerConfig } from '#/typings/openApi';
+
 import { ref } from 'vue';
 
 import { defineStore } from 'pinia';
@@ -5,12 +7,14 @@ import { defineStore } from 'pinia';
 export const useApiStore = defineStore('api', () => {
   const isInitConfig = ref(false);
   const apiData = ref<any>([]);
-  const swaggerConfig = ref();
-  const initConfig = (data, components) => {
+  const openApi = ref<OpenAPISpec>();
+  const swaggerConfig = ref<SwaggerConfig>();
+  const initConfig = (data, api: OpenAPISpec, config: SwaggerConfig) => {
     if (isInitConfig.value) return;
     apiData.value = data;
     isInitConfig.value = true;
-    swaggerConfig.value = components;
+    openApi.value = api;
+    swaggerConfig.value = config;
   };
   const searchPathData = (group: string, tag: string, operationId: string) => {
     const paths = apiData.value[group][tag];
@@ -23,5 +27,6 @@ export const useApiStore = defineStore('api', () => {
     apiData,
     searchPathData,
     swaggerConfig,
+    openApi,
   };
 });
