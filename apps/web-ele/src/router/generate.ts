@@ -1,6 +1,8 @@
 import type { RouteRecordStringComponent } from '@vben/types';
 
-import type { PathMenuItem, Paths } from '#/typings/openApi';
+import type { Brand, PathMenuItem, Paths } from '#/typings/openApi';
+
+import { updatePreferences } from '@vben/preferences';
 
 import { getOpenAPI, getOpenAPIConfig } from '#/api/core/openApi';
 import { requestClient } from '#/api/request.js';
@@ -19,7 +21,12 @@ export const fetchMenuListAsync: () => Promise<
 
   const entries: RouteRecordStringComponent<string>[] = [];
   const { data } = await getOpenAPI();
-  const { paths, components } = data;
+  const { paths, components, 'x-nextdoc4j': xNextdoc4j } = data;
+
+  if (xNextdoc4j.brand) {
+    initBrand(xNextdoc4j.brand);
+  }
+
   const tagGroups = apiByTag(paths);
 
   allPath.all = tagGroups;
@@ -206,4 +213,25 @@ export const apiByTag = (paths: Paths) => {
     });
   });
   return tagGroups;
+};
+
+const initBrand = (brand: Brand) => {
+  const { footerText, logo, title } = brand;
+  updatePreferences({
+    logo: {
+      source: logo,
+    },
+    footer: {},
+    copyright: {
+      enable: true,
+      date: footerText.replaceAll('&nbsp;', ' '),
+      companySiteLink: '',
+      icpLink: '',
+      icp: '',
+      companyName: '',
+    },
+    app: {
+      name: title,
+    },
+  });
 };

@@ -28,16 +28,18 @@ export interface OpenAPISpec {
     schemas: Record<string, SchemaObject>;
   };
   'x-nextdoc4j': {
-    brand?: {
-      footerText?: string;
-      logo?: string;
-      title?: string;
-    };
+    brand?: Brand;
     markdown?: MarkDownDes[];
   };
 }
 
-interface MarkDownDes {
+export interface Brand {
+  footerText: string;
+  logo: string;
+  title: string;
+}
+
+export interface MarkDownDes {
   content: string;
   contentLength: string;
   displayName: string;

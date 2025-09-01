@@ -12,7 +12,7 @@ defineOptions({
 });
 
 withDefaults(defineProps<Props>(), {
-  companyName: 'Dock4j',
+  companyName: 'Nextdoc4j',
   companySiteLink: '',
   date: '2025',
   icp: '',
@@ -33,7 +33,7 @@ withDefaults(defineProps<Props>(), {
     </a>
 
     <!-- Copyright Text -->
-    Copyright © {{ date }}
+    {{ date.includes('Copyright') ? date : `Copyright © ${date}` }}
 
     <!-- Company Link -->
     <a
