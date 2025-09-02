@@ -17,65 +17,107 @@ import {
   ElCheckbox,
   ElIcon,
   ElInput,
+  ElOption,
+  ElSelect,
   ElTable,
   ElTableColumn,
   ElUpload,
   genFileId,
 } from 'element-plus';
 
-const props = defineProps<{
-  tableData: {
-    description?: string;
-    enabled: boolean;
-    name: string;
+interface ParamItem {
+  enabled: boolean;
+  name: string;
+  value: any;
+  description?: string;
+  type?: string;
+  format?: string;
+  required?: boolean;
+  enum?: number[] | string[];
+  schema?: {
+    enum?: number[] | string[];
+    format?: string;
+    items?: {
+      enum?: number[] | string[];
+      format?: string;
+    };
     type?: string;
-    value: any;
-  }[];
+  };
+}
+
+const props = defineProps<{
+  tableData: ParamItem[];
 }>();
 const tableRef = ref();
 const fileList = ref([]);
 const uploadRef = ref<UploadInstance>();
-const remove = (index: number) => {
+
+// 判断是否为枚举参数
+function isEnumParam(row: ParamItem) {
+  return (
+    (row.enum && row.enum.length > 0) ||
+    (row.schema?.enum && row.schema.enum.length > 0) ||
+    (row.schema?.items?.enum && row.schema.items.enum.length > 0)
+  );
+}
+
+// 获取枚举选项
+function getEnumOptions(row: ParamItem) {
+  const enumValues: (number | string)[] =
+    row.enum || row.schema?.enum || row.schema?.items?.enum || [];
+  return enumValues.map((value) => ({
+    label: String(value),
+    value,
+    description: undefined,
+  }));
+}
+
+// 获取输入框占位符
+function getPlaceholder(row: ParamItem) {
+  if (row.description) return row.description;
+  if (row.type) return `请输入${row.type}类型的值`;
+  return '请输入参数值';
+}
+
+// 删除参数
+function remove(index: number) {
   // eslint-disable-next-line vue/no-mutating-props
   props.tableData.splice(index, 1);
-};
-const add = () => {
+}
+
+// 添加参数
+function add() {
   // eslint-disable-next-line vue/no-mutating-props
   props.tableData.push({ name: '', value: '', enabled: true });
-};
+}
+
+// 全选控制，保护必填参数
 const allChecked = computed({
-  get: () => {
-    return !props.tableData.some((item) => !item.enabled);
-  },
-  set: (value) => {
+  get: () => !props.tableData.some((item) => !item.enabled),
+  set: (value: boolean) => {
     props.tableData.forEach((item) => {
-      item.enabled = value;
+      if (!item.required) item.enabled = value;
     });
   },
 });
-const handleChange = (value: CheckboxValueType) => {
+
+function handleChange(value: CheckboxValueType) {
   allChecked.value = value as boolean;
-};
-const handleUpload: (
-  uploadFile: UploadFile,
+}
+
+// 文件上传处理
+function handleUpload(
+  _uploadFile: UploadFile,
   uploadFiles: UploadFiles,
-  row: {
-    description?: string;
-    enabled: boolean;
-    name: string;
-    type?: string;
-    value: any;
-  },
-) => void = (uploadFile, uploadFiles, row) => {
-  if (uploadFiles.length > 0) {
-    const rawFiles = uploadFiles
-      .filter((item) => item.raw !== undefined)
-      .map((item) => item.raw) as UploadRawFile[];
-    row.value = rawFiles;
-  } else {
-    row.value = '';
-  }
-};
+  row: ParamItem,
+) {
+  const rawFiles = uploadFiles
+    .filter((f) => f.raw)
+    .map((f) => f.raw) as UploadRawFile[];
+  row.value = rawFiles.length > 0 ? rawFiles : '';
+}
+
+// 超出文件数量限制处理
 const handleExceed: UploadProps['onExceed'] = (files) => {
   uploadRef.value!.clearFiles();
   const file = files[0] as UploadRawFile;
@@ -83,6 +125,7 @@ const handleExceed: UploadProps['onExceed'] = (files) => {
   uploadRef.value!.handleStart(file);
 };
 </script>
+
 <template>
   <div>
     <ElTable
@@ -113,14 +156,8 @@ const handleExceed: UploadProps['onExceed'] = (files) => {
               v-model:file-list="fileList"
               action="#"
               :auto-upload="false"
-              :on-change="
-                (uploadFile, uploadFiles) =>
-                  handleUpload(uploadFile, uploadFiles, row)
-              "
-              :on-remove="
-                (uploadFile, uploadFiles) =>
-                  handleUpload(uploadFile, uploadFiles, row)
-              "
+              :on-change="(file, files) => handleUpload(file, files, row)"
+              :on-remove="(file, files) => handleUpload(file, files, row)"
               :multiple="row.type === 'array'"
               :limit="row.type === 'array' ? 99 : 1"
               :on-exceed="handleExceed"
@@ -128,8 +165,39 @@ const handleExceed: UploadProps['onExceed'] = (files) => {
               <ElButton plain size="small"> 上传 </ElButton>
             </ElUpload>
           </div>
-          <div class="flex items-center" v-else>
-            <ElInput v-model="row.value" />
+
+          <!-- 枚举类型 -->
+          <div v-else-if="isEnumParam(row)" class="flex items-center">
+            <ElSelect
+              v-model="row.value"
+              placeholder="请选择枚举值"
+              size="small"
+              class="w-full"
+              filterable
+            >
+              <ElOption
+                v-for="option in getEnumOptions(row)"
+                :key="option.value"
+                :label="option.label"
+                :value="option.value"
+              >
+                <span>{{ option.label }}</span>
+                <span
+                  v-if="option.description"
+                  class="ml-2 text-xs text-gray-400"
+                >
+                  {{ option.description }}
+                </span>
+              </ElOption>
+            </ElSelect>
+            <ElIcon @click="remove($index)" class="ml-2 cursor-pointer">
+              <SvgCloseIcon class="size-3" />
+            </ElIcon>
+          </div>
+
+          <!-- 普通输入框 -->
+          <div v-else class="flex items-center">
+            <ElInput v-model="row.value" :placeholder="getPlaceholder(row)" />
             <ElIcon @click="remove($index)" class="cursor-pointer">
               <SvgCloseIcon class="ml-[-12px] size-3" />
             </ElIcon>

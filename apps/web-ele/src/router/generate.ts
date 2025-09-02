@@ -216,7 +216,7 @@ export const apiByTag = (paths: Paths) => {
 };
 
 const initBrand = (brand: Brand) => {
-  const { footerText, logo, title } = brand;
+  const { footerText = '', logo, title } = brand;
   updatePreferences({
     logo: {
       source: logo,

@@ -74,16 +74,14 @@ export function formatDescription(description?: string): string {
   if (!description) return '';
 
   // 处理枚举值说明，例如：{1=系统消息, 2=用户消息}
-  const desc = description.replaceAll(/\{([^}]+)\}/g, (_, content) => {
+  // 处理 HTML 标签
+  return description.replaceAll(/\{([^}]+)\}/g, (_, content) => {
     const items = content.split(',').map((item: string) => {
       const [key, value] = item.trim().split('=');
       return `<ElTag size="small" style="margin: 0 4px">${key}</ElTag> ${value}`;
     });
     return items.join('、');
   });
-
-  // 处理 HTML 标签
-  return desc;
 }
 
 // 构建树形结构数据

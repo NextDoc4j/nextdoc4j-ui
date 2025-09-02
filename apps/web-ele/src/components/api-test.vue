@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import type { ParameterObject } from '../typings/openApi';
+import type { ParameterObject } from '#/typings/openApi';
 
 import { ref, watch } from 'vue';
 
@@ -75,42 +75,60 @@ watch(
 watch(
   () => props.parameters,
   (newParams) => {
-    if (newParams) {
-      // 清空现有参数
-      queryParams.value = [];
-      pathParams.value = [];
-      headers.value = [];
-      // 重新初始化参数
-      newParams.forEach((param) => {
-        const paramItem = {
-          name: param.name,
-          value: param.example?.toString() || '',
-          enabled: param.required || true,
-          description: param.description || '',
-          type: param.schema?.type || 'string',
-          format: param.schema?.format || param.schema?.items?.format,
-        };
+    if (!newParams) return;
 
-        switch (param.in) {
-          case 'cookie': {
-            cookies.value.push(paramItem);
-            break;
-          }
-          case 'header': {
-            headers.value.push(paramItem);
-            break;
-          }
-          case 'path': {
-            pathParams.value.push(paramItem);
-            break;
-          }
-          case 'query': {
-            queryParams.value.push(paramItem);
-            break;
-          }
-        }
-      });
-    }
+    // 清空现有参数
+    queryParams.value = [];
+    pathParams.value = [];
+    headers.value = [];
+    cookies.value = [];
+
+    // 定义类型映射
+    const paramMap = {
+      cookie: cookies.value,
+      header: headers.value,
+      path: pathParams.value,
+      query: queryParams.value,
+    };
+
+    newParams.forEach((param) => {
+      const { schema = {} } = param;
+      const { type, format, enum: enumValues, items } = schema;
+
+      let value = param.example?.toString() || '';
+      if (!value && enumValues?.length) {
+        value = enumValues[0];
+      }
+
+      const paramItem = {
+        name: param.name,
+        value,
+        enabled: param.required ?? true,
+        description: param.description || '',
+        type: type || 'string',
+        format: format || items?.format,
+        required: param.required || false,
+        enum: enumValues,
+        schema: schema
+          ? {
+              type,
+              format,
+              enum: enumValues,
+              items: items
+                ? {
+                    enum: items.enum,
+                    format: items.format,
+                  }
+                : undefined,
+            }
+          : undefined,
+      };
+
+      const targetArray = paramMap[param.in];
+      if (targetArray) {
+        targetArray.push(paramItem);
+      }
+    });
   },
   { immediate: true },
 );

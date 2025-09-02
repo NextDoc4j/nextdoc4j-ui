@@ -440,7 +440,7 @@ defineExpose({
                   </span>
                 </div>
                 <div
-                  v-if="item.description && item.description.includes(' <')"
+                  v-if="item.description && item.description.includes('<')"
                   class="color-[#667085] font-400 mt-2"
                   v-html="item.description"
                 ></div>
