@@ -1,74 +1,54 @@
-name: 🐞 Bug Report
-description: Report an issue with Vben Admin to help us make it better.
-title: 'Bug: '
-labels: ['bug: pending triage']
-
+name: 🐞 Bug 报告
+description: 报告 NextDoc4j 中的缺陷
+title: "[Bug]: "
+labels: ["bug"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to fill out this bug report!
-  - type: dropdown
+        感谢你报告问题
+        请尽量提供 **完整上下文**，包括 SpringDoc / OpenAPI JSON 和报错信息，方便我们重现。
+  - type: input
     id: version
     attributes:
-      label: Version
-      description: What version of our software are you running?
-      options:
-        - Vben Admin V5
-        - Vben Admin V2
-      default: 0
+      label: NextDoc4j 版本
+      description: 你使用的 NextDoc4j 版本号
+      placeholder: e.g. v1.2.0
     validations:
       required: true
-
   - type: textarea
-    id: bug-desc
+    id: reproduce
     attributes:
-      label: Describe the bug?
-      description: A clear and concise description of what the bug is. If you intend to submit a PR for this issue, tell us in the description. Thanks!
-      placeholder: Bug Description
+      label: 复现步骤
+      description: 请描述触发 bug 的操作步骤
+      placeholder: 1. 打开页面 ... 2. 点击 ... 3. 出现错误 ...
     validations:
       required: true
-
   - type: textarea
-    id: reproduction
+    id: expected
     attributes:
-      label: Reproduction
-      description: Please provide a link to [StackBlitz](https://stackblitz.com/fork/github/vitest-dev/vitest/tree/main/examples/basic?initialPath=__vitest__/) (you can also use [examples](https://github.com/vitest-dev/vitest/tree/main/examples)) or a github repo that can reproduce the problem you ran into. A [minimal reproduction](https://stackoverflow.com/help/minimal-reproducible-example) is required unless you are absolutely sure that the issue is obvious and the provided information is enough to understand the problem. If a report is vague (e.g. just a generic error message) and has no reproduction, it will receive a "needs reproduction" label. If no reproduction is provided after 3 days, it will be auto-closed.
-      placeholder: Reproduction
+      label: 预期行为
+      description: 你本来期望的结果
     validations:
       required: true
-
   - type: textarea
-    id: system-info
+    id: actual
     attributes:
-      label: System Info
-      description: Output of `npx envinfo --system --npmPackages '{vue}' --binaries --browsers`
-      render: shell
-      placeholder: System, Binaries, Browsers
+      label: 实际行为
+      description: 实际发生了什么
     validations:
       required: true
-
+  - type: textarea
+    id: openapi-json
+    attributes:
+      label: SpringDoc / OpenAPI JSON
+      description: 请附上出问题时使用的 **完整 OpenAPI JSON** 或至少是相关片段
+      render: json
+    validations:
+      required: true
   - type: textarea
     id: logs
     attributes:
-      label: Relevant log output
-      description: Please copy and paste any relevant log output. This will be automatically formatted into code, so no need for backticks.
+      label: 浏览器/控制台报错信息
+      description: 请粘贴报错内容（浏览器控制台、后端日志等）
       render: shell
-
-  - type: checkboxes
-    id: terms
-    attributes:
-      label: Validations
-      description: Before submitting the issue, please make sure you do the following
-      # description: By submitting this issue, you agree to follow our [Code of Conduct](https://example.com).
-      options:
-        - label: Read the [docs](https://doc.vben.pro/)
-          required: true
-        - label: Ensure the code is up to date. (Some issues have been fixed in the latest version)
-          required: true
-        - label: I have searched the [existing issues](https://github.com/vbenjs/vue-vben-admin/issues) and checked that my issue does not duplicate any existing issues.
-          required: true
-        - label: Check that this is a concrete bug. For Q&A open a [GitHub Discussion](https://github.com/vbenjs/vue-vben-admin/discussions) or join our [Discord Chat Server](https://discord.gg/8GuAdwDhj6).
-          required: true
-        - label: The provided reproduction is a [minimal reproducible example](https://stackoverflow.com/help/minimal-reproducible-example) of the bug.
-          required: true
