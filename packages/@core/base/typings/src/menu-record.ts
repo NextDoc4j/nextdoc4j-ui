@@ -47,6 +47,10 @@ interface MenuRecordRaw extends MenuRecordBadgeRaw {
    */
   icon?: Component | string;
   /**
+   * API 调用方法
+   */
+  method?: string;
+  /**
    * 菜单名
    */
   name: string;
@@ -71,10 +75,6 @@ interface MenuRecordRaw extends MenuRecordBadgeRaw {
    * @default true
    */
   show?: boolean;
-  /**
-   * API 调用方法
-   */
-  method? : string;
 }
 
 export type { ExRouteRecordRaw, MenuRecordBadgeRaw, MenuRecordRaw };

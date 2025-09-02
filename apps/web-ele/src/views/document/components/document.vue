@@ -358,7 +358,7 @@ defineExpose({
                   >
                     <div
                       v-if="item.description && !item.description.includes('<')"
-                      class="index_additionalInformation__title"
+                      class="index-additionalInformation__title"
                     >
                       {{ item.description }}
                     </div>
@@ -419,7 +419,7 @@ defineExpose({
                       v-if="
                         !item.description || !item.description.includes('<')
                       "
-                      class="index_additionalInformation__title"
+                      class="index-additionalInformation__title"
                     >
                       {{ item.description }}
                     </div>
@@ -576,14 +576,14 @@ defineExpose({
     @apply relative max-w-full;
   }
 
-  .index_child-stack {
+  .index-child-stack {
     @apply my-0 ms-5;
 
     .index-node-wrap {
       @apply border-l last:border-0;
 
       &:last-child {
-        .index_sub-border {
+        .index-sub-border {
           margin-left: 0;
           border-left: 1px solid var(--el-border-color);
         }
@@ -594,7 +594,7 @@ defineExpose({
       @apply ps-5;
     }
 
-    .index_sub-border {
+    .index-sub-border {
       position: absolute;
       top: -1.65rem;
       left: -1.25rem;
@@ -634,7 +634,7 @@ defineExpose({
     color: #667085;
   }
 
-  .index_additionalInformation__title {
+  .index-additionalInformation__title {
     margin: 0 8px;
     color: #667085;
   }

@@ -111,7 +111,7 @@ const handleClose = () => {
   }
 
   /* stylelint-disable-next-line selector-class-pattern */
-  .index_child-stack {
+  .index-child-stack {
     @apply my-0 ms-5;
 
     .index-node-wrap {
@@ -119,7 +119,7 @@ const handleClose = () => {
 
       &:last-child {
         /* stylelint-disable-next-line selector-class-pattern */
-        .index_sub-border {
+        .index-sub-border {
           margin-left: 0;
           border-left: 1px solid var(--el-border-color);
         }
@@ -131,7 +131,7 @@ const handleClose = () => {
     }
 
     /* stylelint-disable-next-line selector-class-pattern */
-    .index_sub-border {
+    .index-sub-border {
       position: absolute;
       top: -1.65rem;
       left: -1.25rem;
@@ -172,7 +172,7 @@ const handleClose = () => {
   }
 
   /* stylelint-disable-next-line selector-class-pattern */
-  .index_additionalInformation__title {
+  .index-additionalInformation__title {
     margin: 0 8px;
     color: #667085;
   }

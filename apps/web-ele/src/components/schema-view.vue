@@ -114,7 +114,7 @@ const handleNode = (value) => {
               class="index_additionalInformation flex flex-1 items-center truncate"
             >
               <div v-if="value.description && !value.description.includes('<')">
-                <span class="index_additionalInformation__title">
+                <span class="index-additionalInformation__title">
                   {{ value.description }}
                 </span>
               </div>
@@ -157,13 +157,13 @@ const handleNode = (value) => {
             </div>
           </template>
         </div>
-        <div class="index_sub-border"></div>
+        <div class="index-sub-border"></div>
       </div>
     </div>
 
     <div
       v-if="isExpandable(value) && !fold"
-      class="index_child-stack overflow-hidden transition-all duration-300 ease-in"
+      class="index-child-stack overflow-hidden transition-all duration-300 ease-in"
     >
       <SchemaView :data="value" />
     </div>

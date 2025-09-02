@@ -5,7 +5,6 @@ import { computed } from 'vue';
 
 import { useNamespace } from '@vben-core/composables';
 import { ChevronDown, ChevronRight } from '@vben-core/icons';
-import { VbenIcon } from '@vben-core/shadcn-ui';
 
 import { useMenuContext } from '../hooks';
 
@@ -24,7 +23,6 @@ const props = withDefaults(defineProps<Props>(), {
 
 const rootMenu = useMenuContext();
 const { b, e, is } = useNamespace('sub-menu-content');
-const nsMenu = useNamespace('menu');
 
 const opened = computed(() => {
   return rootMenu?.openedMenus.includes(props.path);
@@ -50,15 +48,6 @@ const mode = computed(() => {
 
 const showArrowIcon = computed(() => {
   return mode.value === 'horizontal' || !(isFirstLevel.value && collapse.value);
-});
-
-const hiddenTitle = computed(() => {
-  return (
-    mode.value === 'vertical' &&
-    isFirstLevel.value &&
-    collapse.value &&
-    !getCollapseShowTitle.value
-  );
 });
 
 const iconComp = computed(() => {

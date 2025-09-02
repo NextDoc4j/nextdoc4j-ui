@@ -4,7 +4,6 @@ import type { MenuRecordRaw } from '@vben-core/typings';
 import type { NormalMenuProps } from './normal-menu';
 
 import { useNamespace } from '@vben-core/composables';
-import { VbenIcon } from '@vben-core/shadcn-ui';
 
 interface Props extends NormalMenuProps {}
 
@@ -12,7 +11,7 @@ defineOptions({
   name: 'NormalMenu',
 });
 
-const props = withDefaults(defineProps<Props>(), {
+withDefaults(defineProps<Props>(), {
   activePath: '',
   collapse: false,
   menus: () => [],
@@ -25,12 +24,6 @@ const emit = defineEmits<{
 }>();
 
 const { b, e, is } = useNamespace('normal-menu');
-
-function menuIcon(menu: MenuRecordRaw) {
-  return props.activePath === menu.path
-    ? menu.activeIcon || menu.icon
-    : menu.icon;
-}
 </script>
 
 <template>

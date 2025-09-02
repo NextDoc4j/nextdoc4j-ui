@@ -25,7 +25,7 @@ const props = withDefaults(
     descriptions: () => ({}),
   },
 );
-const emits = defineEmits<{
+defineEmits<{
   change: [];
 }>();
 const id = `json-viewer-${Date.now()}`;
@@ -35,8 +35,7 @@ const processDescription = (desc: string) => {
   if (desc === undefined) {
     return '';
   } else if (desc.includes('<span')) {
-    const match = desc.match(/\{([^}]+)\}/g);
-    return match;
+    return desc.match(/\{([^}]+)\}/g);
   } else {
     return desc;
   }
@@ -78,7 +77,7 @@ const formatJsonWithComments = (data: any) => {
   // 处理每一行
   return lines
     .map((line, index) => {
-      const keyMatch = line.match(/"([^"]+)":\s*([^,}\]]*)?/);
+      const keyMatch = line.match(/"([^"]+)":\s*([^,}\]]*)/);
       const key = keyMatch?.[1];
       const fullPath = getFieldPath(index);
       // 尝试获取描述（按优先级：完整路径 > 父路径+当前字段 > 当前字段）
@@ -202,9 +201,7 @@ const handleFormat = () => {
     ElMessage.error(`无效的JSON: ${error.message}`);
   }
 };
-const handleChange = () => {
-  emits('change');
-};
+
 // 监听数据变化
 watch(
   () => props.data,

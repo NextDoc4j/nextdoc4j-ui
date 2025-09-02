@@ -1,27 +1,24 @@
 {
-  "name": "vben-admin-monorepo",
-  "version": "5.5.7",
+  "name": "nextdoc4j",
+  "version": "1.0.0",
   "private": true,
   "keywords": [
-    "monorepo",
-    "turbo",
-    "vben",
-    "vben admin",
-    "vben pro",
+    "nextdoc4j",
+    "document management",
     "vue",
     "vue admin",
-    "vue vben admin",
-    "vue vben admin pro",
-    "vue3"
+    "vue3",
+    "monorepo",
+    "turbo"
   ],
-  "homepage": "https://github.com/vbenjs/vue-vben-admin",
-  "bugs": "https://github.com/vbenjs/vue-vben-admin/issues",
-  "repository": "vbenjs/vue-vben-admin.git",
-  "license": "MIT",
+  "homepage": "https://gitee.com/nextdoc4j/nextdoc4j-ui",
+  "bugs": "https://gitee.com/nextdoc4j/nextdoc4j-ui/issues",
+  "repository": "nextdoc4j/nextdoc4j-ui.git",
+  "license": "Apache-2.0",
   "author": {
-    "name": "vben",
-    "email": "ann.vben@gmail.com",
-    "url": "https://github.com/anncwb"
+    "name": "echo",
+    "email": "nextdoc4j@163.com",
+    "url": "https://gitee.com/nextdoc4j"
   },
   "type": "module",
   "scripts": {
