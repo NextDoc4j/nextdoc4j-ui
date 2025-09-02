@@ -23,7 +23,7 @@ export const fetchMenuListAsync: () => Promise<
   const { data } = await getOpenAPI();
   const { paths, components, 'x-nextdoc4j': xNextdoc4j } = data;
 
-  if (xNextdoc4j.brand) {
+  if (xNextdoc4j?.brand) {
     initBrand(xNextdoc4j.brand);
   }
 

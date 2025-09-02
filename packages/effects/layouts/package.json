@@ -38,6 +38,8 @@
     "@vben/utils": "workspace:*",
     "@vueuse/core": "catalog:",
     "vue": "catalog:",
-    "vue-router": "catalog:"
+    "vue-router": "catalog:",
+    "markdown-it": "catalog:",
+    "dompurify": "catalog:"
   }
 }

@@ -267,10 +267,23 @@ const handleTest = () => {
 };
 
 onBeforeMount(() => {
-  const [group, tag, operationId] = (route.name as string).split('*') ?? [];
-  apiInfo.value = apiStore.searchPathData(group, tag, operationId);
+  const routeName = route.name;
+  if (!routeName || typeof routeName !== 'string') {
+    console.warn('Route name is not available');
+    return;
+  }
 
-  activeNames.value = Object.keys(apiInfo.value.responses)[0];
+  const [group, tag, operationId] = routeName.split('*') ?? [];
+  // 确保所有参数都是字符串类型
+  const safeGroup = group || '';
+  const safeTag = tag || '';
+  const safeOperationId = operationId || '';
+
+  apiInfo.value = apiStore.searchPathData(safeGroup, safeTag, safeOperationId);
+
+  if (apiInfo.value?.responses) {
+    activeNames.value = Object.keys(apiInfo.value.responses)[0];
+  }
 });
 defineExpose({
   requestBodyType,
@@ -548,7 +561,7 @@ defineExpose({
   </div>
 </template>
 
-<style lang="scss">
+<style lang="scss" scoped>
 .full-space {
   > :deep(.el-space__item) {
     width: 100%;

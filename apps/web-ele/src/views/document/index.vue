@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, defineAsyncComponent, ref, shallowRef } from 'vue';
 
 import { Pane, Splitpanes } from 'splitpanes';
 
-import apiTest from '#/components/api-test.vue';
-
-import document from './components/document.vue';
-
 import 'splitpanes/dist/splitpanes.css';
+
+// 懒加载组件
+const apiTest = defineAsyncComponent(() => import('#/components/api-test.vue'));
+const document = defineAsyncComponent(
+  () => import('./components/document.vue'),
+);
 
 const drawer = ref(false);
 const method = ref();
@@ -17,7 +19,11 @@ const requestBody = ref();
 const security = ref();
 const testDrawRef = ref();
 const info = ref();
-const handleTest = (data) => {
+
+// 使用 shallowRef 优化大对象响应性
+const documentRef = shallowRef();
+
+const handleTest = (data: any) => {
   info.value = data;
   method.value = data.method;
   path.value = data.path;
@@ -26,10 +32,11 @@ const handleTest = (data) => {
   security.value = data.security;
   drawer.value = true;
 };
-const documentRef = ref();
+
 const requestBodyType = computed(() => {
-  return documentRef.value.requestBodyType ?? '';
+  return documentRef.value?.requestBodyType ?? '';
 });
+
 const handleClose = () => {
   drawer.value = false;
 };
@@ -38,18 +45,46 @@ const handleClose = () => {
 <template>
   <Splitpanes class="default-theme h-full" ref="testDrawRef">
     <Pane :size="70" :min-size="50">
-      <document ref="documentRef" @test="handleTest" :show-test="drawer" />
+      <Suspense>
+        <template #default>
+          <document ref="documentRef" @test="handleTest" :show-test="drawer" />
+        </template>
+        <template #fallback>
+          <div class="flex h-full items-center justify-center">
+            <div class="text-center">
+              <div class="loading">
+                <div class="loader"></div>
+                <div class="title">正在加载API文档</div>
+              </div>
+            </div>
+          </div>
+        </template>
+      </Suspense>
     </Pane>
     <Pane :size="30" :min-size="30" :max-size="50" v-if="drawer">
-      <api-test
-        :method="method"
-        :path="path"
-        :parameters="parameters"
-        :request-body="info.requestBody"
-        :security="security"
-        :request-body-type="requestBodyType"
-        @cancel="handleClose"
-      />
+      <Suspense>
+        <template #default>
+          <api-test
+            :method="method"
+            :path="path"
+            :parameters="parameters"
+            :request-body="info.requestBody"
+            :security="security"
+            :request-body-type="requestBodyType"
+            @cancel="handleClose"
+          />
+        </template>
+        <template #fallback>
+          <div class="flex h-full items-center justify-center">
+            <div class="text-center">
+              <div class="loading">
+                <div class="loader"></div>
+                <div class="title">正在加载API测试工具</div>
+              </div>
+            </div>
+          </div>
+        </template>
+      </Suspense>
     </Pane>
   </Splitpanes>
 </template>
@@ -189,19 +224,19 @@ const handleClose = () => {
   border-radius: 12px;
 }
 
-.el-collapse {
-  .el-collapse-item__header {
-    padding: 0 20px;
-    border-bottom: 1px solid var(--el-border-color) !important;
-  }
-
-  .el-collapse-item__wrap {
-    padding: 0 20px 20px;
-  }
-}
-
-.default-theme.splitpanes .splitpanes__pane {
+.default-theme.splitpanes {
   background-color: transparent;
   transition: none;
+
+  .splitpanes__pane {
+    background-color: transparent;
+    transition: none;
+  }
+
+  .splitpanes__splitter {
+    background-color: var(--el-bg-color);
+    border: 1px dashed var(--el-border-color);
+    border-left: 1px dashed var(--el-border-color) !important;
+  }
 }
 </style>

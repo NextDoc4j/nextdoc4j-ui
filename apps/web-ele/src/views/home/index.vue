@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import type { RouteRecordRaw } from '@vben/types';
+import type { MenuRecordRaw, RouteRecordRaw } from '@vben/types';
 
 import { computed } from 'vue';
 import { useRouter } from 'vue-router';
@@ -10,7 +10,7 @@ defineOptions({ name: 'Home' });
 
 const apiStore = useApiStore();
 const { info, openapi, paths, components } = apiStore.openApi!;
-const brand = apiStore.openApi?.['x-nextdoc4j'].brand;
+const brand = apiStore.openApi?.['x-nextdoc4j']?.brand;
 const apiCount = computed(() => {
   let count = 0;
   Object.entries(paths).forEach(([, value]) => {
@@ -99,63 +99,65 @@ const handleClick = (item: RouteRecordRaw) => {
         <!-- 卡片 1：API 接口 -->
         <div
           v-if="apiCount > 0"
-          class="group flex flex-1 items-center rounded-xl border-s-4 border-s-[var(--el-color-primary)] bg-white p-4 shadow hover:shadow-xl"
+          class="group flex flex-1 items-center rounded-xl border-s-4 border-s-[var(--el-color-primary)] bg-[var(--el-bg-color)] p-4 shadow hover:shadow-xl"
         >
           <span class="mr-4 text-2xl">🚀</span>
           <div>
             <h3
-              class="mb-1 text-2xl font-bold transition duration-100 group-hover:scale-110"
+              class="mb-1 text-2xl font-bold text-[var(--el-text-color-primary)] transition duration-100 group-hover:scale-110"
             >
               {{ apiCount }}
             </h3>
-            <p class="text-sm">API 接口</p>
+            <p class="text-sm text-[var(--el-text-color-regular)]">API 接口</p>
           </div>
         </div>
 
         <!-- 卡片 2：实体模型 -->
         <div
           v-if="entityCount"
-          class="group flex flex-1 items-center rounded-xl border-s-4 border-[var(--el-color-warning)] bg-white p-4 shadow hover:shadow-xl"
+          class="group flex flex-1 items-center rounded-xl border-s-4 border-[var(--el-color-warning)] bg-[var(--el-bg-color)] p-4 shadow hover:shadow-xl"
         >
           <span class="mr-4 text-2xl">🏗️</span>
           <div>
             <h3
-              class="mb-1 text-2xl font-bold transition duration-100 group-hover:scale-110"
+              class="mb-1 text-2xl font-bold text-[var(--el-text-color-primary)] transition duration-100 group-hover:scale-110"
             >
               {{ entityCount }}
             </h3>
-            <p class="text-sm">实体模型</p>
+            <p class="text-sm text-[var(--el-text-color-regular)]">实体模型</p>
           </div>
         </div>
 
         <!-- 卡片 3：业务分组 -->
         <div
           v-if="groupCount"
-          class="group flex flex-1 items-center rounded-xl border-s-4 border-purple-800 bg-white p-4 shadow hover:shadow-xl"
+          class="group flex flex-1 items-center rounded-xl border-s-4 border-[var(--el-color-info)] bg-[var(--el-bg-color)] p-4 shadow hover:shadow-xl"
         >
           <span class="mr-4 text-2xl">📂</span>
           <div>
             <h3
-              class="mb-1 text-2xl font-bold transition duration-100 group-hover:scale-110"
+              class="mb-1 text-2xl font-bold text-[var(--el-text-color-primary)] transition duration-100 group-hover:scale-110"
             >
               {{ groupCount }}
             </h3>
-            <p class="text-sm">业务分组</p>
+            <p class="text-sm text-[var(--el-text-color-regular)]">业务分组</p>
           </div>
         </div>
 
         <!-- 卡片 4：文档覆盖率 -->
         <div
-          class="group flex flex-1 items-center rounded-xl border-s-4 border-orange-400 bg-white p-4 shadow hover:shadow-xl"
+          class="group flex flex-1 items-center rounded-xl border-s-4 border-[var(--el-color-success)] bg-[var(--el-bg-color)] p-4 shadow hover:shadow-xl"
         >
           <span class="mr-4 text-2xl">✅</span>
           <div>
             <h3
-              class="mb-1 text-2xl font-bold transition duration-100 group-hover:scale-110"
+              class="mb-1 text-2xl font-bold text-[var(--el-text-color-primary)] transition duration-100 group-hover:scale-110"
             >
               100%
             </h3>
-            <p class="text-sm">文档覆盖率</p>
+            <p class="text-sm text-[var(--el-text-color-regular)]">
+              文档覆盖率
+            </p>
           </div>
         </div>
       </div>
@@ -164,16 +166,16 @@ const handleClick = (item: RouteRecordRaw) => {
       <h2 class="mb-4 text-lg font-bold">快速导航</h2>
       <div class="flex gap-4">
         <div
-          class="flex flex-1 cursor-pointer items-center justify-between rounded-xl bg-white p-4 shadow hover:shadow-xl"
+          class="flex flex-1 cursor-pointer items-center justify-between rounded-xl bg-[var(--el-bg-color)] p-4 shadow hover:shadow-xl"
           v-for="item in navList"
           :key="item.path"
           @click="handleClick(item)"
         >
-          <h3 class="text-sm">
+          <h3 class="text-sm text-[var(--el-text-color-primary)]">
             {{ item.meta?.title }}
           </h3>
           <span
-            class="bg-primary/10 text-primary border-primary/30 inline-block rounded-xl border px-2 text-xs"
+            class="bg-[var(--el-color-primary)]/10 border-[var(--el-color-primary)]/30 inline-block rounded-xl border px-2 text-xs text-[var(--el-color-primary)]"
           >
             {{ countLeaves(item) }}
           </span>

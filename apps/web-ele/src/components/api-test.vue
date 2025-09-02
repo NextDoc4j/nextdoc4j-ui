@@ -88,7 +88,7 @@ watch(
           enabled: param.required || true,
           description: param.description || '',
           type: param.schema?.type || 'string',
-          format: param.schema.format || param.schema.items?.format,
+          format: param.schema?.format || param.schema?.items?.format,
         };
 
         switch (param.in) {
@@ -126,7 +126,7 @@ const responseHeaders = ref<
 const responseDescriptions = ref({});
 
 // 添加关闭处理函数
-const handleClose = (e) => {
+const handleClose = (e: any) => {
   e.stopPropagation();
   emit('cancel');
 };
