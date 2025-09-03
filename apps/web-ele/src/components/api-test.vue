@@ -201,7 +201,6 @@ async function sendRequest() {
                 formData.append(h.name, h.value);
               }
             });
-          requestHeaders.append('Content-Type', 'multipart/form-data');
         }
         break;
       }
