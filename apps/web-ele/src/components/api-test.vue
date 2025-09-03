@@ -513,6 +513,7 @@ defineExpose({});
               <JsonView
                 :data="responseData"
                 :descriptions="responseDescriptions"
+                :image-render="true"
                 class="response-body"
               />
             </ElTabPane>

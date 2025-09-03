@@ -503,6 +503,7 @@ defineExpose({
                 <JsonView
                   :data="requestBodyExample"
                   :descriptions="requestBodyDescriptions"
+                  :image-render="false"
                 />
               </ElCol>
             </ElRow>
@@ -549,6 +550,7 @@ defineExpose({
                     <JsonView
                       :data="responseExample"
                       :descriptions="responseDescriptions"
+                      :image-render="false"
                     />
                   </ElCol>
                 </ElRow>

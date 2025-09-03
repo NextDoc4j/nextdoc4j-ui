@@ -27,6 +27,7 @@ const customConfig: Linter.Config[] = [
     rules: {
       'perfectionist/sort-interfaces': 'off',
       'perfectionist/sort-objects': 'off',
+      'vue/no-v-html': 'off',
     },
   },
   {

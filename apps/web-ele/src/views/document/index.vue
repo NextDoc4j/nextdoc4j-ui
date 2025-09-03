@@ -44,24 +44,22 @@ const handleClose = () => {
 
 <template>
   <Splitpanes class="default-theme h-full" ref="testDrawRef">
-    <Pane :size="70" :min-size="50">
+    <Pane :size="60" :min-size="50">
       <Suspense>
         <template #default>
           <document ref="documentRef" @test="handleTest" :show-test="drawer" />
         </template>
         <template #fallback>
           <div class="flex h-full items-center justify-center">
-            <div class="text-center">
-              <div class="loading">
-                <div class="loader"></div>
-                <div class="title">正在加载API文档</div>
-              </div>
+            <div class="loading-container">
+              <div class="loader"></div>
+              <div class="title">正在加载API文档</div>
             </div>
           </div>
         </template>
       </Suspense>
     </Pane>
-    <Pane :size="30" :min-size="30" :max-size="50" v-if="drawer">
+    <Pane :size="40" :min-size="30" :max-size="50" v-if="drawer">
       <Suspense>
         <template #default>
           <api-test
@@ -76,11 +74,9 @@ const handleClose = () => {
         </template>
         <template #fallback>
           <div class="flex h-full items-center justify-center">
-            <div class="text-center">
-              <div class="loading">
-                <div class="loader"></div>
-                <div class="title">正在加载API测试工具</div>
-              </div>
+            <div class="loading-container">
+              <div class="loader"></div>
+              <div class="title">正在加载API测试工具</div>
             </div>
           </div>
         </template>
@@ -90,6 +86,65 @@ const handleClose = () => {
 </template>
 
 <style lang="scss">
+@keyframes rotate1 {
+  0% {
+    transform: rotateX(45deg) rotateY(-45deg) rotateZ(0deg);
+  }
+
+  100% {
+    transform: rotateX(45deg) rotateY(-45deg) rotateZ(360deg);
+  }
+}
+
+@keyframes rotate2 {
+  0% {
+    transform: rotateX(45deg) rotateY(45deg) rotateZ(0deg);
+  }
+
+  100% {
+    transform: rotateX(45deg) rotateY(45deg) rotateZ(360deg);
+  }
+}
+
+@keyframes rotate3 {
+  0% {
+    transform: rotateX(-60deg) rotateY(0deg) rotateZ(0deg);
+  }
+
+  100% {
+    transform: rotateX(-60deg) rotateY(0deg) rotateZ(360deg);
+  }
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(-45deg);
+  }
+
+  50% {
+    border-radius: 50%;
+    transform: rotate(-360deg);
+  }
+
+  100% {
+    transform: rotate(-45deg);
+  }
+}
+
+/* 文字渐变动画 */
+@keyframes text-gradient {
+  0%,
+  100% {
+    background: linear-gradient(-45deg, #fc00ff 0%, #00dbde 100%);
+    background-clip: text;
+  }
+
+  50% {
+    background: linear-gradient(-45deg, #00dbde 0%, #fc00ff 100%);
+    background-clip: text;
+  }
+}
+
 .full-space {
   > :deep(.el-space__item) {
     width: 100%;
@@ -238,5 +293,49 @@ const handleClose = () => {
     border: 1px dashed var(--el-border-color);
     border-left: 1px dashed var(--el-border-color) !important;
   }
+}
+
+/* 加载容器样式 */
+.loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+/* From Uiverse.io by gharsh11032000 */
+.loader {
+  position: relative;
+  width: 5em;
+  height: 5em;
+  margin: 0 auto 1rem;
+  background: linear-gradient(-45deg, #fc00ff 0%, #00dbde 100%);
+  animation: spin 3s infinite;
+}
+
+.loader::before {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  content: '';
+  background: linear-gradient(-45deg, #fc00ff 0%, #00dbde 100%);
+  filter: blur(20px);
+  transform: translate3d(0, 0, 0) scale(0.95);
+}
+
+/* 添加标题样式，与动画颜色保持一致 */
+.title {
+  display: block;
+  padding: 0;
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 500;
+  line-height: 1.5;
+  text-align: center;
+  background: linear-gradient(-45deg, #fc00ff 0%, #00dbde 100%);
+  background-clip: text;
+  animation: text-gradient 3s ease-in-out infinite;
+  -webkit-text-fill-color: transparent;
 }
 </style>

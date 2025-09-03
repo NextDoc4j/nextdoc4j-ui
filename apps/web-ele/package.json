@@ -55,8 +55,6 @@
   "devDependencies": {
     "@types/splitpanes": "^2.2.6",
     "@types/vue-splitpane": "^1.0.5",
-    "unplugin-auto-import": "^20.1.0",
-    "unplugin-element-plus": "catalog:",
-    "unplugin-vue-components": "^29.0.0"
+    "unplugin-element-plus": "catalog:"
   }
 }
