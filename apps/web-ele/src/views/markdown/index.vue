@@ -4,14 +4,17 @@ import type { MarkDownDes } from '#/typings/openApi';
 import { computed, onBeforeMount, ref } from 'vue';
 import { useRoute } from 'vue-router';
 
+import { preferences } from '@vben/preferences';
+
 import DOMPurify from 'dompurify';
-import { ElCard, ElCol, ElRow } from 'element-plus';
+import { ElCol, ElRow } from 'element-plus';
 import hljs from 'highlight.js';
 import MarkdownIt from 'markdown-it';
 
 import { useApiStore } from '#/store';
 
 import 'highlight.js/styles/atom-one-light.css';
+import '#/assets/style/github-markdown.css';
 
 const route = useRoute();
 const apiStore = useApiStore();
@@ -82,62 +85,30 @@ onBeforeMount(() => {
 </script>
 <template>
   <div class="relative box-border h-full w-full overflow-y-auto p-5">
-    <ElCard>
-      <div v-html="contentHtml" class="markdown-body leading-relaxed"></div>
-      <ElRow class="markdown-body">
-        <ElCol
-          :span="12"
-          class="text-xs text-[var(--el-text-color-placeholder)]"
-        >
-          更新时间：{{ markDown.lastModified }}
-        </ElCol>
-        <ElCol
-          :span="12"
-          class="text-right text-xs text-[var(--el-text-color-placeholder)]"
-        >
-          文件大小：{{ markDown.contentLength }}
-        </ElCol>
-      </ElRow>
-    </ElCard>
+    <div
+      v-html="contentHtml"
+      class="markdown-body"
+      :data-theme="preferences.theme.mode"
+    ></div>
+    <ElRow class="mt-8">
+      <ElCol :span="12" class="text-xs text-[var(--el-text-color-placeholder)]">
+        更新时间：{{ markDown.lastModified }}
+      </ElCol>
+      <ElCol
+        :span="12"
+        class="text-right text-xs text-[var(--el-text-color-placeholder)]"
+      >
+        文件大小：{{ markDown.contentLength }}
+      </ElCol>
+    </ElRow>
   </div>
 </template>
 <style lang="scss">
-.markdown-body {
-  padding: 20px;
-  line-height: 1.6;
-  color: var(--el-text-color-regular);
+.dark {
+  color-scheme: dark;
+}
 
-  table {
-    width: 100%;
-    border-collapse: collapse;
-
-    th {
-      background-color: var(--el-fill-color);
-    }
-
-    td {
-      padding: 8px;
-      text-align: left;
-      border: 1px solid var(--el-border-color);
-    }
-  }
-
-  code {
-    padding: 0.2em 0.4em;
-    color: var(--el-text-color-regular);
-    background-color: var(--el-fill-color);
-    border-radius: 3px;
-  }
-
-  pre {
-    padding: 16px;
-    overflow: auto;
-    background-color: var(--el-fill-color);
-    border-radius: 3px;
-  }
-
-  .hljs {
-    padding: 10px !important;
-  }
+.light {
+  color-scheme: light;
 }
 </style>
