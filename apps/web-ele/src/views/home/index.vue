@@ -95,11 +95,11 @@ const handleClick = (item: RouteRecordRaw) => {
     </header>
     <section class="mt-8">
       <h2 class="mb-4 text-lg font-bold">API 统计概览</h2>
-      <div class="flex gap-4">
+      <div class="flex flex-wrap gap-4">
         <!-- 卡片 1：API 接口 -->
         <div
           v-if="apiCount > 0"
-          class="group flex flex-1 items-center rounded-xl border-s-4 border-s-[var(--el-color-primary)] bg-[var(--el-bg-color)] p-4 shadow hover:shadow-xl"
+          class="group flex min-w-[220px] flex-1 items-center rounded-xl border-s-4 border-s-[var(--el-color-primary)] bg-[var(--el-bg-color)] p-4 shadow hover:shadow-xl"
         >
           <span class="mr-4 text-2xl">🚀</span>
           <div>
@@ -108,14 +108,16 @@ const handleClick = (item: RouteRecordRaw) => {
             >
               {{ apiCount }}
             </h3>
-            <p class="text-sm text-[var(--el-text-color-regular)]">API 接口</p>
+            <p class="truncate text-sm text-[var(--el-text-color-regular)]">
+              API 接口
+            </p>
           </div>
         </div>
 
         <!-- 卡片 2：实体模型 -->
         <div
           v-if="entityCount"
-          class="group flex flex-1 items-center rounded-xl border-s-4 border-[var(--el-color-warning)] bg-[var(--el-bg-color)] p-4 shadow hover:shadow-xl"
+          class="group flex min-w-[220px] flex-1 items-center rounded-xl border-s-4 border-[var(--el-color-warning)] bg-[var(--el-bg-color)] p-4 shadow hover:shadow-xl"
         >
           <span class="mr-4 text-2xl">🏗️</span>
           <div>
@@ -124,14 +126,16 @@ const handleClick = (item: RouteRecordRaw) => {
             >
               {{ entityCount }}
             </h3>
-            <p class="text-sm text-[var(--el-text-color-regular)]">实体模型</p>
+            <p class="truncate text-sm text-[var(--el-text-color-regular)]">
+              实体模型
+            </p>
           </div>
         </div>
 
         <!-- 卡片 3：业务分组 -->
         <div
           v-if="groupCount"
-          class="group flex flex-1 items-center rounded-xl border-s-4 border-[var(--el-color-info)] bg-[var(--el-bg-color)] p-4 shadow hover:shadow-xl"
+          class="group flex min-w-[220px] flex-1 items-center rounded-xl border-s-4 border-[var(--el-color-info)] bg-[var(--el-bg-color)] p-4 shadow hover:shadow-xl"
         >
           <span class="mr-4 text-2xl">📂</span>
           <div>
@@ -140,13 +144,15 @@ const handleClick = (item: RouteRecordRaw) => {
             >
               {{ groupCount }}
             </h3>
-            <p class="text-sm text-[var(--el-text-color-regular)]">业务分组</p>
+            <p class="truncate text-sm text-[var(--el-text-color-regular)]">
+              业务分组
+            </p>
           </div>
         </div>
 
         <!-- 卡片 4：文档覆盖率 -->
         <div
-          class="group flex flex-1 items-center rounded-xl border-s-4 border-[var(--el-color-success)] bg-[var(--el-bg-color)] p-4 shadow hover:shadow-xl"
+          class="group flex min-w-[220px] flex-1 items-center rounded-xl border-s-4 border-[var(--el-color-success)] bg-[var(--el-bg-color)] p-4 shadow hover:shadow-xl"
         >
           <span class="mr-4 text-2xl">✅</span>
           <div>
@@ -155,7 +161,7 @@ const handleClick = (item: RouteRecordRaw) => {
             >
               100%
             </h3>
-            <p class="text-sm text-[var(--el-text-color-regular)]">
+            <p class="truncate text-sm text-[var(--el-text-color-regular)]">
               文档覆盖率
             </p>
           </div>
@@ -164,14 +170,16 @@ const handleClick = (item: RouteRecordRaw) => {
     </section>
     <section class="mt-8" v-if="navList.length > 0">
       <h2 class="mb-4 text-lg font-bold">快速导航</h2>
-      <div class="flex gap-4">
+      <div
+        class="grid grid-cols-4 gap-4 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8"
+      >
         <div
           class="flex flex-1 cursor-pointer items-center justify-between rounded-xl bg-[var(--el-bg-color)] p-4 shadow hover:shadow-xl"
           v-for="item in navList"
           :key="item.path"
           @click="handleClick(item)"
         >
-          <h3 class="text-sm text-[var(--el-text-color-primary)]">
+          <h3 class="truncate text-sm text-[var(--el-text-color-primary)]">
             {{ item.meta?.title }}
           </h3>
           <span
