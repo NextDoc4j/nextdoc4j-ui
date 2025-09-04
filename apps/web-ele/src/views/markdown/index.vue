@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import type { MarkDownDes } from '#/typings/openApi';
 
-import { computed, onBeforeMount, ref } from 'vue';
+import { computed, onBeforeMount, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 
 import { preferences } from '@vben/preferences';
@@ -10,6 +10,8 @@ import DOMPurify from 'dompurify';
 import { ElCol, ElRow } from 'element-plus';
 import hljs from 'highlight.js';
 import MarkdownIt from 'markdown-it';
+import Anchor from 'markdown-it-anchor';
+import tocPlugin from 'markdown-it-toc-done-right';
 
 import { useApiStore } from '#/store';
 
@@ -18,9 +20,10 @@ import '#/assets/style/github-markdown.css';
 
 const route = useRoute();
 const apiStore = useApiStore();
-
+const nav = ref();
 const md = new MarkdownIt({
-  html: true, // 禁止原始 HTML
+  html: false, // 禁止原始 HTML
+  xhtmlOut: true,
   linkify: true, // 自动识别链接
   breaks: true, // 换行转 <br>
   typographer: true, // 启用印刷替换
@@ -32,7 +35,23 @@ const md = new MarkdownIt({
     }
     return `<pre class="hljs"><code>${md.utils.escapeHtml(str)}</code></pre>`;
   },
-});
+})
+  .use(Anchor, {
+    permalink: false,
+    permalinkBefore: false,
+    permalinkSymbol: '#',
+  })
+  .use(tocPlugin, {
+    maxDepth: 3, // 可调整的最大标题层级
+    bullets: '- ', // 目录条目的符号
+    anchorLinkSymbol: '', // 是否显示锚点链接，默认为'
+    containerClass: 'toc',
+    callback(html: string) {
+      // 把目录单独列出来
+      nav.value = html;
+    },
+  });
+
 const markDown = ref();
 const contentHtml = computed(() =>
   markDown.value.content ? renderMarkdown(markDown.value.content) : '',
@@ -82,33 +101,75 @@ onBeforeMount(() => {
     safeName,
   );
 });
+onMounted(() => {
+  // 处理目录点击事件
+  document.querySelectorAll('.toc a').forEach((link) => {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.target instanceof HTMLElement) {
+        const targetId = e.target.getAttribute('href')?.slice(1) || '';
+        // eslint-disable-next-line unicorn/prefer-query-selector
+        const targetElement = document.getElementById(targetId);
+        if (targetElement) {
+          targetElement.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start',
+          });
+        }
+      }
+    });
+  });
+});
 </script>
 <template>
-  <div class="relative box-border h-full w-full overflow-y-auto p-5">
-    <div
-      v-html="contentHtml"
-      class="markdown-body"
-      :data-theme="preferences.theme.mode"
-    ></div>
-    <ElRow class="mt-8">
-      <ElCol :span="12" class="text-xs text-[var(--el-text-color-placeholder)]">
-        更新时间：{{ markDown.lastModified }}
-      </ElCol>
+  <div class="relative box-border h-full w-full p-5">
+    <ElRow class="h-full w-full">
       <ElCol
-        :span="12"
-        class="text-right text-xs text-[var(--el-text-color-placeholder)]"
+        :span="18"
+        class="h-full w-full overflow-y-auto overflow-x-hidden pr-2"
       >
-        文件大小：{{ markDown.contentLength }}
+        <div
+          v-html="contentHtml"
+          class="markdown-body"
+          :data-theme="preferences.theme.mode"
+        ></div>
+        <ElRow class="mt-8">
+          <ElCol
+            :span="12"
+            class="text-xs text-[var(--el-text-color-placeholder)]"
+          >
+            更新时间：{{ markDown.lastModified }}
+          </ElCol>
+          <ElCol
+            :span="12"
+            class="text-right text-xs text-[var(--el-text-color-placeholder)]"
+          >
+            文件大小：{{ markDown.contentLength }}
+          </ElCol>
+        </ElRow>
+      </ElCol>
+      <ElCol :span="6" class="h-full w-full">
+        <div
+          v-html="nav"
+          class="nav h-full w-full overflow-y-auto overflow-x-hidden"
+        ></div>
       </ElCol>
     </ElRow>
   </div>
 </template>
 <style lang="scss">
-.dark {
-  color-scheme: dark;
-}
+.nav {
+  ol {
+    counter-reset: list-item;
+  }
 
-.light {
-  color-scheme: light;
+  li {
+    display: block;
+    padding-left: 6px;
+    font-size: 0.9rem;
+    line-height: 1.8;
+    counter-increment: list-item;
+  }
 }
 </style>
