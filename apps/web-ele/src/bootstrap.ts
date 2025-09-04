@@ -13,7 +13,6 @@ import { ElLoading } from 'element-plus';
 import { $t, setupI18n } from '#/locales';
 
 import { initComponentAdapter } from './adapter/component';
-import { initSetupVbenForm } from './adapter/form';
 import App from './app.vue';
 import Directives from './directive/index';
 import { router } from './router';
@@ -21,9 +20,6 @@ import { router } from './router';
 async function bootstrap(namespace: string) {
   // 初始化组件适配器
   await initComponentAdapter();
-
-  // 初始化表单组件
-  await initSetupVbenForm();
 
   // // 设置弹窗的默认配置
   // setDefaultModalProps({
@@ -61,8 +57,8 @@ async function bootstrap(namespace: string) {
   app.use(router);
 
   // 配置Motion插件
-  const { MotionPlugin } = await import('@vben/plugins/motion');
-  app.use(MotionPlugin);
+  // const { MotionPlugin } = await import('@vben/plugins/motion');
+  // app.use(MotionPlugin);
   app.use(Directives);
   // 动态更新标题
   watchEffect(() => {

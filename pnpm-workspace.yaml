@@ -193,4 +193,4 @@ catalog:
   zod: ^3.25.67
   zod-defaults: ^0.1.3
   dompurify: ^3.2.6
-  markdown-it: ^14.1.0
+  markdown-it: 14.1.0

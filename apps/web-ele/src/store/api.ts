@@ -1,4 +1,8 @@
-import type { OpenAPISpec, SwaggerConfig } from '#/typings/openApi';
+import type {
+  MarkDownDes,
+  OpenAPISpec,
+  SwaggerConfig,
+} from '#/typings/openApi';
 
 import { ref } from 'vue';
 
@@ -9,6 +13,7 @@ export const useApiStore = defineStore('api', () => {
   const apiData = ref<any>([]);
   const openApi = ref<OpenAPISpec>();
   const swaggerConfig = ref<SwaggerConfig>();
+  const markDownGroup = ref<Record<keyof MarkDownDes, MarkDownDes[]>>([]);
   const initConfig = (data, api: OpenAPISpec, config: SwaggerConfig) => {
     if (isInitConfig.value) return;
     apiData.value = data;
@@ -21,6 +26,14 @@ export const useApiStore = defineStore('api', () => {
     const data = paths.find((item) => item.operationId === operationId);
     return data;
   };
+  const initMarkDown = (group: Record<keyof MarkDownDes, MarkDownDes[]>) => {
+    markDownGroup.value = group;
+  };
+
+  const searchMarkDown = (group: keyof MarkDownDes, name: string) => {
+    return markDownGroup.value[group].find((item) => item.displayName === name);
+  };
+
   return {
     initConfig,
     isInitConfig,
@@ -28,5 +41,7 @@ export const useApiStore = defineStore('api', () => {
     searchPathData,
     swaggerConfig,
     openApi,
+    initMarkDown,
+    searchMarkDown,
   };
 });

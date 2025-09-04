@@ -1,6 +1,11 @@
 import type { RouteRecordStringComponent } from '@vben/types';
 
-import type { Brand, PathMenuItem, Paths } from '#/typings/openApi';
+import type {
+  Brand,
+  MarkDownDes,
+  PathMenuItem,
+  Paths,
+} from '#/typings/openApi';
 
 import { updatePreferences } from '@vben/preferences';
 
@@ -23,8 +28,12 @@ export const fetchMenuListAsync: () => Promise<
   const { data } = await getOpenAPI();
   const { paths, components, 'x-nextdoc4j': xNextdoc4j } = data;
 
-  if (xNextdoc4j?.brand) {
+  if (xNextdoc4j && xNextdoc4j.brand) {
     initBrand(xNextdoc4j.brand);
+  }
+  let markDownMenus: RouteRecordStringComponent<string>[] = [];
+  if (xNextdoc4j && xNextdoc4j.markdown) {
+    markDownMenus = initMarkdown(xNextdoc4j.markdown);
   }
 
   const tagGroups = apiByTag(paths);
@@ -192,6 +201,7 @@ export const fetchMenuListAsync: () => Promise<
         },
         children: accessEntries,
       },
+      ...markDownMenus,
     ]);
   });
 };
@@ -224,7 +234,7 @@ const initBrand = (brand: Brand) => {
     footer: {},
     copyright: {
       enable: true,
-      date: footerText.replaceAll('&nbsp;', ' '),
+      date: footerText,
       companySiteLink: '',
       icpLink: '',
       icp: '',
@@ -234,4 +244,58 @@ const initBrand = (brand: Brand) => {
       name: title,
     },
   });
+};
+
+const initMarkdown = (markdowns: MarkDownDes[]) => {
+  if (markdowns.length > 0) {
+    const group = markDownGroupBy(markdowns, 'group');
+    useApiStore().initMarkDown(group);
+    const menus: RouteRecordStringComponent<string>[] = [];
+    Object.entries(group).forEach(([groupKey, groupContent]) => {
+      menus.push({
+        name: groupKey,
+        path: `/markdown/${groupKey}`,
+        component: '/views/markdown/index.vue',
+        meta: {
+          title: groupKey,
+        },
+        children: groupContent.map((markdown) => {
+          return {
+            name: `${groupKey}*${markdown.displayName}`,
+            path: `/markdown/${groupKey}/${markdown.displayName}`,
+            component: '/views/markdown/index.vue',
+            meta: {
+              title: markdown.displayName,
+            },
+          };
+        }),
+      });
+    });
+
+    return [
+      {
+        name: 'markdown',
+        path: '/markdown',
+        component: '/views/markdown/index.vue',
+        meta: {
+          title: '其它文档',
+        },
+        children: menus,
+      },
+    ];
+  }
+  return [];
+};
+
+const markDownGroupBy = (markdowns: MarkDownDes[], key: keyof MarkDownDes) => {
+  // eslint-disable-next-line unicorn/no-array-reduce
+  const group = markdowns.reduce(
+    (result: Record<string, MarkDownDes[]>, currentItem: MarkDownDes) => {
+      const groupKey = currentItem[key];
+      (result[groupKey] = result[groupKey] || []).push(currentItem);
+      return result;
+    },
+    {},
+  );
+  return group;
 };
