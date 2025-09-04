@@ -43,6 +43,7 @@
     "dayjs": "catalog:",
     "dompurify": "^3.2.6",
     "element-plus": "catalog:",
+    "github-markdown-css": "^5.8.1",
     "highlight.js": "^11.11.1",
     "markdown-it": "catalog:",
     "markdown-it-highlightjs": "^4.2.0",
