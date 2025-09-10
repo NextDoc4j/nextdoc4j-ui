@@ -6,7 +6,7 @@
 
 基于 Vue 3 + TypeScript + Vite 构建，深度整合 SpringDoc，完美替代 Swagger UI
 
-[在线演示](https://demo.dockit4j.top/) | [文档](https://docs.dockit4j.top) | [后端项目](https://gitee.com/nextdoc4j/nextdoc4j)
+[在线演示](https://demo.nextdoc4j.top/) | [文档](https://nextdoc4j.top/) | [后端项目](https://gitee.com/nextdoc4j/nextdoc4j/)
 
 </div>
 
