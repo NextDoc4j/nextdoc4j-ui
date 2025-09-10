@@ -13,13 +13,15 @@ import { getOpenAPI, getOpenAPIConfig } from '#/api/core/openApi';
 import { requestClient } from '#/api/request.js';
 import { useApiStore } from '#/store';
 
+interface TagGroups {
+  [tag: string]: Record<string, PathMenuItem[]>;
+  all: Record<string, PathMenuItem[]>;
+}
+
 export const fetchMenuListAsync: () => Promise<
   RouteRecordStringComponent<string>[]
 > = async () => {
-  const allPath: {
-    [tag: string]: Record<string, PathMenuItem[]>;
-    all: Record<string, PathMenuItem[]>;
-  } = {
+  const allPath: TagGroups = {
     all: {},
   };
   const accessRoutes: RouteRecordStringComponent<string>[] = [];
@@ -179,7 +181,13 @@ export const fetchMenuListAsync: () => Promise<
         }),
     );
   }
-
+  if (data.info.title) {
+    updatePreferences({
+      app: {
+        name: data.info.title,
+      },
+    });
+  }
   return new Promise((resolve) => {
     useApiStore().initConfig(allPath, data, config);
     resolve([

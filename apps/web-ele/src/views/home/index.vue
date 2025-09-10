@@ -4,6 +4,8 @@ import type { MenuRecordRaw, RouteRecordRaw } from '@vben/types';
 import { computed } from 'vue';
 import { useRouter } from 'vue-router';
 
+import { preferences } from '@vben/preferences';
+
 import { useApiStore } from '#/store';
 
 defineOptions({ name: 'Home' });
@@ -57,40 +59,70 @@ const handleClick = (item: RouteRecordRaw) => {
 </script>
 
 <template>
-  <div class="h-full w-full overflow-y-auto p-5">
-    <header class="header-wrapper">
+  <div class="h-full w-full overflow-y-auto overflow-x-hidden p-5">
+    <header
+      class="header-wrapper relative overflow-hidden bg-gradient-to-r from-[var(--el-color-primary)] to-[var(--el-color-primary-light-5)]"
+    >
       <!-- 左侧项目信息 -->
-      <div class="flex flex-col gap-4 text-sm">
-        <h1 class="text-3xl font-bold">{{ info?.title ?? 'Nextdoc4j' }}</h1>
+      <div class="flex flex-1 flex-col gap-4 text-sm">
+        <h1 class="text-3xl font-bold">
+          {{ info?.title ?? 'Nextdoc4j' }}
+        </h1>
         <p>
           {{ info?.description }}
         </p>
-        <div class="mt-2 flex gap-2">
-          <span>联系人：{{ info?.contact?.name }}</span>
-          <a :href="info?.contact?.url" target="_blank" class="underline">
+        <div class="mt-2 flex flex-wrap gap-2">
+          <span v-if="info?.contact?.name">
+            联系人：{{ info?.contact?.name }}
+          </span>
+          <a
+            v-if="info?.contact?.url"
+            :href="info?.contact?.url"
+            target="_blank"
+          >
             网址：
-            <span class="text-blue-400">{{ info?.contact?.url }}</span>
+            <span
+              class="underline-offset-1 hover:underline hover:decoration-dashed"
+            >
+              {{ info?.contact?.url }}
+            </span>
           </a>
-          <span>
+          <span v-if="info?.contact?.email">
             邮箱：
             {{ info?.contact?.email }}
           </span>
         </div>
-        <div class="flex gap-2 text-xs">
-          <span class="rounded-2xl bg-green-400 px-2 py-1 text-white">
+        <div class="flex cursor-pointer gap-2 text-xs text-white">
+          <span
+            class="transform rounded-2xl border border-[var(--el-color-success-light-3)] px-2 py-1 text-[var(--el-color-success-light-3)] hover:-translate-y-1"
+            v-if="info?.license?.name"
+          >
             {{ info?.license?.name }}
           </span>
-          <span class="rounded-2xl bg-blue-400 px-2 py-1 text-white">
-            {{ info?.version }}
+          <span
+            v-if="info?.version"
+            class="transform rounded-2xl border border-white px-2 py-1 text-white hover:-translate-y-1"
+          >
+            V {{ info?.version }}
           </span>
-          <span class="rounded-2xl bg-purple-400 px-2 py-1 text-white">
+          <span
+            v-if="openapi"
+            class="transform rounded-2xl border border-[var(--el-color-warning-light-3)] px-2 py-1 text-[var(--el-color-warning-light-3)] hover:-translate-y-1"
+          >
             OpenAPI {{ openapi ?? '' }}
           </span>
         </div>
       </div>
       <!-- 右侧 Logo 区域 -->
-      <div v-if="brand?.logo" class="flex items-center">
-        <img :src="brand?.logo" alt="Logo" class="w-24" />
+      <div
+        v-if="brand?.logo || preferences.logo.source"
+        class="flex flex-shrink-0 flex-grow-0 items-center"
+      >
+        <img
+          :src="brand?.logo ?? preferences.logo.source"
+          alt="Logo"
+          class="w-24"
+        />
       </div>
     </header>
     <section class="mt-8">
@@ -195,7 +227,5 @@ const handleClick = (item: RouteRecordRaw) => {
 <style lang="scss" scoped>
 .header-wrapper {
   @apply flex justify-between rounded-xl px-6 py-10 text-white;
-
-  background-image: linear-gradient(to right, #8d82e4, #8b5cf6);
 }
 </style>

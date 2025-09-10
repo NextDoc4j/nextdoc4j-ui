@@ -12,23 +12,11 @@ import { ElLoading } from 'element-plus';
 
 import { $t, setupI18n } from '#/locales';
 
-import { initComponentAdapter } from './adapter/component';
 import App from './app.vue';
 import Directives from './directive/index';
 import { router } from './router';
 
 async function bootstrap(namespace: string) {
-  // 初始化组件适配器
-  await initComponentAdapter();
-
-  // // 设置弹窗的默认配置
-  // setDefaultModalProps({
-  //   fullscreenButton: false,
-  // });
-  // // 设置抽屉的默认配置
-  // setDefaultDrawerProps({
-  //   zIndex: 2000,
-  // });
   const app = createApp(App);
 
   // 注册Element Plus提供的v-loading指令
@@ -56,9 +44,6 @@ async function bootstrap(namespace: string) {
   // 配置路由及路由守卫
   app.use(router);
 
-  // 配置Motion插件
-  // const { MotionPlugin } = await import('@vben/plugins/motion');
-  // app.use(MotionPlugin);
   app.use(Directives);
   // 动态更新标题
   watchEffect(() => {

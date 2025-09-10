@@ -345,7 +345,7 @@ defineExpose({
                     </span>
                   </span>
                   &nbsp;
-                  <span v-if="item.schema" class="text-muted-big">
+                  <span v-if="item?.schema" class="text-muted-big">
                     {{ item?.schema?.type }} &nbsp;
                     {{
                       item?.schema?.format ? `<${item?.schema?.format}>` : ''
@@ -382,13 +382,14 @@ defineExpose({
         <ElDescriptionsItem v-if="parametersInQuery">
           <ElCard bordered header="Query 参数">
             <div class="app-json-schema-viewer pl-2">
+              <SchemaView v-if="parametersInQuery" :data="parametersInQuery" />
               <div
                 v-for="item in parametersInQuery"
                 :key="item.name"
                 class="index-node pb-6"
               >
                 <div class="flex items-center justify-items-start">
-                  <span class="property-name">
+                  <span v-if="item.name" class="property-name">
                     <span
                       class="truncate hover:underline hover:decoration-dashed"
                       v-copy
@@ -397,28 +398,14 @@ defineExpose({
                     </span>
                   </span>
                   <span v-if="item.schema" class="text-muted-big">
-                    <span v-if="item.schema.type && !item.schema.enum">{{
-                      item.schema.type
-                    }}</span>
-                    <template v-if="item.schema.enum">
-                      enum&lt;{{ `${item.schema.type}>` }}
-                    </template>
-                    &nbsp;
-                    <span
-                      v-if="item.schema.format"
-                      class="color-[#667085] font-400 text-[12px]"
-                    >
-                      {{ `<${item.schema.format}>` }}
-                    </span>
+                    <SchemaView :data="resolveSchema(item.schema)" />
                   </span>
 
                   <div
                     class="index_additionalInformation flex flex-1 items-center truncate"
                   >
                     <div
-                      v-if="
-                        !item.description || !item.description.includes('<')
-                      "
+                      v-if="item.description && !item.description.includes('<')"
                       class="index-additionalInformation__title"
                     >
                       {{ item.description }}
@@ -444,7 +431,7 @@ defineExpose({
                   class="color-[#667085] font-400 mt-2"
                   v-html="item.description"
                 ></div>
-                <template v-if="item.schema.enum">
+                <template v-if="item?.schema?.enum">
                   <div class="mt-1 flex flex-nowrap items-start">
                     <span class="index-key">枚举值:</span>
                     <span
@@ -456,7 +443,22 @@ defineExpose({
                     </span>
                   </div>
                 </template>
-                <div class="mt-1 flex flex-nowrap items-center">
+                <template v-if="item?.schema?.items?.enum">
+                  <div class="mt-1 flex flex-nowrap items-center">
+                    <span class="index-key">枚举值:</span>
+                    <span
+                      v-for="value in item.schema.items.enum"
+                      :key="value"
+                      class="index-value mr-2"
+                    >
+                      {{ value }}
+                    </span>
+                  </div>
+                </template>
+                <div
+                  class="mt-1 flex flex-nowrap items-center"
+                  v-if="item.example"
+                >
                   <span class="index-key">示例值:</span>
                   <span class="index-value">{{ item.example }}</span>
                 </div>
@@ -573,6 +575,7 @@ defineExpose({
 .app-json-schema-viewer {
   width: 100%;
   max-width: 800px;
+  overflow-x: hidden;
 
   .index-node {
     @apply relative max-w-full;

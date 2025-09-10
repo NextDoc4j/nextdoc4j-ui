@@ -51,6 +51,7 @@ const listen = computed(() => {
       result[key] = value;
     }
   }
+
   return result;
 });
 </script>

@@ -20,8 +20,10 @@ const isExpandable = (item: any) => {
 const getChildSchema = (item: any) => {
   if (item.type === 'object') {
     return item.properties || {};
-  } else if (item.type === 'array' && item.items?.type === 'object') {
-    return item.items.properties || {};
+  } else if (item.type === 'array') {
+    return item.items?.type === 'object'
+      ? item.items.properties || {}
+      : item.items;
   }
   return {};
 };
@@ -43,7 +45,19 @@ const handleNode = (value) => {
 </script>
 
 <template>
+  <div v-if="data?.type === 'array' && data?.items?.type !== 'object'">
+    <span class="property-name">
+      {{ data.type }}
+      <span class="truncate">
+        {{ `[${data.items.type}]` }}
+        <span v-if="data?.items?.format">
+          {{ `<${data.items.format}>` }}
+        </span>
+      </span>
+    </span>
+  </div>
   <div
+    v-else
     v-for="(value, key) in getChildSchema(data)"
     :key="key"
     class="index-node-wrap"
