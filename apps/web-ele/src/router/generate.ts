@@ -10,7 +10,7 @@ import type {
 import { updatePreferences } from '@vben/preferences';
 
 import { getOpenAPI, getOpenAPIConfig } from '#/api/core/openApi';
-import { requestClient } from '#/api/request.js';
+import { baseRequestClient } from '#/api/request.js';
 import { useApiStore } from '#/store';
 
 interface TagGroups {
@@ -103,83 +103,85 @@ export const fetchMenuListAsync: () => Promise<
   const { data: config } = await getOpenAPIConfig();
   const { urls } = config;
   if (urls) {
-    await Promise.all(
-      urls
-        .filter(({ url }) => {
-          const code = url.split('/');
-          const tag = code[code.length - 1];
-          return tag !== 'all';
-        })
-        .map(async ({ url, name }) => {
-          const { data } = await requestClient.get(url);
-          const { paths, components } = data;
-          const tagGroups = apiByTag(paths);
-          const code = url.split('/');
-          const tag = code[code.length - 1] ?? '';
-          const accessRoutes: RouteRecordStringComponent[] = [];
-          allPath[tag] = tagGroups;
-          Object.keys(tagGroups).forEach((key: string) => {
-            const children = tagGroups[key]?.map((api) => {
-              return {
-                name: `${tag}*${key}*${api.operationId}`,
-                path: `/document/${tag}/${key}/${api.operationId}`,
-                meta: {
-                  title: api.summary,
-                  method: api.method,
-                  keepAlive: true,
-                },
+    try {
+      await Promise.all(
+        urls
+          .filter(({ url }) => {
+            const code = url.split('/');
+            const tag = code[code.length - 1];
+            return tag !== 'all';
+          })
+          .map(async ({ url, name }) => {
+            const { data } = await baseRequestClient.get(url);
+            const { paths, components } = data;
+            const tagGroups = apiByTag(paths);
+            const code = url.split('/');
+            const tag = code[code.length - 1] ?? '';
+            const accessRoutes: RouteRecordStringComponent[] = [];
+            allPath[tag] = tagGroups;
+            Object.keys(tagGroups).forEach((key: string) => {
+              const children = tagGroups[key]?.map((api) => {
+                return {
+                  name: `${tag}*${key}*${api.operationId}`,
+                  path: `/document/${tag}/${key}/${api.operationId}`,
+                  meta: {
+                    title: api.summary,
+                    method: api.method,
+                    keepAlive: true,
+                  },
+                  component: '/views/document/index.vue',
+                  parent: '/document',
+                };
+              }) as RouteRecordStringComponent<string>[];
+              accessRoutes.push({
                 component: '/views/document/index.vue',
-                parent: '/document',
-              };
-            }) as RouteRecordStringComponent<string>[];
-            accessRoutes.push({
+                name: `${tag}-${key}`,
+                path: `/document/${tag}/${key}`,
+                meta: {
+                  title: key,
+                },
+                children,
+              });
+            });
+            access.push({
+              name: tag,
+              path: `/document/${tag}`,
               component: '/views/document/index.vue',
-              name: `${tag}-${key}`,
-              path: `/document/${tag}/${key}`,
               meta: {
-                title: key,
+                title: name,
               },
-              children,
+              children: accessRoutes,
+              redirect:
+                accessRoutes.length > 0
+                  ? accessRoutes[0]?.path
+                  : `/document/${tag}`,
             });
-          });
-          access.push({
-            name: tag,
-            path: `/document/${tag}`,
-            component: '/views/document/index.vue',
-            meta: {
-              title: name,
-            },
-            children: accessRoutes,
-            redirect:
-              accessRoutes.length > 0
-                ? accessRoutes[0]?.path
-                : `/document/${tag}`,
-          });
-          const entityGroup: RouteRecordStringComponent<string> = {
-            component: '/views/entity/index.vue',
-            name: `entity*${tag}`,
-            path: `/entity/${tag}`,
-            meta: {
-              title: name,
-            },
-            children: [],
-          };
-          Object.keys(components.schemas).forEach((key: string) => {
-            if (!entityGroup.children) {
-              entityGroup.children = [];
-            }
-            entityGroup.children.push({
+            const entityGroup: RouteRecordStringComponent<string> = {
               component: '/views/entity/index.vue',
-              name: `${tag}*${key}`,
-              path: `/entity/${tag}/${key}`,
+              name: `entity*${tag}`,
+              path: `/entity/${tag}`,
               meta: {
-                title: key,
+                title: name,
               },
+              children: [],
+            };
+            Object.keys(components.schemas).forEach((key: string) => {
+              if (!entityGroup.children) {
+                entityGroup.children = [];
+              }
+              entityGroup.children.push({
+                component: '/views/entity/index.vue',
+                name: `${tag}*${key}`,
+                path: `/entity/${tag}/${key}`,
+                meta: {
+                  title: key,
+                },
+              });
             });
-          });
-          accessEntries.push(entityGroup);
-        }),
-    );
+            accessEntries.push(entityGroup);
+          }),
+      );
+    } catch {}
   }
   if (data.info.title) {
     updatePreferences({
