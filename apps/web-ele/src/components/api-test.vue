@@ -163,9 +163,7 @@ async function sendRequest() {
       }
     });
 
-    const finalUrl = new URL(
-      import.meta.env.DEV ? window.origin + apiURL + url : apiURL + url,
-    );
+    const finalUrl = new URL(window.origin + apiURL + url);
 
     // 添加查询参数
     queryParams.value
