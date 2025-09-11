@@ -3,6 +3,7 @@ import type { ParameterObject } from '#/typings/openApi';
 
 import { ref, watch } from 'vue';
 
+import { useAppConfig } from '@vben/hooks';
 import { SvgCloseIcon } from '@vben/icons';
 
 import {
@@ -39,7 +40,7 @@ const props = defineProps<{
 // 添加 emit 定义
 const emit = defineEmits(['cancel']);
 
-const config = import.meta.env.VITE_GLOB_API_URL;
+const { apiURL } = useAppConfig(import.meta.env, import.meta.env.PROD);
 
 const activeTab = ref(props.requestBody ? 'Body' : 'Params');
 const bodyTabRef = ref();
@@ -162,7 +163,9 @@ async function sendRequest() {
       }
     });
 
-    const finalUrl = new URL(config + url, window.origin);
+    const finalUrl = new URL(
+      import.meta.env.DEV ? window.origin + apiURL + url : apiURL + url,
+    );
 
     // 添加查询参数
     queryParams.value
@@ -297,10 +300,10 @@ async function sendRequest() {
     }
     responseSize.value = formatSize(size);
   } catch (error: any) {
-    ElMessage.error(error?.ElMessage || '请求失败');
+    ElMessage.error(error?.msg || '请求失败');
     responseStatus.value = {
       code: 0,
-      text: error?.ElMessage || '请求失败',
+      text: error?.msg || '请求失败',
       type: 'error',
     };
   } finally {

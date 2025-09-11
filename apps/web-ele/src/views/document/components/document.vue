@@ -410,6 +410,15 @@ defineExpose({
                     >
                       {{ item.description }}
                     </div>
+                    <div
+                      v-if="
+                        item?.schema?.items?.description &&
+                        !item?.schema?.items?.description.includes('<')
+                      "
+                      class="index-additionalInformation__title"
+                    >
+                      {{ item.schema.items.description }}
+                    </div>
                     <div class="index-divider"></div>
                   </div>
                   <span v-if="item.required" class="index-required">必需</span>
@@ -430,6 +439,14 @@ defineExpose({
                   v-if="item.description && item.description.includes('<')"
                   class="color-[#667085] font-400 mt-2"
                   v-html="item.description"
+                ></div>
+                <div
+                  v-if="
+                    item?.schema?.items?.description &&
+                    item?.schema?.items?.description.includes('<')
+                  "
+                  class="color-[#667085] font-400 mt-2"
+                  v-html="item?.schema?.items.description"
                 ></div>
                 <template v-if="item?.schema?.enum">
                   <div class="mt-1 flex flex-nowrap items-start">
