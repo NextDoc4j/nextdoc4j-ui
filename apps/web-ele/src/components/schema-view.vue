@@ -9,7 +9,7 @@ defineOptions({
 defineProps<{
   data: any;
 }>();
-const fold = ref(false);
+const fold = ref<{ [propName: string]: boolean }>({});
 const isExpandable = (item: any) => {
   return (
     (item.type === 'object' && Object.keys(item.properties).length > 0) ||
@@ -19,7 +19,11 @@ const isExpandable = (item: any) => {
 
 const getChildSchema = (item: any) => {
   if (item.type === 'object') {
-    return item.properties || {};
+    const obj = item.properties || {};
+    for (const key in obj) {
+      obj[key].fold = false;
+    }
+    return obj;
   } else if (item.type === 'array') {
     return item.items?.type === 'object'
       ? item.items.properties || {}
@@ -37,9 +41,9 @@ const childSchemaLength = (item: any) => {
   return 0;
 };
 
-const handleNode = (value) => {
+const handleNode = (value, key) => {
   if (value.type === 'object' || value?.items?.type === 'object') {
-    fold.value = !fold.value;
+    fold.value[key] = !fold.value?.[key];
   }
 };
 </script>
@@ -68,13 +72,15 @@ const handleNode = (value) => {
         'cursor-pointer':
           value.type === 'object' || value?.items?.type === 'object',
       }"
-      @click="handleNode(value)"
+      @click="handleNode(value, key)"
     >
       <div class="relative flex items-center justify-items-start">
         <div class="flex flex-1 flex-col items-stretch gap-1">
           <div class="flex items-center">
             <SvgCaretRightIcon
-              :style="{ transform: !fold ? 'rotate(90deg)' : 'rotate(0deg)' }"
+              :style="{
+                transform: fold?.[key] ? 'rotate(0deg)' : 'rotate(90deg)',
+              }"
               v-if="isExpandable(value)"
               class="ml-[-12px] size-3"
             />
@@ -176,7 +182,7 @@ const handleNode = (value) => {
     </div>
 
     <div
-      v-if="isExpandable(value) && !fold"
+      v-if="isExpandable(value) && !fold[key]"
       class="index-child-stack overflow-hidden transition-all duration-300 ease-in"
     >
       <SchemaView :data="value" />

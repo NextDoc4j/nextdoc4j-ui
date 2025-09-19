@@ -300,9 +300,9 @@ defineExpose({
         {{ apiInfo?.method?.toUpperCase() }}
       </span>
       <ElTooltip content="点击复制" placement="top">
-        <span class="pl-4 hover:underline hover:decoration-dashed" v-copy>{{
-          apiInfo?.path
-        }}</span>
+        <span class="pl-4 hover:underline hover:decoration-dashed" v-copy>
+          {{ apiInfo?.path }}
+        </span>
       </ElTooltip>
       <ElButton
         type="primary"
@@ -412,6 +412,7 @@ defineExpose({
                     </div>
                     <div
                       v-if="
+                        !item.description &&
                         item?.schema?.items?.description &&
                         !item?.schema?.items?.description.includes('<')
                       "
@@ -425,13 +426,10 @@ defineExpose({
                   <span v-else class="index-optional">可选</span>
                 </div>
                 <div class="flex flex-nowrap items-center">
-                  <span
-                    v-if="item.schema.minLength !== undefined"
-                    class="index-value"
-                  >
+                  <span v-if="item?.schema?.minLength" class="index-value">
                     {{ `>=${item.schema.minLength}` }} 字符
                   </span>
-                  <span v-if="item.schema.maxLength" class="index-value">
+                  <span v-if="item?.schema?.maxLength" class="index-value">
                     {{ `<= ${item.schema.maxLength}` }} 字符
                   </span>
                 </div>
@@ -442,6 +440,7 @@ defineExpose({
                 ></div>
                 <div
                   v-if="
+                    !item.description &&
                     item?.schema?.items?.description &&
                     item?.schema?.items?.description.includes('<')
                   "

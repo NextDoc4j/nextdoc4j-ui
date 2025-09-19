@@ -16,8 +16,7 @@ export default defineConfig(async () => {
           '/api': {
             changeOrigin: true,
             rewrite: (path) => path.replace(/^\/api/, ''),
-            // target: 'http://192.168.20.95:50012',
-            target: 'https://demo-api.dockit4j.top',
+            target: 'https://demo-api.nextdoc4j.top',
             ws: true,
           },
         },
