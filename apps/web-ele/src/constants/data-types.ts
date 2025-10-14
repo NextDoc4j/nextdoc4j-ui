@@ -3,7 +3,7 @@ export const DataType: Record<string, any> = {
     color: '#17b26a',
   },
   number: {
-    color: '#fff',
+    color: '#ED5AB3',
   },
   integer: {
     color: '#ED5AB3',
@@ -24,6 +24,6 @@ export const DataType: Record<string, any> = {
     color: '#17b26a',
   },
   default: {
-    color: '',
+    color: 'var(--el-color-primary)',
   },
 };

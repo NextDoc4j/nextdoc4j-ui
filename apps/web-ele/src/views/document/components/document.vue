@@ -427,10 +427,20 @@ defineExpose({
                 </div>
                 <div class="flex flex-nowrap items-center">
                   <span v-if="item?.schema?.minLength" class="index-value">
-                    {{ `>=${item.schema.minLength}` }} 字符
+                    {{
+                      `>=${item.schema.minLength} ${item.schema.type === 'string' ? '字符' : ''}`
+                    }}
                   </span>
                   <span v-if="item?.schema?.maxLength" class="index-value">
-                    {{ `<= ${item.schema.maxLength}` }} 字符
+                    {{
+                      `<= ${item.schema.maxLength} ${item.schema.type === 'string' ? '字符' : ''}`
+                    }}
+                  </span>
+                  <span v-if="item?.schema?.minimum" class="index-value">
+                    {{ `>= ${item.schema.minimum}` }}
+                  </span>
+                  <span v-if="item?.schema?.maximum" class="index-value">
+                    {{ `<= ${item.schema.maximum}` }}
                   </span>
                 </div>
                 <div
@@ -471,6 +481,21 @@ defineExpose({
                     </span>
                   </div>
                 </template>
+                <div class="mt-1 flex flex-nowrap items-center">
+                  <span v-if="item?.minimum" class="index-value mr-2">
+                    {{ `>= ${item.minimum}` }}
+                  </span>
+                  <span v-if="item?.maximum" class="index-value mr-2">
+                    {{ `<= ${item.maximum}` }}
+                  </span>
+                </div>
+                <div
+                  class="mt-1 flex flex-nowrap items-center"
+                  v-if="item.default"
+                >
+                  <span class="index-key">默认值:</span>
+                  <span class="index-value">{{ item.default }}</span>
+                </div>
                 <div
                   class="mt-1 flex flex-nowrap items-center"
                   v-if="item.example"
