@@ -185,6 +185,7 @@ async function sendRequest() {
 
     // 添加form-data 添加默认的 Content-Type
     const formData = new FormData();
+    const searchParams = new URLSearchParams();
     let bodyData = '';
     switch (bodyTabRef.value.bodyType) {
       case 'binary': {
@@ -229,7 +230,7 @@ async function sendRequest() {
         if (urlEncodedParams.value.some((h) => h.enabled && h.name)) {
           urlEncodedParams.value
             .filter((h) => h.enabled && h.name)
-            .forEach((h) => formData.append(h.name, h.value));
+            .forEach((h) => searchParams.append(h.name, h.value));
         }
         requestHeaders.append('Content-Type', 'x-www-form-urlencoded');
         break;
@@ -252,11 +253,12 @@ async function sendRequest() {
       headers: requestHeaders,
       body:
         props.method.toLowerCase() !== 'get' &&
-        ['binary', 'form-data', 'x-www-form-urlencoded'].includes(
-          bodyTabRef.value.bodyType,
-        )
+        ['binary', 'form-data'].includes(bodyTabRef.value.bodyType)
           ? formData
-          : bodyData || undefined,
+          : // eslint-disable-next-line unicorn/no-nested-ternary
+            bodyTabRef.value.bodyType === 'x-www-form-urlencoded'
+            ? searchParams
+            : bodyData || undefined,
     });
     // 处理响应
     // 根据Content-Type自动选择解析方式
