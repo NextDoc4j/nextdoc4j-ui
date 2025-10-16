@@ -334,27 +334,42 @@ function downloadBlob(blob: Blob, filename: string = 'download') {
 }
 
 /**
- * 从HTTP响应获取下载文件名
+ * 从HTTP响应获取下载文件名（支持 filename 和 filename*）
  * @param response - fetch响应对象
- * @param url - 请求URL
+ * @param url - 请求URL（备用）
  * @returns 提取到的文件名
  */
 function getDownloadFilename(response: Response, url: string): string {
   // 优先从Content-Disposition头获取
   const contentDisposition = response.headers.get('Content-Disposition');
+  let filename = '';
+
   if (contentDisposition) {
-    const filenameMatch = contentDisposition.match(
-      /filename[^;=\n]*((['"]).*?\2|[^;\n]*)/,
+    // filename* (RFC 5987) UTF-8
+    const filenameStarMatch = contentDisposition.match(
+      /filename\*=([^']+)'[^']*'(.+)/i,
     );
-    if (filenameMatch?.[1]) {
-      return filenameMatch[1].replaceAll(/['"]/g, '');
+    if (filenameStarMatch?.[2]) {
+      try {
+        filename = decodeURIComponent(filenameStarMatch[2]);
+      } catch {
+        filename = filenameStarMatch[2];
+      }
+    } else {
+      // 普通 filename
+      const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/i);
+      if (filenameMatch?.[1]) {
+        filename = filenameMatch[1];
+      }
     }
   }
-
-  // 从URL路径中提取备用方案
-  const pathname = new URL(url).pathname;
-  const filename = pathname.split('/').pop()?.split('?')[0] || 'download';
-
+  // 备选 url 获取
+  if (!filename) {
+    const pathname = new URL(url).pathname;
+    filename = pathname.split('/').pop() || 'download';
+  }
+  // 去除非法字符
+  filename = filename.replaceAll(/[/\\?%*:|"<>]/g, '_').trim();
   return filename;
 }
 
