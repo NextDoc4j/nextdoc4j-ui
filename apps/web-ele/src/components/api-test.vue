@@ -1,4 +1,6 @@
 <script lang="ts" setup>
+import type { ParamsType } from './body-params.vue';
+
 import type { ParameterObject } from '#/typings/openApi';
 
 import { ref, watch } from 'vue';
@@ -197,7 +199,9 @@ async function sendRequest() {
             .filter((h) => h.enabled && h.name)
             .forEach((h) => {
               if (Array.isArray(h.value) && h.value.length > 0) {
-                formData.append(h.name, ...h.value);
+                h.value.forEach((item) => {
+                  formData.append(h.name, item);
+                });
               } else {
                 formData.append(h.name, h.value);
               }
@@ -361,23 +365,10 @@ function formatSize(bytes: number): string {
 }
 
 // Form Data 参数相关
-const formDataParams = ref<
-  Array<{
-    enabled: boolean;
-    name: string;
-    type: 'file' | 'text';
-    value: string;
-  }>
->([]);
+const formDataParams = ref<Array<ParamsType>>([]);
 
 // URL Encoded 参数相关
-const urlEncodedParams = ref<
-  Array<{
-    enabled: boolean;
-    name: string;
-    value: string;
-  }>
->([]);
+const urlEncodedParams = ref<Array<ParamsType>>([]);
 
 defineExpose({});
 </script>

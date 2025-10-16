@@ -46,11 +46,12 @@ type BodyType =
   | 'raw'
   | 'x-www-form-urlencoded'
   | 'xml';
-interface ParamsType {
+export interface ParamsType {
   enabled: boolean;
   name: string;
   value: string;
   format?: string;
+  type?: string;
 }
 // 请求体类型
 const bodyType = ref<BodyType>();
@@ -140,7 +141,9 @@ onMounted(() => {
     const properties =
       props.requestBody.content['application/json'].schema?.properties ?? {};
     const file = Object.keys(properties).find(
-      (item) => properties[item].format === 'binary',
+      (item) =>
+        properties[item]?.format === 'binary' ||
+        properties[item]?.items?.format === 'binary',
     );
     if (file) {
       bodyType.value = 'form-data';
@@ -149,10 +152,49 @@ onMounted(() => {
         name: file,
         enabled: true,
         value: '',
-        format: 'binary',
+        format: properties[file]?.format || properties[file]?.items?.format,
+        type: properties[file]?.type,
       });
     } else {
       bodyType.value = 'json';
+    }
+  } else if (props.requestBody.content['multipart/form-data']) {
+    bodyType.value = 'form-data';
+    const { properties, type } =
+      props.requestBody.content['multipart/form-data'].schema;
+    if (type === 'object') {
+      Object.keys(properties).forEach((key) => {
+        // eslint-disable-next-line vue/no-mutating-props
+        props.formDataParams.push({
+          name: key,
+          enabled: true,
+          value: '',
+          format:
+            properties[key].type === 'array'
+              ? properties[key]?.items?.format
+              : properties[key].format,
+          type: properties[key].type,
+        });
+      });
+    }
+  } else if (props.requestBody.content['application/x-www-form-urlencoded']) {
+    bodyType.value = 'x-www-form-urlencoded';
+    const { properties, type } =
+      props.requestBody.content['application/x-www-form-urlencoded'].schema;
+    if (type === 'object') {
+      Object.keys(properties).forEach((key) => {
+        // eslint-disable-next-line vue/no-mutating-props
+        props.formDataParams.push({
+          name: key,
+          enabled: true,
+          value: '',
+          format:
+            properties[key].type === 'array'
+              ? properties[key]?.items?.format
+              : properties[key].format,
+          type: properties[key].type,
+        });
+      });
     }
   }
 });
