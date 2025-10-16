@@ -196,7 +196,13 @@ const handleNode = (value, key) => {
               </span>
             </div>
           </template>
-
+          <div
+            class="mt-1 flex flex-nowrap items-center"
+            v-if="!isExpandable(value) && value.default"
+          >
+            <span class="index-key">默认值:</span>
+            <span class="index-value">{{ value.default }}</span>
+          </div>
           <div
             v-if="!isExpandable(value) && value.example"
             class="flex-items-start flex flex-nowrap"

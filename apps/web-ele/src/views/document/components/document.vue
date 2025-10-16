@@ -405,6 +405,13 @@ defineExpose({
                   class="color-[#667085] font-400 mt-2"
                   v-html="item.description"
                 ></div>
+                <div
+                  class="mt-1 flex flex-nowrap items-center"
+                  v-if="item.default"
+                >
+                  <span class="index-key">默认值:</span>
+                  <span class="index-value">{{ item.default }}</span>
+                </div>
                 <div class="mt-1 flex flex-nowrap items-center">
                   <span class="index-key">示例值:</span>
                   <span class="index-value">{{ item.example }}</span>
