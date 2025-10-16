@@ -145,6 +145,40 @@ const handleNode = (value, key) => {
             </span>
             <span v-else class="index-optional">可选</span>
           </div>
+          <div class="flex flex-nowrap items-center">
+            <span v-if="value?.schema?.minLength" class="index-value">
+              {{
+                `>=${value.schema.minLength} ${value.schema.type === 'string' ? '字符' : ''}`
+              }}
+            </span>
+            <span v-if="value?.schema?.maxLength" class="index-value">
+              {{
+                `<= ${value.schema.maxLength} ${value.schema.type === 'string' ? '字符' : ''}`
+              }}
+            </span>
+            <span v-if="value?.schema?.minimum" class="index-value">
+              {{ `>= ${value.schema.minimum}` }}
+            </span>
+            <span v-if="value?.schema?.maximum" class="index-value">
+              {{ `<= ${value.schema.maximum}` }}
+            </span>
+            <span v-if="value?.minLength" class="index-value">
+              {{
+                `>=${value.minLength} ${value.type === 'string' ? '字符' : ''}`
+              }}
+            </span>
+            <span v-if="value?.maxLength" class="index-value">
+              {{
+                `<= ${value.maxLength} ${value.type === 'string' ? '字符' : ''}`
+              }}
+            </span>
+            <span v-if="value?.minimum" class="index-value">
+              {{ `>= ${value.minimum}` }}
+            </span>
+            <span v-if="value?.maximum" class="index-value">
+              {{ `<= ${value.maximum}` }}
+            </span>
+          </div>
           <div
             v-if="value.description && value.description.includes('<')"
             class="color-[#667085] font-400 mt-2"

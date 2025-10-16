@@ -366,6 +366,40 @@ defineExpose({
                   </div>
                   <span class="index-required">必需</span>
                 </div>
+                <div class="flex flex-nowrap items-center">
+                  <span v-if="item?.schema?.minLength" class="index-value">
+                    {{
+                      `>=${item.schema.minLength} ${item.schema.type === 'string' ? '字符' : ''}`
+                    }}
+                  </span>
+                  <span v-if="item?.schema?.maxLength" class="index-value">
+                    {{
+                      `<= ${item.schema.maxLength} ${item.schema.type === 'string' ? '字符' : ''}`
+                    }}
+                  </span>
+                  <span v-if="item?.schema?.minimum" class="index-value">
+                    {{ `>= ${item.schema.minimum}` }}
+                  </span>
+                  <span v-if="item?.schema?.maximum" class="index-value">
+                    {{ `<= ${item.schema.maximum}` }}
+                  </span>
+                  <span v-if="item?.minLength" class="index-value">
+                    {{
+                      `>=${item.minLength} ${item.type === 'string' ? '字符' : ''}`
+                    }}
+                  </span>
+                  <span v-if="item?.maxLength" class="index-value">
+                    {{
+                      `<= ${item.maxLength} ${item.type === 'string' ? '字符' : ''}`
+                    }}
+                  </span>
+                  <span v-if="item?.minimum" class="index-value">
+                    {{ `>= ${item.minimum}` }}
+                  </span>
+                  <span v-if="item?.maximum" class="index-value">
+                    {{ `<= ${item.maximum}` }}
+                  </span>
+                </div>
                 <div
                   v-if="item.description && item.description.includes('<')"
                   class="color-[#667085] font-400 mt-2"
@@ -441,6 +475,22 @@ defineExpose({
                   </span>
                   <span v-if="item?.schema?.maximum" class="index-value">
                     {{ `<= ${item.schema.maximum}` }}
+                  </span>
+                  <span v-if="item?.minLength" class="index-value">
+                    {{
+                      `>=${item.minLength} ${item.type === 'string' ? '字符' : ''}`
+                    }}
+                  </span>
+                  <span v-if="item?.maxLength" class="index-value">
+                    {{
+                      `<= ${item.maxLength} ${item.type === 'string' ? '字符' : ''}`
+                    }}
+                  </span>
+                  <span v-if="item?.minimum" class="index-value">
+                    {{ `>= ${item.minimum}` }}
+                  </span>
+                  <span v-if="item?.maximum" class="index-value">
+                    {{ `<= ${item.maximum}` }}
                   </span>
                 </div>
                 <div
