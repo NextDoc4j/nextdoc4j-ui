@@ -637,7 +637,7 @@ defineExpose({
                 <ElRow :gutter="16">
                   <ElCol :span="props.showTest ? 24 : 14" class="mt-6">
                     <ElTag type="info" class="index-value rounded-sm px-2 py-1">
-                      {{ Object.keys(item.content).join(' ') }}
+                      {{ Object.keys(item.content || {}).join(' ') }}
                     </ElTag>
                     <div class="my-2">{{ item.description }}</div>
                     <h5 class="text-5 font-500">Body</h5>
