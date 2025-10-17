@@ -130,10 +130,13 @@ const responseDescriptions = computed(() => {
 
 // 获取请求体数据
 const requestBody = computed(() => {
-  if (!apiInfo.value?.requestBody?.content?.['application/json']?.schema) {
+  if (!apiInfo.value?.requestBody?.content) {
     return null;
   }
-  const schema = apiInfo.value.requestBody.content['application/json'].schema;
+  const content = apiInfo.value.requestBody.content;
+  const type = Object.keys(content || {})?.[0];
+
+  const schema = type ? content[type].schema : '';
 
   if (schema.oneOf) {
     const arr = schema.oneOf.map((item: Schema) => {
@@ -567,8 +570,13 @@ defineExpose({
         <ElDescriptionsItem v-if="requestBody">
           <ElCard bordered header="Body 参数">
             <template #header>
-              <span>Body 参数</span>
-              <ElTag class="mx-6">application/json</ElTag>
+              <span>Body 参数 </span>
+              <ElTag class="mx-6">
+                {{
+                  Object.keys(apiInfo?.requestBody?.content || {})?.[0] ??
+                  'application/json'
+                }}
+              </ElTag>
             </template>
             <ElRow :gutter="16">
               <ElCol :span="props.showTest ? 24 : 14">
@@ -636,8 +644,12 @@ defineExpose({
 
                 <ElRow :gutter="16">
                   <ElCol :span="props.showTest ? 24 : 14" class="mt-6">
-                    <ElTag type="info" class="index-value rounded-sm px-2 py-1">
-                      {{ Object.keys(item.content || {}).join(' ') }}
+                    <ElTag
+                      v-if="item.content"
+                      type="info"
+                      class="index-value rounded-sm px-2 py-1"
+                    >
+                      {{ Object.keys(item.content).join(' ') }}
                     </ElTag>
                     <div class="my-2">{{ item.description }}</div>
                     <h5 class="text-5 font-500">Body</h5>

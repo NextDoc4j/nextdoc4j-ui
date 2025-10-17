@@ -138,8 +138,13 @@ onMounted(() => {
   if (props.requestBody === undefined) {
     bodyType.value = 'none';
   } else if (props.requestBody.content['application/json']) {
-    const properties =
-      props.requestBody.content['application/json'].schema?.properties ?? {};
+    const schema = props.requestBody.content['application/json'].schema;
+    let properties = schema?.properties;
+    if (schema.$ref) {
+      // 解析 ref
+      const resolved = resolveSchema(schema);
+      properties = resolved.properties;
+    }
     const file = Object.keys(properties).find(
       (item) =>
         properties[item]?.format === 'binary' ||
@@ -160,8 +165,15 @@ onMounted(() => {
     }
   } else if (props.requestBody.content['multipart/form-data']) {
     bodyType.value = 'form-data';
-    const { properties, type } =
-      props.requestBody.content['multipart/form-data'].schema;
+    const schema = props.requestBody.content['multipart/form-data'].schema;
+    let properties = schema?.properties;
+    let type = schema?.type;
+    if (schema.$ref) {
+      // 解析 ref
+      const resolved = resolveSchema(schema);
+      properties = resolved.properties;
+      type = resolved.type;
+    }
     if (type === 'object') {
       Object.keys(properties).forEach((key) => {
         // eslint-disable-next-line vue/no-mutating-props
@@ -179,8 +191,16 @@ onMounted(() => {
     }
   } else if (props.requestBody.content['application/x-www-form-urlencoded']) {
     bodyType.value = 'x-www-form-urlencoded';
-    const { properties, type } =
+    const schema =
       props.requestBody.content['application/x-www-form-urlencoded'].schema;
+    let properties = schema?.properties;
+    let type = schema?.type;
+    if (schema.$ref) {
+      // 解析 ref
+      const resolved = resolveSchema(schema);
+      properties = resolved.properties;
+      type = resolved.type;
+    }
     if (type === 'object') {
       Object.keys(properties).forEach((key) => {
         // eslint-disable-next-line vue/no-mutating-props
