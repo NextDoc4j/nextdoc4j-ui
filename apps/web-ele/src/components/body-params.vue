@@ -139,12 +139,13 @@ onMounted(() => {
     bodyType.value = 'none';
   } else if (props.requestBody.content['application/json']) {
     const schema = props.requestBody.content['application/json'].schema;
-    let properties = schema?.properties;
+    let properties: Record<string, any>;
     if (schema.$ref) {
       // 解析 ref
       const resolved = resolveSchema(schema);
-      properties = resolved.properties;
+      properties = resolved.properties ?? {};
     }
+    properties = schema?.properties ?? {};
     const file = Object.keys(properties).find(
       (item) =>
         properties[item]?.format === 'binary' ||
@@ -166,12 +167,12 @@ onMounted(() => {
   } else if (props.requestBody.content['multipart/form-data']) {
     bodyType.value = 'form-data';
     const schema = props.requestBody.content['multipart/form-data'].schema;
-    let properties = schema?.properties;
+    let properties = schema?.properties ?? {};
     let type = schema?.type;
     if (schema.$ref) {
       // 解析 ref
       const resolved = resolveSchema(schema);
-      properties = resolved.properties;
+      properties = resolved.properties ?? {};
       type = resolved.type;
     }
     if (type === 'object') {
@@ -193,12 +194,12 @@ onMounted(() => {
     bodyType.value = 'x-www-form-urlencoded';
     const schema =
       props.requestBody.content['application/x-www-form-urlencoded'].schema;
-    let properties = schema?.properties;
+    let properties = schema?.properties ?? {};
     let type = schema?.type;
     if (schema.$ref) {
       // 解析 ref
       const resolved = resolveSchema(schema);
-      properties = resolved.properties;
+      properties = resolved.properties ?? {};
       type = resolved.type;
     }
     if (type === 'object') {

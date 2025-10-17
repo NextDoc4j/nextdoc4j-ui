@@ -182,7 +182,14 @@ const requestBody = computed(() => {
 // 修改请求体描述获取
 const requestBodyDescriptions = computed(() => {
   if (!requestBody.value) return {};
-  return getAllFieldDescriptions(requestBody.value);
+  if (Array.isArray(requestBody.value)) {
+    const data = requestBody.value.find(
+      (item) => item.title === requestBodyType.value,
+    );
+    return getAllFieldDescriptions(data);
+  } else {
+    return getAllFieldDescriptions(requestBody.value);
+  }
 });
 
 // 请求体示例
@@ -766,8 +773,6 @@ defineExpose({
   }
 
   .el-radio-button {
-    padding: 0 6px 6px;
-
     .el-radio-button__inner {
       border: 1px solid var(--el-border-color);
       border-radius: var(--el-border-radius-base);

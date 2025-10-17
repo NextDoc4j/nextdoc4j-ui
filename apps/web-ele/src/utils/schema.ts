@@ -91,7 +91,7 @@ export function buildSchemaTree(schema: Schema): any[] {
   const nodes: any[] = [];
 
   // 处理 oneOf
-  if (schema.type === 'oneOf') {
+  if (schema.type === 'oneOf' && schema.oneOf) {
     schema.oneOf.forEach((item: any, index: number) => {
       const node = {
         key: `oneOf-${index}`,

@@ -92,6 +92,7 @@ export interface Schema {
   required?: string[];
   example?: any;
   allOf?: Schema[];
+  oneOf?: Schema[];
 }
 
 // 添加树节点类型定义
