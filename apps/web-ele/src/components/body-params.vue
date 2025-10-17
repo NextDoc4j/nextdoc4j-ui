@@ -52,6 +52,7 @@ export interface ParamsType {
   value: string;
   format?: string;
   type?: string;
+  description?: string;
 }
 // 请求体类型
 const bodyType = ref<BodyType>();
@@ -164,6 +165,7 @@ onMounted(() => {
           properties[key].type === 'array'
             ? properties[key]?.items?.format
             : properties[key].format,
+        description: properties[key].description,
         type: properties[key].type,
       });
     });
@@ -189,6 +191,7 @@ onMounted(() => {
             properties[key].type === 'array'
               ? properties[key]?.items?.format
               : properties[key].format,
+          description: properties[key].description,
           type: properties[key].type,
         });
       });
@@ -216,6 +219,7 @@ onMounted(() => {
             properties[key].type === 'array'
               ? properties[key]?.items?.format
               : properties[key].format,
+          description: properties[key].description,
           type: properties[key].type,
         });
       });

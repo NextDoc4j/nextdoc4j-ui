@@ -75,7 +75,7 @@ function getEnumOptions(row: ParamItem) {
 // 获取输入框占位符
 function getPlaceholder(row: ParamItem) {
   if (row.description) return row.description;
-  if (row.type) return `请输入${row.type}类型的值`;
+  if (row.type) return row.type;
   return '请输入参数值';
 }
 
