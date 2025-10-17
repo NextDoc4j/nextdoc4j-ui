@@ -10,7 +10,7 @@ import type {
 import { updatePreferences } from '@vben/preferences';
 
 import { getOpenAPI, getOpenAPIConfig } from '#/api/core/openApi';
-import { baseRequestClient } from '#/api/request.js';
+import { baseRequestClient } from '#/api/request';
 import { useApiStore } from '#/store';
 
 interface TagGroups {

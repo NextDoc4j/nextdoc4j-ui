@@ -35,6 +35,9 @@ export const requestClient = createRequestClient(apiURL, {
   responseReturn: 'data',
 });
 
-export const baseRequestClient = new RequestClient({
-  baseURL: import.meta.env ? apiURL : '',
-});
+export const baseRequestClient = createRequestClient(
+  import.meta.env.DEV ? apiURL : '',
+  {
+    responseReturn: 'data',
+  },
+);
