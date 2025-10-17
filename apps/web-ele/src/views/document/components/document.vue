@@ -577,12 +577,15 @@ defineExpose({
         <ElDescriptionsItem v-if="requestBody">
           <ElCard bordered header="Body 参数">
             <template #header>
-              <span>Body 参数 </span>
+              <span>Body 参数</span>
               <ElTag class="mx-6">
                 {{
                   Object.keys(apiInfo?.requestBody?.content || {})?.[0] ??
                   'application/json'
                 }}
+              </ElTag>
+              <ElTag v-if="requestBodyType" type="danger">
+                {{ requestBodyType }}
               </ElTag>
             </template>
             <ElRow :gutter="16">

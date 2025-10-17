@@ -138,6 +138,7 @@ onMounted(() => {
   if (props.requestBody === undefined) {
     bodyType.value = 'none';
   } else if (props.requestBody.content['application/json']) {
+    bodyType.value = 'json';
     const schema = props.requestBody.content['application/json'].schema;
     let properties: Record<string, any>;
     properties = schema?.properties ?? {};
@@ -146,24 +147,26 @@ onMounted(() => {
       const resolved = resolveSchema(schema);
       properties = resolved.properties ?? {};
     }
-    const file = Object.keys(properties).find(
-      (item) =>
-        properties[item]?.format === 'binary' ||
-        properties[item]?.items?.format === 'binary',
-    );
-    if (file) {
-      bodyType.value = 'form-data';
+    Object.keys(properties).forEach((key) => {
+      if (
+        (properties[key]?.format === 'binary' ||
+          properties[key]?.items?.format === 'binary') &&
+        bodyType.value !== 'form-data'
+      ) {
+        bodyType.value = 'form-data';
+      }
       // eslint-disable-next-line vue/no-mutating-props
       props.formDataParams.push({
-        name: file,
+        name: key,
         enabled: true,
         value: '',
-        format: properties[file]?.format || properties[file]?.items?.format,
-        type: properties[file]?.type,
+        format:
+          properties[key].type === 'array'
+            ? properties[key]?.items?.format
+            : properties[key].format,
+        type: properties[key].type,
       });
-    } else {
-      bodyType.value = 'json';
-    }
+    });
   } else if (props.requestBody.content['multipart/form-data']) {
     bodyType.value = 'form-data';
     const schema = props.requestBody.content['multipart/form-data'].schema;
