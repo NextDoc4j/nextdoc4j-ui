@@ -124,7 +124,7 @@ const formatJsonWithComments = (data: any) => {
   return lines
     .map((line, index) => {
       const keyMatch = line.match(/"([^"]+)":\s*([^,}\]]*)/);
-      const key = keyMatch?.[1];
+      const key = keyMatch?.[1] ?? '';
       const fullPath = getFieldPath(index);
       // 尝试获取描述（按优先级：完整路径 > 父路径+当前字段 > 当前字段）
       const desc =

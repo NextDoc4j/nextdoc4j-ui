@@ -140,12 +140,12 @@ onMounted(() => {
   } else if (props.requestBody.content['application/json']) {
     const schema = props.requestBody.content['application/json'].schema;
     let properties: Record<string, any>;
+    properties = schema?.properties ?? {};
     if (schema.$ref) {
       // 解析 ref
       const resolved = resolveSchema(schema);
       properties = resolved.properties ?? {};
     }
-    properties = schema?.properties ?? {};
     const file = Object.keys(properties).find(
       (item) =>
         properties[item]?.format === 'binary' ||
