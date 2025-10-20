@@ -21,14 +21,10 @@ interface TagGroups {
 export const fetchMenuListAsync: () => Promise<
   RouteRecordStringComponent<string>[]
 > = async () => {
-  const allPath: TagGroups = {
-    all: {},
-  };
-  const accessRoutes: RouteRecordStringComponent<string>[] = [];
-
   const entries: RouteRecordStringComponent<string>[] = [];
   const { data } = await getOpenAPI();
   const { paths, components, 'x-nextdoc4j': xNextdoc4j, security } = data;
+  const { access, allPath } = initGroupRoute(paths);
 
   if (xNextdoc4j && xNextdoc4j.brand) {
     initBrand(xNextdoc4j.brand);
@@ -37,47 +33,6 @@ export const fetchMenuListAsync: () => Promise<
   if (xNextdoc4j && xNextdoc4j.markdown) {
     markDownMenus = initMarkdown(xNextdoc4j.markdown);
   }
-
-  const tagGroups = apiByTag(paths);
-
-  allPath.all = tagGroups;
-
-  Object.keys(tagGroups).forEach((key: string) => {
-    const children = tagGroups[key]?.map((api) => {
-      return {
-        name: `all*${key}*${api.operationId}`,
-        path: `/document/all/${key}/${api.operationId}`,
-        meta: {
-          title: api.summary,
-          method: api.method,
-          keepAlive: true,
-        },
-        component: '/views/document/index.vue',
-      };
-    }) as RouteRecordStringComponent<string>[];
-    accessRoutes.push({
-      component: '/views/document/index.vue',
-      name: `all*${key}`,
-      meta: {
-        title: key,
-      },
-      path: `/document/all/${key}`,
-      children,
-    });
-  });
-  const access = [
-    {
-      name: 'all',
-      path: '/document/all',
-      component: '/views/document/index.vue',
-      meta: {
-        title: '所有接口',
-      },
-      redirect:
-        accessRoutes.length > 0 ? accessRoutes[0]?.path : '/document/all',
-      children: accessRoutes,
-    },
-  ];
   Object.keys(components?.schemas ?? {}).forEach((key: string) => {
     entries.push({
       component: '/views/entity/index.vue',
@@ -104,94 +59,98 @@ export const fetchMenuListAsync: () => Promise<
   const { urls } = config;
   if (urls) {
     try {
-      await Promise.all(
-        urls
-          .filter(({ url }) => {
-            const code = url.split('/');
-            const tag = code[code.length - 1];
-            return tag !== 'all';
-          })
-          .map(async ({ url, name }) => {
-            const { data } = await baseRequestClient.get(url);
-            const { paths, components } = data;
-            const tagGroups = apiByTag(paths);
+      const filterUrls = urls.filter(({ url }) => {
+        const code = url.split('/');
+        const tag = code[code.length - 1];
+        return tag !== 'all';
+      });
+      if (filterUrls.length > 0) {
+        const fetchList = filterUrls.map(({ url }) =>
+          baseRequestClient.get(url),
+        );
+        const dataList = await Promise.all(fetchList);
+        dataList.forEach(({ data }, index) => {
+          const { paths, components } = data;
+          const tagGroups = apiByTag(paths);
 
-            const code = url.split('/');
-            const tag = code[code.length - 1] ?? '';
-            const accessRoutes: RouteRecordStringComponent[] = [];
-            allPath[tag] = tagGroups;
-            Object.keys(tagGroups).forEach((key: string) => {
-              const children = tagGroups[key]?.map((api) => {
-                return {
-                  name: `${tag}*${key}*${api.operationId}`,
-                  path: `/document/${tag}/${key}/${api.operationId}`,
-                  meta: {
-                    title: api.summary,
-                    method: api.method,
-                    keepAlive: true,
-                  },
-                  component: '/views/document/index.vue',
-                  parent: '/document',
-                };
-              }) as RouteRecordStringComponent<string>[];
-              accessRoutes.push({
+          const code = filterUrls?.[index]?.url?.split('/') ?? '';
+          const tag = code[code.length - 1] ?? '';
+          const accessRoutes: RouteRecordStringComponent[] = [];
+          allPath[tag] = tagGroups;
+          Object.keys(tagGroups).forEach((key: string) => {
+            const children = tagGroups[key]?.map((api) => {
+              return {
+                name: `${tag}*${key}*${api.operationId}`,
+                path: `/document/${tag}/${key}/${api.operationId}`,
+                meta: {
+                  title: api.summary,
+                  method: api.method,
+                  keepAlive: true,
+                },
                 component: '/views/document/index.vue',
-                name: `${tag}-${key}`,
-                path: `/document/${tag}/${key}`,
-                meta: {
-                  title: key,
-                },
-                children,
-              });
-            });
-            access.push({
-              name: tag,
-              path: `/document/${tag}`,
+                parent: '/document',
+              };
+            }) as RouteRecordStringComponent<string>[];
+            accessRoutes.push({
               component: '/views/document/index.vue',
+              name: `${tag}-${key}`,
+              path: `/document/${tag}/${key}`,
               meta: {
-                title: name,
+                title: key,
               },
-              children: accessRoutes,
-              redirect:
-                accessRoutes.length > 0 ? accessRoutes[0]?.path : '/empty',
+              children,
             });
-            const entityGroup: RouteRecordStringComponent<string> = {
+          });
+
+          access.push({
+            name: tag,
+            path: `/document/${tag}`,
+            component: '/views/document/index.vue',
+            meta: {
+              title: filterUrls?.[index]?.name ?? '默认分组',
+            },
+            children: accessRoutes,
+            redirect:
+              accessRoutes.length > 0 ? accessRoutes[0]?.path : '/empty',
+          });
+          const entityGroup: RouteRecordStringComponent<string> = {
+            component: '/views/entity/index.vue',
+            name: `entity*${tag}`,
+            path: `/entity/${tag}`,
+            meta: {
+              title: filterUrls?.[index]?.name ?? '默认分组',
+            },
+            children: [],
+          };
+          Object.keys(components?.schemas ?? {}).forEach((key: string) => {
+            if (!entityGroup.children) {
+              entityGroup.children = [];
+            }
+            entityGroup.children.push({
               component: '/views/entity/index.vue',
-              name: `entity*${tag}`,
-              path: `/entity/${tag}`,
+              name: `${tag}*${key}`,
+              path: `/entity/${tag}/${key}`,
               meta: {
-                title: name,
+                title: key,
               },
-              children: [],
-            };
-            Object.keys(components.schemas).forEach((key: string) => {
-              if (!entityGroup.children) {
-                entityGroup.children = [];
-              }
-              entityGroup.children.push({
-                component: '/views/entity/index.vue',
-                name: `${tag}*${key}`,
-                path: `/entity/${tag}/${key}`,
-                meta: {
-                  title: key,
-                },
-              });
             });
-            accessEntries.push(entityGroup);
-          }),
-      );
+          });
+          accessEntries.push(entityGroup);
+        });
+      }
     } catch {}
   }
-  if (data.info.title) {
+  if (data?.info?.title) {
     updatePreferences({
       app: {
         name: data.info.title,
       },
     });
   }
+
   return new Promise((resolve) => {
     useApiStore().initConfig(allPath, data, config);
-    const routes = [
+    const routes: RouteRecordStringComponent<string>[] = [
       {
         name: 'document',
         path: '/document',
@@ -222,6 +181,7 @@ export const fetchMenuListAsync: () => Promise<
         component: 'views/authorize/index.vue',
       });
     }
+
     resolve(routes);
   });
 };
@@ -318,4 +278,51 @@ const markDownGroupBy = (markdowns: MarkDownDes[], key: keyof MarkDownDes) => {
     {},
   );
   return group;
+};
+
+const initGroupRoute = (paths: Paths) => {
+  const accessRoutes: RouteRecordStringComponent<string>[] = [];
+  const tagGroups = apiByTag(paths);
+  const allPath: TagGroups = {
+    all: {},
+  };
+  allPath.all = tagGroups;
+
+  Object.keys(tagGroups).forEach((key: string) => {
+    const children = tagGroups[key]?.map((api) => {
+      return {
+        name: `all*${key}*${api.operationId}`,
+        path: `/document/all/${key}/${api.operationId}`,
+        meta: {
+          title: api.summary,
+          method: api.method,
+          keepAlive: true,
+        },
+        component: '/views/document/index.vue',
+      };
+    }) as RouteRecordStringComponent<string>[];
+    accessRoutes.push({
+      component: '/views/document/index.vue',
+      name: `all*${key}`,
+      meta: {
+        title: key,
+      },
+      path: `/document/all/${key}`,
+      children,
+    });
+  });
+  const access: RouteRecordStringComponent<string>[] = [
+    {
+      name: 'all',
+      path: '/document/all',
+      component: '/views/document/index.vue',
+      meta: {
+        title: '所有接口',
+      },
+      redirect: accessRoutes.length > 0 ? accessRoutes[0]?.path : '/empty',
+      children: accessRoutes,
+    },
+  ];
+
+  return { access, allPath };
 };
