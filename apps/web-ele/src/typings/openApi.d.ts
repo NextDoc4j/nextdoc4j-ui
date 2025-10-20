@@ -23,9 +23,11 @@ export interface OpenAPISpec {
     title: string;
     version: string;
   };
+  security?: any[];
   paths: Paths;
   components: {
     schemas: Record<string, SchemaObject>;
+    securitySchemes?: Record<string, SecuritySchemeObject>;
   };
   'x-nextdoc4j': {
     brand?: Brand;
@@ -157,3 +159,11 @@ export type PathMenuItem = OperationObject & {
   path: string;
   security: any[];
 };
+
+// 添加 SecurityScheme 对象类型定义
+export interface SecuritySchemeObject {
+  type: string;
+  in: string;
+  name: string;
+  scheme: string;
+}

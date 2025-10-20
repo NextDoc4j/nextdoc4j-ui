@@ -2,16 +2,13 @@ import { acceptHMRUpdate, defineStore } from 'pinia';
 
 export const useTokenStore = defineStore('token', {
   actions: {
-    setToken(token: null | string) {
-      this.token = token;
+    setToken(token: null | string, key: string) {
+      this.token[key] = token;
     },
   },
-  persist: {
-    // 持久化
-    pick: ['token'],
-  },
-  state: (): { token: null | string } => ({
-    token: null,
+  persist: true,
+  state: (): { token: Record<string, null | string> } => ({
+    token: {},
   }),
 });
 

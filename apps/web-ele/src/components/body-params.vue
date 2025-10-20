@@ -239,7 +239,7 @@ defineExpose({
     <template #label>
       <span class="px-2 font-normal">Body </span>
       <span
-        class="highlight circle"
+        class="highlight"
         v-if="
           (bodyType === 'form-data' && formDataParams.length > 0) ||
           (bodyType === 'x-www-form-urlencoded' && urlEncodedParams.length > 0)

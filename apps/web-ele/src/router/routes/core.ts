@@ -17,6 +17,19 @@ const fallbackNotFoundRoute: RouteRecordRaw = {
   path: '/:path(.*)*',
 };
 
+/** 全局empty页面 */
+const emptyRoute: RouteRecordRaw = {
+  component: () => import('#/views/_core/fallback/empty.vue'),
+  meta: {
+    hideInBreadcrumb: true,
+    hideInMenu: true,
+    hideInTab: true,
+    title: 'empty',
+  },
+  name: 'EmptyPage',
+  path: '/empty',
+};
+
 /** 基本路由，这些路由是必须存在的 */
 const coreRoutes: RouteRecordRaw[] = [
   /**
@@ -33,7 +46,7 @@ const coreRoutes: RouteRecordRaw[] = [
     name: 'Root',
     path: '/',
     redirect: preferences.app.defaultHomePath,
-    children: [],
+    children: [emptyRoute],
   },
 ];
 

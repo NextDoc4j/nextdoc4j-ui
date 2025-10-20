@@ -18,41 +18,48 @@ defineOptions({ name: 'Authorize' });
 const apiStore = useApiStore();
 const tokenStore = useTokenStore();
 const { refresh } = useRefresh();
-const {
-  components: { securitySchemes },
-} = apiStore.openApi;
-const key = computed(() => {
-  return Object.keys(securitySchemes)[0] ?? '';
+
+const securitySchemes = computed(() => {
+  return apiStore.openApi?.components?.securitySchemes ?? {};
 });
+
 const value = ref(tokenStore.token);
-const handleToken = (value: null | string) => {
-  tokenStore.setToken(value);
+const handleToken = (value: null | string, key: string) => {
+  tokenStore.setToken(value, key);
   refresh();
 };
 </script>
 
 <template>
-  <div class="h-full w-full p-5">
-    <ElCard class="h-full w-full" :style="{ border: 'none' }" shadow="never">
+  <div class="h-full w-full overflow-y-auto p-5">
+    <ElCard
+      :style="{ border: 'none' }"
+      shadow="never"
+      v-for="(security, index) in securitySchemes"
+      :key="index"
+    >
       <ElDescriptions :column="1" border label-width="120px">
         <ElDescriptionsItem label="参数Key" label-align="center">
-          {{ key }}
+          {{ index }}
         </ElDescriptionsItem>
         <ElDescriptionsItem label="参数名称" label-align="center">
-          {{ securitySchemes[key].name ?? key }}
+          {{ security.name ?? '' }}
         </ElDescriptionsItem>
         <ElDescriptionsItem label="in" label-align="center">
-          {{ securitySchemes[key].in ?? 'header' }}
+          {{ security.in ?? 'header' }}
         </ElDescriptionsItem>
         <ElDescriptionsItem label="参数值" label-align="center">
           <ElInput
             placeholder="请输入"
-            v-model.trim="value"
-            @change="handleToken"
+            v-model.trim="value[security.name]"
+            @change="(val) => handleToken(val, security.name)"
           />
         </ElDescriptionsItem>
         <ElDescriptionsItem>
-          <ElButton type="primary" @click.passive="handleToken(null)">
+          <ElButton
+            type="primary"
+            @click.passive="handleToken(null, security.name)"
+          >
             注销
           </ElButton>
         </ElDescriptionsItem>

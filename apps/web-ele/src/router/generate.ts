@@ -28,7 +28,7 @@ export const fetchMenuListAsync: () => Promise<
 
   const entries: RouteRecordStringComponent<string>[] = [];
   const { data } = await getOpenAPI();
-  const { paths, components, 'x-nextdoc4j': xNextdoc4j } = data;
+  const { paths, components, 'x-nextdoc4j': xNextdoc4j, security } = data;
 
   if (xNextdoc4j && xNextdoc4j.brand) {
     initBrand(xNextdoc4j.brand);
@@ -115,6 +115,7 @@ export const fetchMenuListAsync: () => Promise<
             const { data } = await baseRequestClient.get(url);
             const { paths, components } = data;
             const tagGroups = apiByTag(paths);
+
             const code = url.split('/');
             const tag = code[code.length - 1] ?? '';
             const accessRoutes: RouteRecordStringComponent[] = [];
@@ -152,9 +153,7 @@ export const fetchMenuListAsync: () => Promise<
               },
               children: accessRoutes,
               redirect:
-                accessRoutes.length > 0
-                  ? accessRoutes[0]?.path
-                  : `/document/${tag}`,
+                accessRoutes.length > 0 ? accessRoutes[0]?.path : '/empty',
             });
             const entityGroup: RouteRecordStringComponent<string> = {
               component: '/views/entity/index.vue',
@@ -192,7 +191,7 @@ export const fetchMenuListAsync: () => Promise<
   }
   return new Promise((resolve) => {
     useApiStore().initConfig(allPath, data, config);
-    resolve([
+    const routes = [
       {
         name: 'document',
         path: '/document',
@@ -212,7 +211,18 @@ export const fetchMenuListAsync: () => Promise<
         children: accessEntries,
       },
       ...markDownMenus,
-    ]);
+    ];
+    if (security) {
+      routes.unshift({
+        meta: {
+          title: '全局认证',
+        },
+        name: '全局认证',
+        path: '/authorize',
+        component: 'views/authorize/index.vue',
+      });
+    }
+    resolve(routes);
   });
 };
 

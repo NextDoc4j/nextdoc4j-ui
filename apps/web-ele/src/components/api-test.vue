@@ -3,7 +3,7 @@ import type { ParamsType } from './body-params.vue';
 
 import type { ParameterObject } from '#/typings/openApi';
 
-import { ref, watch } from 'vue';
+import { onMounted, ref, watch } from 'vue';
 
 import { useAppConfig } from '@vben/hooks';
 import { SvgCloseIcon } from '@vben/icons';
@@ -177,11 +177,6 @@ async function sendRequest() {
     headers.value
       .filter((h) => h.enabled && h.name)
       .forEach((h) => requestHeaders.append(h.name, h.value));
-
-    if (props.security && useTokenStore().token) {
-      const security: string[] = Object.keys(props.security[0]);
-      requestHeaders.append(security[0] ?? '', useTokenStore().token ?? '');
-    }
 
     // 添加form-data 添加默认的 Content-Type
     const formData = new FormData();
@@ -387,7 +382,16 @@ const formDataParams = ref<Array<ParamsType>>([]);
 // URL Encoded 参数相关
 const urlEncodedParams = ref<Array<ParamsType>>([]);
 
-defineExpose({});
+onMounted(() => {
+  const security = props?.security?.[0] ?? {};
+  Object.entries(security).forEach(([key]) => {
+    headers.value.push({
+      enabled: true,
+      name: key ?? '',
+      value: useTokenStore()?.token?.[key] ?? '',
+    });
+  });
+});
 </script>
 
 <template>
@@ -429,7 +433,7 @@ defineExpose({});
             <template #label>
               <span class="px-2 font-normal">Params </span>
               <span
-                class="highlight circle"
+                class="highlight"
                 v-if="pathParams.length + queryParams.length"
               >
                 {{ pathParams.length + queryParams.length }}
@@ -475,6 +479,9 @@ defineExpose({});
           <ElTabPane name="Headers" label="Headers">
             <template #label>
               <span class="px-2 font-normal">Headers </span>
+              <span class="highlight" v-if="headers.length > 0">
+                {{ headers.length }}
+              </span>
             </template>
             <params-table :table-data="headers" />
           </ElTabPane>
@@ -528,10 +535,7 @@ defineExpose({});
             <ElTabPane name="Headers" label="Headers">
               <template #label>
                 <span class="px-2 font-normal">Headers </span>
-                <span
-                  v-if="responseHeaders.length > 0"
-                  class="highlight circle"
-                >
+                <span v-if="responseHeaders.length > 0" class="highlight">
                   {{ responseHeaders.length }}
                 </span>
               </template>
@@ -610,6 +614,12 @@ defineExpose({});
 
   .el-tabs__item {
     padding: 0 4px;
+
+    .highlight {
+      @apply h-4 w-4 rounded-full text-center text-white;
+
+      background-color: var(--el-color-primary);
+    }
   }
 
   .el-tabs__content {
