@@ -33,6 +33,10 @@ export interface OpenAPISpec {
     brand?: Brand;
     markdown?: MarkDownDes[];
   };
+  servers?: {
+    description: string;
+    url: string;
+  }[];
 }
 
 export interface Brand {
@@ -166,4 +170,5 @@ export interface SecuritySchemeObject {
   in: string;
   name: string;
   scheme: string;
+  description: string;
 }

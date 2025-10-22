@@ -16,9 +16,11 @@ const SvgCloseIcon = createIconifyIcon('svg:close-duotone');
 const SvgCopyIcon = createIconifyIcon('svg:copy');
 const SvgFormatLeftIcon = createIconifyIcon('svg:format-left');
 const SvgExchangeIcon = createIconifyIcon('svg:exchange');
+const SvgApiPrefixIcon = createIconifyIcon('svg:api-prefix');
 
 export {
   SvgAntdvLogoIcon,
+  SvgApiPrefixIcon,
   SvgAvatar1Icon,
   SvgAvatar2Icon,
   SvgAvatar3Icon,

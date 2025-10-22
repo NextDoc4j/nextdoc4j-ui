@@ -4,6 +4,8 @@ import type { ParameterObject, Schema } from '#/typings/openApi';
 import { computed, onBeforeMount, ref } from 'vue';
 import { useRoute } from 'vue-router';
 
+import { SvgApiPrefixIcon } from '@vben/icons';
+
 import {
   ElButton,
   ElCard,
@@ -32,7 +34,7 @@ const props = defineProps<{
 const emits = defineEmits<{
   test: [data: any];
 }>();
-
+const baseUrl = ref('');
 const apiStore = useApiStore();
 const route = useRoute();
 const apiInfo = ref<any>(null);
@@ -294,6 +296,7 @@ onBeforeMount(() => {
   if (apiInfo.value?.responses) {
     activeNames.value = Object.keys(apiInfo.value.responses)[0];
   }
+  baseUrl.value = apiStore?.openApi?.servers?.[0]?.url ?? '';
 });
 defineExpose({
   requestBodyType,
@@ -309,6 +312,11 @@ defineExpose({
       >
         {{ apiInfo?.method?.toUpperCase() }}
       </span>
+      <ElTooltip placement="top" :content="baseUrl" v-if="baseUrl">
+        <ElButton size="small" class="ml-2 p-0">
+          <SvgApiPrefixIcon class="size-4" />
+        </ElButton>
+      </ElTooltip>
       <ElTooltip content="点击复制" placement="top">
         <span class="pl-4 hover:underline hover:decoration-dashed" v-copy>
           {{ apiInfo?.path }}

@@ -51,14 +51,14 @@ const handleToken = (value: null | string, key: string) => {
         <ElDescriptionsItem label="参数值" label-align="center">
           <ElInput
             placeholder="请输入"
-            v-model.trim="value[security.name]"
-            @change="(val) => handleToken(val, security.name)"
+            v-model.trim="value[`${index}_${security.in}`]"
+            @change="(val) => handleToken(val, `${index}_${security.in}`)"
           />
         </ElDescriptionsItem>
         <ElDescriptionsItem>
           <ElButton
             type="primary"
-            @click.passive="handleToken(null, security.name)"
+            @click.passive="handleToken(null, `${index}_${security.in}`)"
           >
             注销
           </ElButton>

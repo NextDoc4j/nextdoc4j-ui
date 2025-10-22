@@ -6,7 +6,7 @@ import type { ParameterObject } from '#/typings/openApi';
 import { onMounted, ref, watch } from 'vue';
 
 import { useAppConfig } from '@vben/hooks';
-import { SvgCloseIcon } from '@vben/icons';
+import { SvgApiPrefixIcon, SvgCloseIcon } from '@vben/icons';
 
 import {
   ElButton,
@@ -25,10 +25,18 @@ import { Pane, Splitpanes } from 'splitpanes';
 
 import JsonView from '#/components/json-view.vue';
 import { methodType } from '#/constants/methods';
-import { useTokenStore } from '#/store';
+import { useApiStore, useTokenStore } from '#/store';
 
 import bodyParams from './body-params.vue';
 import paramsTable from './params-table.vue';
+
+interface TableParamsObject {
+  description: string;
+  enabled: boolean;
+  name: string;
+  value: string;
+  type?: string;
+}
 
 const props = defineProps<{
   method: string;
@@ -43,7 +51,7 @@ const props = defineProps<{
 const emit = defineEmits(['cancel']);
 
 const { apiURL } = useAppConfig(import.meta.env, import.meta.env.PROD);
-
+const baseUrl = ref();
 const activeTab = ref(props.requestBody ? 'Body' : 'Params');
 const bodyTabRef = ref();
 const responseTab = ref('Body');
@@ -52,16 +60,10 @@ const responseTab = ref('Body');
 const loading = ref(false);
 const requestUrl = ref('');
 
-const queryParams = ref<
-  Array<{ enabled: boolean; name: string; value: string }>
->([]);
-const pathParams = ref<Array<{ name: string; value: string }>>([]);
-const headers = ref<Array<{ enabled: boolean; name: string; value: string }>>(
-  [],
-);
-const cookies = ref<Array<{ enabled: boolean; name: string; value: string }>>(
-  [],
-);
+const queryParams = ref<Array<TableParamsObject>>([]);
+const pathParams = ref<Array<TableParamsObject>>([]);
+const headers = ref<Array<TableParamsObject>>([]);
+const cookies = ref<Array<TableParamsObject>>([]);
 
 // 监听 props 变化，同步接口信息
 watch(
@@ -384,12 +386,27 @@ const urlEncodedParams = ref<Array<ParamsType>>([]);
 
 onMounted(() => {
   const security = props?.security?.[0] ?? {};
+  const openApi = useApiStore().openApi;
+  const securitySchemes = openApi?.components?.securitySchemes ?? {};
+  baseUrl.value = openApi?.servers?.[0]?.url;
   Object.entries(security).forEach(([key]) => {
-    headers.value.push({
-      enabled: true,
-      name: key ?? '',
-      value: useTokenStore()?.token?.[key] ?? '',
-    });
+    const tokenKey = `${key}_${securitySchemes?.[key]?.in}`;
+    if (securitySchemes?.[key]?.in === 'header') {
+      headers.value.push({
+        enabled: true,
+        name: key ?? '',
+        value: useTokenStore()?.token?.[tokenKey] ?? '',
+        description: securitySchemes?.[key]?.description,
+      });
+    } else if (securitySchemes?.[key]?.in === 'query') {
+      queryParams.value.push({
+        name: key,
+        enabled: true,
+        value: useTokenStore()?.token?.[tokenKey] ?? '',
+        description: securitySchemes?.[key]?.description,
+        type: securitySchemes?.[key]?.type,
+      });
+    }
   });
 });
 </script>
@@ -418,6 +435,11 @@ onMounted(() => {
                 >
                   {{ method?.toUpperCase() }}
                 </span>
+                <ElTooltip placement="top" :content="baseUrl" v-if="baseUrl">
+                  <ElButton size="small" class="ml-2 p-0">
+                    <SvgApiPrefixIcon class="size-4" />
+                  </ElButton>
+                </ElTooltip>
               </template>
             </ElInput>
             <ElButton type="primary" class="ml-2" @click="sendRequest">
