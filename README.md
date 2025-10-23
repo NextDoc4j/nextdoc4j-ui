@@ -1,14 +1,29 @@
-# Nextdoc4j UI
+<p align="center">
+  <img src=".images/logo.png" alt="Nextdoc4j Logo" width="336">
+</p>
 
-<div align="center">
+<h1 align="center">Nextdoc4j UI</h1>
 
-**现代化的 API 文档界面解决方案**
+<p align="center">
+  <strong>现代化的 API 文档界面解决方案</strong><br>
+  基于 <strong>Vue 3</strong> + <strong>TypeScript</strong> + <strong>Vite</strong> 构建，深度整合 SpringDoc,替代 Swagger UI，<br>
+  提供更美观、更强大的开发体验，让 API 文档焕然一新。
+</p>
 
-基于 Vue 3 + TypeScript + Vite 构建，深度整合 SpringDoc，完美替代 Swagger UI
+<p align="center">
+  🌐 <a href="https://demo.nextdoc4j.top/">在线演示</a> |
+  📘 <a href="https://nextdoc4j.top/">官方文档</a> |
+  🧩 <a href="https://nextdoc4j.top/more/changelog.html">更新日志</a> |
+  ❓ <a href="https://nextdoc4j.top/more/faq.html">常见问题</a>
+</p>
 
-[在线演示](https://demo.nextdoc4j.top/) | [文档](https://nextdoc4j.top/) | [后端项目](https://gitee.com/nextdoc4j/nextdoc4j/)
+## 📦 代码仓库
 
-</div>
+| 平台 | 仓库地址 |
+| --- | --- |
+| GitCode | [https://gitcode.com/QAQ_Z/nextdoc4j-ui](https://gitcode.com/QAQ_Z/nextdoc4j-ui) |
+| Gitee | [https://gitee.com/nextdoc4j/nextdoc4j-ui](https://gitee.com/nextdoc4j/nextdoc4j-ui) |
+| GitHub | [https://github.com/NextDoc4j/nextdoc4j-ui](https://github.com/NextDoc4j/nextdoc4j-ui) |
 
 ## 📖 项目简介
 
@@ -45,7 +60,13 @@ Nextdoc4j UI 是一个现代化的 API 文档前端界面，专为 Nextdoc4j 后
 ### 安装依赖
 
 ```bash
-# 克隆项目
+# 克隆项目（选择任一平台）
+git clone https://gitcode.com/QAQ_Z/nextdoc4j-ui.git
+# 或
+git clone https://gitee.com/nextdoc4j/nextdoc4j-ui.git
+# 或
+git clone https://github.com/NextDoc4j/nextdoc4j-ui.git
+
 # 进入项目目录
 cd nextdoc4j-ui
 
@@ -68,6 +89,8 @@ pnpm dev
 # 构建生产版本
 pnpm build
 ```
+
+更多配置和使用方式请参考 [官方文档](https://nextdoc4j.top/)。
 
 ## 📁 项目结构
 
@@ -92,23 +115,7 @@ nextdoc4j-ui/
 │   ├── tailwind-config/      # TailwindCSS 配置
 │   ├── tsconfig/             # TypeScript 配置
 │   └── vite-config/          # Vite 构建配置
-├── scripts/
-│   ├── clean.mjs             # 清理脚本
-│   ├── turbo-run/            # Turbo 运行脚本
-│   └── vsh/                  # Shell 脚本工具
-├── licenses/
-│   ├── LICENSE-Apache-2.0    # Apache 2.0 许可证
-│   └── LICENSE-MIT-Vben      # Vben MIT 许可证
-├── cspell.json               # 拼写检查配置
-├── eslint.config.mjs         # ESLint 配置
-├── lefthook.yml              # Git hooks 配置
-├── pnpm-workspace.yaml       # pnpm 工作区配置
-├── stylelint.config.mjs      # 样式检查配置
-├── tea.yaml                  # Tea 包管理器配置
-├── turbo.json                # Turbo 构建配置
-├── vitest.config.ts          # Vitest 测试配置
-├── vitest.workspace.ts       # Vitest 工作区配置
-└── vben-admin.code-workspace # VS Code 工作区配置
+└── ...
 ```
 
 ## 🔧 技术栈
@@ -131,6 +138,33 @@ nextdoc4j-ui/
 2. **实时文档同步**: 后端 API 变更时前端文档自动更新
 3. **在线接口测试**: 内置接口测试工具，支持各种认证方式
 4. **类型安全**: 基于 OpenAPI 规范自动生成 TypeScript 类型
+
+### 后端项目地址
+
+| 平台 | 仓库地址 |
+| --- | --- |
+| GitCode | [https://gitcode.com/QAQ_Z/nextdoc4j](https://gitcode.com/QAQ_Z/nextdoc4j) |
+| Gitee | [https://gitee.com/nextdoc4j/nextdoc4j](https://gitee.com/nextdoc4j/nextdoc4j) |
+| GitHub | [https://github.com/NextDoc4j/nextdoc4j](https://github.com/NextDoc4j/nextdoc4j) |
+
+## 🤝 参与贡献
+
+我们欢迎所有形式的贡献！包括但不限于：
+
+- 🐛 提交 Bug 反馈
+- 💡 提供功能建议
+- 📝 改进文档
+- 💻 贡献代码
+
+详细的贡献指南请访问：[贡献指南](https://nextdoc4j.top/more/contribute.html)
+
+## 📚 相关链接
+
+- **官方文档**: [https://nextdoc4j.top](https://nextdoc4j.top)
+- **贡献指南**: [https://nextdoc4j.top/more/contribute.html](https://nextdoc4j.top/more/contribute.html)
+- **更新日志**: [https://nextdoc4j.top/more/changelog.html](https://nextdoc4j.top/more/changelog.html)
+- **常见问题**: [https://nextdoc4j.top/more/faq.html](https://nextdoc4j.top/more/faq.html)
+- **团队介绍**: [https://nextdoc4j.top/more/team/team.html](https://nextdoc4j.top/more/team/team.html)
 
 ## 📄 许可证
 
