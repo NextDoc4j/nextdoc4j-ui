@@ -1,5 +1,5 @@
 <p align="center">
-  <img src=".images/logo.png" alt="Nextdoc4j Logo" width="336">
+  <img src=".images/logo.png" alt="Nextdoc4j Logo" width="180">
 </p>
 
 <h1 align="center">Nextdoc4j UI</h1>
@@ -19,11 +19,11 @@
 
 ## 📦 代码仓库
 
-| 平台 | 仓库地址 |
-| --- | --- |
-| GitCode | [https://gitcode.com/QAQ_Z/nextdoc4j-ui](https://gitcode.com/QAQ_Z/nextdoc4j-ui) |
-| Gitee | [https://gitee.com/nextdoc4j/nextdoc4j-ui](https://gitee.com/nextdoc4j/nextdoc4j-ui) |
-| GitHub | [https://github.com/NextDoc4j/nextdoc4j-ui](https://github.com/NextDoc4j/nextdoc4j-ui) |
+| 平台      | 仓库地址                                                                                   |
+|---------|----------------------------------------------------------------------------------------|
+| GitCode | [https://gitcode.com/QAQ_Z/nextdoc4j-ui](https://gitcode.com/QAQ_Z/nextdoc4j-ui)       |
+| Gitee   | [https://gitee.com/nextdoc4j/nextdoc4j-ui](https://gitee.com/nextdoc4j/nextdoc4j-ui)   |
+| GitHub  | [https://github.com/NextDoc4j/nextdoc4j-ui](https://github.com/NextDoc4j/nextdoc4j-ui) |
 
 ## 📖 项目简介
 
@@ -141,11 +141,11 @@ nextdoc4j-ui/
 
 ### 后端项目地址
 
-| 平台 | 仓库地址 |
-| --- | --- |
-| GitCode | [https://gitcode.com/QAQ_Z/nextdoc4j](https://gitcode.com/QAQ_Z/nextdoc4j) |
-| Gitee | [https://gitee.com/nextdoc4j/nextdoc4j](https://gitee.com/nextdoc4j/nextdoc4j) |
-| GitHub | [https://github.com/NextDoc4j/nextdoc4j](https://github.com/NextDoc4j/nextdoc4j) |
+| 平台      | 仓库地址                                                                             |
+|---------|----------------------------------------------------------------------------------|
+| GitCode | [https://gitcode.com/QAQ_Z/nextdoc4j](https://gitcode.com/QAQ_Z/nextdoc4j)       |
+| Gitee   | [https://gitee.com/nextdoc4j/nextdoc4j](https://gitee.com/nextdoc4j/nextdoc4j)   |
+| GitHub  | [https://github.com/NextDoc4j/nextdoc4j](https://github.com/NextDoc4j/nextdoc4j) |
 
 ## 🤝 参与贡献
 
