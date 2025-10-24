@@ -4,6 +4,10 @@ export const useTokenStore = defineStore('token', {
   actions: {
     setToken(token: null | string, key: string) {
       this.token[key] = token;
+      if (token === null) {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete this.token[key];
+      }
     },
   },
   persist: true,

@@ -11,3 +11,9 @@ export const MdiGithub = createIconifyIcon('mdi:github');
 export const MdiGoogle = createIconifyIcon('mdi:google');
 
 export const MdiQqchat = createIconifyIcon('mdi:qqchat');
+
+export const MdiLock = createIconifyIcon('mdi:lock');
+
+export const MdiPlus = createIconifyIcon('mdi:plus');
+
+export const MdiMinus = createIconifyIcon('mdi:minus');
