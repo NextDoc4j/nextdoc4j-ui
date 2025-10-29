@@ -1,6 +1,4 @@
-<p align="center">
-  <img src=".images/logo.png" alt="Nextdoc4j Logo" width="180">
-</p>
+span
 
 <h1 align="center">Nextdoc4j UI</h1>
 
@@ -19,11 +17,11 @@
 
 ## 📦 代码仓库
 
-| 平台      | 仓库地址                                                                                   |
-|---------|----------------------------------------------------------------------------------------|
-| GitCode | [https://gitcode.com/QAQ_Z/nextdoc4j-ui](https://gitcode.com/QAQ_Z/nextdoc4j-ui)       |
-| Gitee   | [https://gitee.com/nextdoc4j/nextdoc4j-ui](https://gitee.com/nextdoc4j/nextdoc4j-ui)   |
-| GitHub  | [https://github.com/NextDoc4j/nextdoc4j-ui](https://github.com/NextDoc4j/nextdoc4j-ui) |
+| 平台 | 仓库地址 |
+| --- | --- |
+| GitCode | [https://gitcode.com/NextDoc4j/nextdoc4j-ui](https://gitcode.com/NextDoc4j/nextdoc4j-ui) |
+| Gitee | [https://gitee.com/nextdoc4j/nextdoc4j-ui](https://gitee.com/nextdoc4j/nextdoc4j-ui) |
+| GitHub | [https://github.com/NextDoc4j/nextdoc4j-ui](https://github.com/NextDoc4j/nextdoc4j-ui) |
 
 ## 📖 项目简介
 
@@ -61,7 +59,7 @@ Nextdoc4j UI 是一个现代化的 API 文档前端界面，专为 Nextdoc4j 后
 
 ```bash
 # 克隆项目（选择任一平台）
-git clone https://gitcode.com/QAQ_Z/nextdoc4j-ui.git
+git clone https://gitcode.com/NextDoc4j/nextdoc4j-ui.git
 # 或
 git clone https://gitee.com/nextdoc4j/nextdoc4j-ui.git
 # 或
@@ -141,11 +139,11 @@ nextdoc4j-ui/
 
 ### 后端项目地址
 
-| 平台      | 仓库地址                                                                             |
-|---------|----------------------------------------------------------------------------------|
-| GitCode | [https://gitcode.com/QAQ_Z/nextdoc4j](https://gitcode.com/QAQ_Z/nextdoc4j)       |
-| Gitee   | [https://gitee.com/nextdoc4j/nextdoc4j](https://gitee.com/nextdoc4j/nextdoc4j)   |
-| GitHub  | [https://github.com/NextDoc4j/nextdoc4j](https://github.com/NextDoc4j/nextdoc4j) |
+| 平台 | 仓库地址 |
+| --- | --- |
+| GitCode | [https://gitcode.com/NextDoc4j/nextdoc4j](https://gitcode.com/NextDoc4j/nextdoc4j) |
+| Gitee | [https://gitee.com/nextdoc4j/nextdoc4j](https://gitee.com/nextdoc4j/nextdoc4j) |
+| GitHub | [https://github.com/NextDoc4j/nextdoc4j](https://github.com/NextDoc4j/nextdoc4j) |
 
 ## 🤝 参与贡献
 
