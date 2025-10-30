@@ -8,6 +8,8 @@ export interface SwaggerConfig {
 }
 export type Paths = Record<string, PathItem>;
 
+export type MarkDownGroup = Record<keyof MarkDownDes, MarkDownDes[]>;
+
 export interface OpenAPISpec {
   openapi: string;
   info: {
@@ -56,6 +58,13 @@ export interface MarkDownDes {
 
 export interface PathItem {
   [method: string]: OperationObject;
+  operationId: string;
+}
+
+export interface ApiData {
+  [group: string]: {
+    [tag: string]: PathItem[];
+  };
 }
 
 export interface OperationObject {
