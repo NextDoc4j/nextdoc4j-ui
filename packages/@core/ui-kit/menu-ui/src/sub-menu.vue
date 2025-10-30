@@ -87,7 +87,7 @@ const countLeaves = (treeData: MenuRecordRaw) => {
     <template #title>
       <span class="flex-1">{{ menu.name }}</span>
       <span
-        class="bg-blue-6 font-700 inline-flex max-w-[70px] items-center rounded-md px-1 py-0.5 text-xs text-white"
+        class="bg-blue-6 inline-flex max-w-[70px] items-center rounded-lg px-1.5 py-0.5 text-xs font-bold text-white"
         :style="{ ...methodType[menu?.method?.toUpperCase()] }"
         v-if="menu.method"
       >

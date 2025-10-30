@@ -17,3 +17,7 @@ export const MdiLock = createIconifyIcon('mdi:lock');
 export const MdiPlus = createIconifyIcon('mdi:plus');
 
 export const MdiMinus = createIconifyIcon('mdi:minus');
+
+export const ApiLinkPrefix = createIconifyIcon('material-symbols:link-rounded');
+
+export const ApiTestRun = createIconifyIcon('material-symbols:play-arrow');

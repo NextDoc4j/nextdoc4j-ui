@@ -8,6 +8,8 @@ import { computed, ref } from 'vue';
 import { Pin, X } from '@vben-core/icons';
 import { VbenContextMenu, VbenIcon } from '@vben-core/shadcn-ui';
 
+import { methodType } from '../../../../../../../apps/web-ele/src/constants/methods';
+
 interface Props extends TabsProps {}
 
 defineOptions({
@@ -160,6 +162,16 @@ function onMouseDown(e: MouseEvent, tab: TabConfig) {
               />
 
               <span class="flex-1 overflow-hidden whitespace-nowrap text-sm">
+                <span
+                  v-if="tab.meta.method"
+                  class="mr-2 text-[12px] font-semibold"
+                  :style="{
+                    ...methodType[(tab.meta.method as string).toUpperCase()],
+                    background: 'transparent',
+                  }"
+                >
+                  {{ (tab.meta.method as string).toUpperCase() }}
+                </span>
                 {{ tab.title }}
               </span>
             </div>
