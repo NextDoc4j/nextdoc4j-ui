@@ -1,5 +1,6 @@
-span
-
+<p align="center">
+  <img src=".images/logo.png" alt="Nextdoc4j Logo" width="180">
+</p>
 <h1 align="center">Nextdoc4j UI</h1>
 
 <p align="center">
@@ -181,6 +182,6 @@ nextdoc4j-ui/
 
 <div align="center">
 
-如果这个项目对你有帮助，请给它一个 ⭐️
+**NextDoc4j** - 让 API 文档焕然一新！ 如果这个项目对你有帮助，请给它一个 ⭐️
 
 </div>
