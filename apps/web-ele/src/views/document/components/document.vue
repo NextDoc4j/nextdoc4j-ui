@@ -4,7 +4,7 @@ import type { ParameterObject, Schema } from '#/typings/openApi';
 import { computed, onBeforeMount, ref } from 'vue';
 import { useRoute } from 'vue-router';
 
-import { SvgApiPrefixIcon } from '@vben/icons';
+import { ApiLinkPrefix, ApiTestRun } from '@vben/icons';
 
 import {
   ElButton,
@@ -26,6 +26,8 @@ import SchemaView from '#/components/schema-view.vue';
 import { methodType } from '#/constants/methods';
 import { useApiStore } from '#/store';
 import { generateExample, resolveSchema } from '#/utils/schema';
+
+import PathSegment from './path-segment.vue';
 
 const props = defineProps<{
   showTest: boolean;
@@ -278,6 +280,11 @@ const handleTest = () => {
   emits('test', apiInfo.value);
 };
 
+const tagName = computed(() => {
+  const routeName = route.name as string;
+  return routeName ? routeName.split('*')[1] : '';
+});
+
 onBeforeMount(() => {
   const routeName = route.name;
   if (!routeName || typeof routeName !== 'string') {
@@ -304,40 +311,62 @@ defineExpose({
 </script>
 
 <template>
-  <div class="relative box-border h-full w-full overflow-y-auto p-5">
-    <ElCard :body-style="{ padding: '10px' }" class="sticky top-0 z-10">
-      <span
-        class="round font-600 inline-flex h-[24px] max-h-[90px] items-center !rounded px-1.5 py-[2px] text-sm"
-        :style="{ ...methodType[apiInfo?.method?.toUpperCase()] }"
+  <div class="relative h-full w-full overflow-y-auto p-5">
+    <div class="flex flex-col">
+      <div
+        class="text-primary dark:text-primary-light h-5 text-sm font-semibold"
       >
-        {{ apiInfo?.method?.toUpperCase() }}
-      </span>
-      <ElTooltip placement="top" :content="baseUrl" v-if="baseUrl">
-        <ElButton size="small" class="ml-2 p-0">
-          <SvgApiPrefixIcon class="size-4" />
+        {{ tagName }}
+      </div>
+      <h1
+        class="mt-[10px] inline-block break-all text-2xl font-bold tracking-tight text-gray-900 sm:text-3xl dark:text-gray-200"
+      >
+        {{ apiInfo.summary ?? '暂无描述' }}
+      </h1>
+      <div class="prose prose-gray dark:prose-invert mt-2 text-lg">
+        <p>{{ apiInfo?.description }}。</p>
+      </div>
+    </div>
+
+    <ElCard
+      shadow="never"
+      :body-style="{ padding: '10px' }"
+      class="sticky top-0 z-10 mt-6"
+    >
+      <div class="flex items-center justify-between">
+        <div>
+          <span
+            class="inline-flex h-[24px] max-h-[90px] items-center rounded-lg px-1.5 py-0.5 text-sm font-bold"
+            :style="{ ...methodType[apiInfo?.method?.toUpperCase()] }"
+          >
+            {{ apiInfo?.method?.toUpperCase() }}
+          </span>
+          <ElTooltip placement="top" :content="baseUrl" v-if="baseUrl">
+            <ElButton size="small" class="ml-2 !px-1">
+              <ApiLinkPrefix class="size-4" />
+            </ElButton>
+          </ElTooltip>
+          <PathSegment
+            :path="apiInfo?.path"
+            :param-style="{
+              ...methodType[apiInfo?.method?.toUpperCase()],
+              borderColor: methodType[apiInfo?.method?.toUpperCase()].color,
+            }"
+            class="ml-2"
+          />
+        </div>
+        <ElButton
+          text
+          :style="{ ...methodType[apiInfo?.method?.toUpperCase()] }"
+          @click="handleTest"
+          v-if="!props.showTest"
+        >
+          调试
+          <ApiTestRun class="ml-1 size-4" />
         </ElButton>
-      </ElTooltip>
-      <ElTooltip content="点击复制" placement="top">
-        <span class="pl-4 hover:underline hover:decoration-dashed" v-copy>
-          {{ apiInfo?.path }}
-        </span>
-      </ElTooltip>
-      <ElButton
-        type="primary"
-        size="small"
-        class="float-right ml-4"
-        @click="handleTest"
-        v-if="!props.showTest"
-      >
-        调试
-      </ElButton>
+      </div>
     </ElCard>
     <div class="w-full pt-5">
-      <ElDescriptions :column="2" bordered title="接口描述">
-        <ElDescriptionsItem>
-          <span v-html="apiInfo?.description ?? '暂无描述'"></span>
-        </ElDescriptionsItem>
-      </ElDescriptions>
       <ElDescriptions
         :column="1"
         bordered

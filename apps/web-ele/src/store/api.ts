@@ -1,5 +1,7 @@
 import type {
+  ApiData,
   MarkDownDes,
+  MarkDownGroup,
   OpenAPISpec,
   SwaggerConfig,
 } from '#/typings/openApi';
@@ -10,11 +12,15 @@ import { defineStore } from 'pinia';
 
 export const useApiStore = defineStore('api', () => {
   const isInitConfig = ref(false);
-  const apiData = ref<any>([]);
+  const apiData = ref<ApiData>({});
   const openApi = ref<OpenAPISpec>();
   const swaggerConfig = ref<SwaggerConfig>();
-  const markDownGroup = ref<Record<keyof MarkDownDes, MarkDownDes[]>>([]);
-  const initConfig = (data, api: OpenAPISpec, config: SwaggerConfig) => {
+  const markDownGroup = ref<MarkDownGroup>({} as MarkDownGroup);
+  const initConfig = (
+    data: ApiData,
+    api: OpenAPISpec,
+    config: SwaggerConfig,
+  ) => {
     if (isInitConfig.value) return;
     apiData.value = data;
     isInitConfig.value = true;
@@ -22,8 +28,8 @@ export const useApiStore = defineStore('api', () => {
     swaggerConfig.value = config;
   };
   const searchPathData = (group: string, tag: string, operationId: string) => {
-    const paths = apiData.value[group][tag];
-    const data = paths.find((item) => item.operationId === operationId);
+    const paths = apiData.value[group]?.[tag];
+    const data = paths?.find((item) => item.operationId === operationId);
     return data;
   };
   const initMarkDown = (group: Record<keyof MarkDownDes, MarkDownDes[]>) => {
@@ -35,12 +41,12 @@ export const useApiStore = defineStore('api', () => {
   };
 
   return {
-    initConfig,
     isInitConfig,
     apiData,
-    searchPathData,
     swaggerConfig,
     openApi,
+    searchPathData,
+    initConfig,
     initMarkDown,
     searchMarkDown,
   };
