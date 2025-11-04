@@ -1,5 +1,6 @@
 import type {
   ApiData,
+  ApiInfo,
   MarkDownDes,
   MarkDownGroup,
   OpenAPISpec,
@@ -30,7 +31,7 @@ export const useApiStore = defineStore('api', () => {
   const searchPathData = (group: string, tag: string, operationId: string) => {
     const paths = apiData.value[group]?.[tag];
     const data = paths?.find((item) => item.operationId === operationId);
-    return data;
+    return data as unknown as ApiInfo;
   };
   const initMarkDown = (group: Record<keyof MarkDownDes, MarkDownDes[]>) => {
     markDownGroup.value = group;

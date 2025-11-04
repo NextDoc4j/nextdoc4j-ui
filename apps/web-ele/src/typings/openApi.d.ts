@@ -63,7 +63,7 @@ export interface PathItem {
 
 export interface ApiData {
   [group: string]: {
-    [tag: string]: PathItem[];
+    [tag: string]: ApiInfo[];
   };
 }
 
@@ -85,15 +85,6 @@ export interface RequestBody {
     };
   };
   required?: boolean;
-}
-
-export interface Response {
-  description: string;
-  content?: {
-    [key: string]: {
-      schema: Schema;
-    };
-  };
 }
 
 export interface Schema {
@@ -180,4 +171,43 @@ export interface SecuritySchemeObject {
   name: string;
   scheme: string;
   description: string;
+}
+
+export interface ApiInfo {
+  method: string;
+  path: string;
+  tags: string[];
+  summary?: string;
+  description?: string;
+  operationId: string;
+  parameters: Parameter[];
+  requestBody: RequestBody;
+  responses: {
+    [statusCode: string]: Response;
+  };
+  security: SecurityRequirement[];
+}
+
+export interface Response {
+  description: string;
+  content?: {
+    [key: string]: {
+      schema: Schema;
+    };
+  };
+  schema?: Schema;
+}
+
+interface Parameter {
+  name: string;
+  in: 'path' | 'query';
+  required: boolean;
+  schema: Schema;
+  example?: string;
+  default?: string;
+  description?: string;
+}
+
+interface SecurityRequirement {
+  [name: string]: string[];
 }
