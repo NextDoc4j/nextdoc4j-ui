@@ -118,7 +118,6 @@ const htmlDescription = computed(() => {
       <div v-if="plainDescription" class="text-gray-600 dark:text-gray-400">
         {{ plainDescription }}
       </div>
-
       <div
         v-if="htmlDescription"
         class="mt-2 text-gray-600 dark:text-gray-400"
@@ -186,15 +185,15 @@ const htmlDescription = computed(() => {
             可选
           </div>
         </div>
-        <div
-          v-if="htmlDescription"
-          class="mt-2 text-sm text-gray-600 dark:text-gray-400"
-          v-html="htmlDescription"
-        ></div>
       </div>
       <div class="mt-4 text-gray-600 dark:text-gray-400">
         {{ plainDescription }}
       </div>
+      <div
+        v-if="htmlDescription"
+        class="mt-2 text-sm text-gray-600 dark:text-gray-400"
+        v-html="htmlDescription"
+      ></div>
       <div
         v-if="schema?.enum || schema?.items?.enum"
         class="mt-6 flex items-center"

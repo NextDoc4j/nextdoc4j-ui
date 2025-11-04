@@ -142,14 +142,15 @@ const hasHtmlDescription = (desc: string) => desc?.includes('<');
           <div
             class="flex rounded-md bg-gray-100/50 px-1.5 py-0.5 font-mono text-xs font-bold text-gray-600 dark:bg-white/5 dark:text-gray-200"
           >
-            <span>
-              {{ value.items.type }}[{{ value.items.title }}]
+            <div>
+              <span>{{ value.items.type }}[{{ value.items.title }}]</span>
               <span
                 v-if="value.format"
                 class="ml-1 text-xs text-gray-600 dark:text-gray-400"
-                >{{ `<${value.format}>` }}
+              >
+                {{ `<${value.format}>` }}
               </span>
-            </span>
+            </div>
           </div>
         </template>
 
