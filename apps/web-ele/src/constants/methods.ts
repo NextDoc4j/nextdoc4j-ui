@@ -4,8 +4,8 @@ export const methodType: Record<string, any> = {
     color: '#17b26a',
   },
   PUT: {
-    backgroundColor: '#2e90fa',
-    color: '#fff',
+    backgroundColor: '#60a5fa33',
+    color: '#1d4ed8',
   },
   POST: {
     backgroundColor: '#fdede4',

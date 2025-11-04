@@ -3,231 +3,251 @@ import { ref } from 'vue';
 
 import { SvgCaretRightIcon } from '@vben/icons';
 
+import { ElTooltip } from 'element-plus';
+
 defineOptions({
-  name: 'SchemaView', // 给组件命名
+  name: 'SchemaView',
 });
+
 defineProps<{
   data: any;
 }>();
-const fold = ref<{ [propName: string]: boolean }>({});
+
+const foldState = ref<Record<string, boolean>>({});
+
+// 判断是否可展开
 const isExpandable = (item: any) => {
-  return (
-    (item.type === 'object' && Object.keys(item.properties).length > 0) ||
-    (item.type === 'array' && item.items?.type === 'object')
-  );
+  if (item.type === 'object' && item.properties) {
+    return Object.keys(item.properties).length > 0;
+  }
+  if (item.type === 'array' && item.items?.type === 'object') {
+    return true;
+  }
+  return false;
 };
 
+// 获取子级 Schema
 const getChildSchema = (item: any) => {
-  if (item.type === 'object') {
-    const obj = item.properties || {};
-    for (const key in obj) {
-      obj[key].fold = false;
-    }
-    return obj;
-  } else if (item.type === 'array') {
-    return item.items?.type === 'object'
-      ? item.items.properties || {}
-      : item.items;
+  if (!item.type || item.type === 'object') {
+    return item.properties || {};
+  }
+  if (item.type === 'array' && item.items?.type === 'object') {
+    return item.items.properties || {};
   }
   return {};
 };
 
-const childSchemaLength = (item: any) => {
-  if (item.type === 'object') {
-    return Object.keys(item.properties || {}).length;
-  } else if (item.type === 'array' && item.items?.type === 'object') {
-    return Object.keys(item.items.properties || {}).length;
+// 切换折叠状态
+const toggleFold = (key: string, value: any) => {
+  if (isExpandable(value)) {
+    foldState.value[key] = !foldState.value[key];
   }
-  return 0;
 };
 
-const handleNode = (value, key) => {
-  if (value.type === 'object' || value?.items?.type === 'object') {
-    fold.value[key] = !fold.value?.[key];
+// 获取类型显示文本
+const getTypeText = (value: any) => {
+  if (value.enum) {
+    return `enum<${value.type}>`;
   }
+  return value.type;
 };
+
+// 获取约束信息
+const getConstraints = (value: any) => {
+  const source = value.schema || value;
+  const parts: string[] = [];
+
+  if (source.minLength !== undefined) {
+    parts.push(
+      `>=${source.minLength}${source.type === 'string' ? ' 字符' : ''}`,
+    );
+  }
+  if (source.maxLength !== undefined) {
+    parts.push(
+      `<=${source.maxLength}${source.type === 'string' ? ' 字符' : ''}`,
+    );
+  }
+  if (source.minimum !== undefined) {
+    parts.push(`>=${source.minimum}`);
+  }
+  if (source.maximum !== undefined) {
+    parts.push(`<=${source.maximum}`);
+  }
+
+  return parts.join(' 或 ');
+};
+
+// 判断描述是否包含 HTML
+const hasHtmlDescription = (desc: string) => desc?.includes('<');
 </script>
 
 <template>
-  <div v-if="data?.type === 'array' && data?.items?.type !== 'object'">
-    <span class="property-name">
+  <!-- 数组类型且 items 不是对象 -->
+  <div
+    v-if="data?.type === 'array' && data?.items?.type !== 'object'"
+    class="flex items-center gap-2"
+  >
+    <span class="text-primary font-mono text-base font-bold">
       {{ data.type }}
-      <span class="truncate">
-        {{ `[${data.items.type}]` }}
-        <span v-if="data?.items?.format">
-          {{ `<${data.items.format}>` }}
-        </span>
-      </span>
     </span>
+    <div
+      v-if="data.items.type"
+      class="flex rounded-md bg-gray-100/50 px-1.5 py-0.5 font-mono text-xs font-bold text-gray-600 dark:bg-white/5 dark:text-gray-200"
+    >
+      <span>{{ data.items.type }}</span>
+      <span v-if="data.items.format">{{ `<${data.items.format}>` }}</span>
+    </div>
   </div>
+
+  <!-- 对象或数组对象类型 -->
   <div
     v-else
     v-for="(value, key) in getChildSchema(data)"
     :key="key"
-    class="index-node-wrap"
+    class="border-b border-gray-100 py-6 last:border-b-0 last:pb-0 dark:border-gray-800"
   >
-    <div
-      class="index-node pt-6"
-      :class="{
-        'cursor-pointer':
-          value.type === 'object' || value?.items?.type === 'object',
-      }"
-      @click="handleNode(value, key)"
-    >
-      <div class="relative flex items-center justify-items-start">
-        <div class="flex flex-1 flex-col items-stretch gap-1">
-          <div class="flex items-center">
-            <SvgCaretRightIcon
-              :style="{
-                transform: fold?.[key] ? 'rotate(0deg)' : 'rotate(90deg)',
-              }"
-              v-if="isExpandable(value)"
-              class="ml-[-12px] size-3"
-            />
-            <span class="property-name">
-              <span
-                class="truncate hover:underline hover:decoration-dashed"
-                v-copy
-              >
-                {{ key }}
-              </span>
-            </span>
-            &nbsp;
-            <div class="text-muted-big">
-              <template v-if="value.enum">enum&lt;</template>
-              <span class="text-muted-big">{{ value.type }}</span>
-              <template v-if="value.enum">></template>
-            </div>
-            <span
-              v-if="value.format"
-              class="color-[#667085] font-400 text-[12px]"
-            >
-              {{ `<${value.format}>` }}
-            </span>
-            <div
-              v-if="value.type === 'array'"
-              class="color-[#667085] font-400 text-[12px]"
-            >
-              <span>[</span>
+    <div class="flex items-center gap-2">
+      <SvgCaretRightIcon
+        v-if="isExpandable(value)"
+        :class="{
+          'rotate-90': !foldState[key],
+          'cursor-pointer': isExpandable(value),
+        }"
+        class="size-4 transition-transform"
+        @click="toggleFold(String(key), value)"
+      />
+      <div class="flex items-center gap-2">
+        <!-- 字段名 -->
+        <span class="text-primary font-mono text-base font-bold">
+          {{ key }}
+        </span>
 
-              <span>{{ value.items.type }}</span>
-              <span
-                v-if="value.items.type === 'object'"
-                class="color-[#667085] font-400 text-[12px]"
-              >
-                {{ ` (${value.items.title}) ${childSchemaLength(value)} ` }}
-              </span>
-              <span v-if="value.items.format">
-                {{ `<${value.items.format}>` }}
-              </span>
-              <span>]</span>
-            </div>
-            &nbsp;
-            <div
-              v-if="value.type === 'object'"
-              class="color-[#667085] font-400 text-[12px]"
-            >
-              <span v-if="value.title">{{ ` (${value.title}) ` }}</span>
-            </div>
-            &nbsp;
-            <div
-              class="index_additionalInformation flex flex-1 items-center truncate"
-            >
-              <div v-if="value.description && !value.description.includes('<')">
-                <span class="index-additionalInformation__title">
-                  {{ value.description }}
-                </span>
-              </div>
-              <div class="index-divider"></div>
-            </div>
-            <span v-if="data?.required?.includes(key)" class="index-required">
-              必需
-            </span>
-            <span v-else class="index-optional">可选</span>
+        <div
+          v-if="getTypeText(value)"
+          class="flex rounded-md bg-gray-100/50 px-1.5 py-0.5 font-mono text-xs font-bold text-gray-600 dark:bg-white/5 dark:text-gray-200"
+        >
+          <div class="flex items-center">
+            <div>{{ getTypeText(value) }}</div>
+            <span v-if="value.title">{{ `<${value.title}>` }}</span>
           </div>
-          <div class="flex flex-nowrap items-center">
-            <span v-if="value?.schema?.minLength" class="index-value">
-              {{
-                `>=${value.schema.minLength} ${value.schema.type === 'string' ? '字符' : ''}`
-              }}
-            </span>
-            <span v-if="value?.schema?.maxLength" class="index-value">
-              {{
-                `<= ${value.schema.maxLength} ${value.schema.type === 'string' ? '字符' : ''}`
-              }}
-            </span>
-            <span v-if="value?.schema?.minimum" class="index-value">
-              {{ `>= ${value.schema.minimum}` }}
-            </span>
-            <span v-if="value?.schema?.maximum" class="index-value">
-              {{ `<= ${value.schema.maximum}` }}
-            </span>
-            <span v-if="value?.minLength" class="index-value">
-              {{
-                `>=${value.minLength} ${value.type === 'string' ? '字符' : ''}`
-              }}
-            </span>
-            <span v-if="value?.maxLength" class="index-value">
-              {{
-                `<= ${value.maxLength} ${value.type === 'string' ? '字符' : ''}`
-              }}
-            </span>
-            <span v-if="value?.minimum" class="index-value">
-              {{ `>= ${value.minimum}` }}
-            </span>
-            <span v-if="value?.maximum" class="index-value">
-              {{ `<= ${value.maximum}` }}
-            </span>
-          </div>
-          <div
-            v-if="value.description && value.description.includes('<')"
-            class="color-[#667085] font-400 mt-2"
-            v-html="value.description"
-          ></div>
-          <template v-if="value.enum">
-            <div class="flex-items-start mt-2 flex flex-nowrap">
-              <span class="index-key">枚举值:</span>
-              <span
-                v-for="item in value.enum"
-                :key="item"
-                class="index-value mr-2"
-              >
-                {{ item }}
-              </span>
-            </div>
-          </template>
-          <div
-            class="mt-1 flex flex-nowrap items-center"
-            v-if="!isExpandable(value) && value.default"
-          >
-            <span class="index-key">默认值:</span>
-            <span class="index-value">{{ value.default }}</span>
-          </div>
-          <div
-            v-if="!isExpandable(value) && value.example"
-            class="flex-items-start flex flex-nowrap"
-          >
-            <span class="index-key">示例值:</span>
-            <span class="index-value">{{ value.example }}</span>
-          </div>
-          <template v-if="value.pattern">
-            <div class="flex-items-start mt-2 flex flex-nowrap">
-              <span class="index-key">正则匹配:</span>
-              <span class="index-value">{{ value.pattern }}</span>
-            </div>
-          </template>
+          <span
+            v-if="value.format"
+            class="ml-1 text-xs text-gray-600 dark:text-gray-400"
+            >{{ `<${value.format}>` }}
+          </span>
         </div>
-        <div class="index-sub-border"></div>
+
+        <!-- 数组信息 -->
+        <template v-if="value.type === 'array'">
+          <div
+            class="flex rounded-md bg-gray-100/50 px-1.5 py-0.5 font-mono text-xs font-bold text-gray-600 dark:bg-white/5 dark:text-gray-200"
+          >
+            <span>
+              {{ value.items.type }}[{{ value.items.title }}]
+              <span
+                v-if="value.format"
+                class="ml-1 text-xs text-gray-600 dark:text-gray-400"
+                >{{ `<${value.format}>` }}
+              </span>
+            </span>
+          </div>
+        </template>
+
+        <div
+          v-if="!isExpandable(value) && value.example"
+          class="flex items-center rounded-md bg-gray-100/50 px-1.5 py-0.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-200"
+        >
+          <span class="mr-0.5 text-gray-400 dark:text-gray-500">示例值：</span>
+          <ElTooltip placement="top" :content="String(value.example)">
+            <span class="max-w-24 truncate font-mono">
+              {{ value.example }}
+            </span>
+          </ElTooltip>
+        </div>
+
+        <div
+          v-if="!isExpandable(value) && value.default"
+          class="flex items-center rounded-md bg-gray-100/50 px-1.5 py-0.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-200"
+        >
+          <span class="mr-0.5 text-gray-400 dark:text-gray-500">默认值：</span>
+          <span class="font-mono">{{ value.default }}</span>
+        </div>
+
+        <div
+          v-if="getConstraints(value)"
+          class="flex items-center rounded-md bg-gray-100/50 px-1.5 py-0.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-200"
+        >
+          <span class="mr-0.5 text-gray-400 dark:text-gray-500">
+            取值范围：
+          </span>
+          <span class="font-mono">
+            {{ getConstraints(value) }}
+          </span>
+        </div>
+
+        <div
+          v-if="value.pattern"
+          class="flex items-center rounded-md bg-gray-100/50 px-1.5 py-0.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-200"
+        >
+          <span class="mr-0.5 text-gray-400 dark:text-gray-500">
+            正则匹配：
+          </span>
+          <ElTooltip placement="top" :content="String(value.pattern)">
+            <span class="max-w-24 truncate font-mono">
+              {{ value.pattern }}
+            </span>
+          </ElTooltip>
+        </div>
+
+        <div
+          v-if="data?.required?.includes(key)"
+          class="rounded-md bg-red-100/50 px-1.5 py-0.5 text-xs font-bold text-red-600 dark:bg-red-400/10 dark:text-red-300"
+        >
+          必须
+        </div>
+        <div
+          v-else
+          class="rounded-md bg-green-100/50 px-1.5 py-0.5 text-xs font-bold text-green-600 dark:bg-green-400/10 dark:text-green-300"
+        >
+          可选
+        </div>
+
+        <!-- HTML 描述 -->
+        <div
+          v-if="value.description && hasHtmlDescription(value.description)"
+          class="mt-2 text-sm text-gray-600 dark:text-gray-400"
+          v-html="value.description"
+        ></div>
       </div>
     </div>
 
+    <!-- 描述 -->
     <div
-      v-if="isExpandable(value) && !fold[key]"
-      class="index-child-stack overflow-hidden transition-all duration-300 ease-in"
+      v-if="value.description && !hasHtmlDescription(value.description)"
+      class="mt-4 text-gray-600 dark:text-gray-400"
+    >
+      {{ value.description }}
+    </div>
+
+    <div v-if="value.enum" class="mt-6 flex items-center">
+      <span class="text-xs font-medium text-gray-600 dark:text-gray-400">
+        可用值：
+      </span>
+      <div
+        v-for="item in value.enum"
+        :key="item"
+        class="mr-2 rounded-md bg-gray-100/50 px-1.5 py-0.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-200"
+      >
+        <span class="font-mono">{{ item }}</span>
+      </div>
+    </div>
+
+    <!-- 子级展开 -->
+    <div
+      v-if="isExpandable(value) && !foldState[key]"
+      class="ml-8 overflow-hidden transition-all duration-200"
     >
       <SchemaView :data="value" />
     </div>
   </div>
 </template>
-
-<style lang="scss" scoped></style>

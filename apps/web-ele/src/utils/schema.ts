@@ -164,6 +164,7 @@ export function generateExample(schema: Schema): any {
     return generateExample(schema.items[0]);
   }
   const example: Record<string, any> = {};
+
   switch (schema.type) {
     case 'array': {
       return schema.items ? [generateExample(schema.items)] : [];
@@ -187,8 +188,13 @@ export function generateExample(schema: Schema): any {
     case 'string': {
       return schema.enum?.[0] || 'string';
     }
-
     default: {
+      if (schema.properties) {
+        for (const [key, prop] of Object.entries(schema.properties)) {
+          example[key] = generateExample(prop as any);
+        }
+        return example;
+      }
       return null;
     }
   }

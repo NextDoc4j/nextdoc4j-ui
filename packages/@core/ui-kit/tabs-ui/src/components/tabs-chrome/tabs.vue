@@ -164,7 +164,7 @@ function onMouseDown(e: MouseEvent, tab: TabConfig) {
               <span class="flex-1 overflow-hidden whitespace-nowrap text-sm">
                 <span
                   v-if="tab.meta.method"
-                  class="mr-2 text-[12px] font-semibold"
+                  class="mr-0.5 font-mono text-[12px] font-semibold"
                   :style="{
                     ...methodType[(tab.meta.method as string).toUpperCase()],
                     background: 'transparent',

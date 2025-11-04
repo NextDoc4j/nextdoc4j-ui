@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import type { ParameterObject, Schema } from '#/typings/openApi';
+import type { ApiInfo, Schema } from '#/typings/openApi';
 
-import { computed, onBeforeMount, ref } from 'vue';
+import { computed, onBeforeMount, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 
 import { ApiLinkPrefix, ApiTestRun } from '@vben/icons';
@@ -9,15 +9,12 @@ import { ApiLinkPrefix, ApiTestRun } from '@vben/icons';
 import {
   ElButton,
   ElCard,
-  ElCol,
   ElCollapse,
   ElCollapseItem,
   ElDescriptions,
   ElDescriptionsItem,
   ElRadioButton,
   ElRadioGroup,
-  ElRow,
-  ElTag,
   ElTooltip,
 } from 'element-plus';
 
@@ -27,73 +24,76 @@ import { methodType } from '#/constants/methods';
 import { useApiStore } from '#/store';
 import { generateExample, resolveSchema } from '#/utils/schema';
 
+import ParameterView from './parameter-view.vue';
 import PathSegment from './path-segment.vue';
+
+defineOptions({
+  name: 'DocumentView',
+});
 
 const props = defineProps<{
   showTest: boolean;
 }>();
 
 const emits = defineEmits<{
-  test: [data: any];
+  test: [data: ApiInfo];
 }>();
-const baseUrl = ref('');
-const apiStore = useApiStore();
-const route = useRoute();
-const apiInfo = ref<any>(null);
-const activeNames = ref<string | undefined>(undefined);
-const requestBodyType = ref();
-const parametersInPath = computed(() => {
-  if (!apiInfo.value) return null;
-  if (!apiInfo.value.parameters) return null;
-  const data = apiInfo.value.parameters.filter(
-    (item: ParameterObject) => item.in === 'path',
-  );
-  return data.length > 0 ? data : null;
-});
-const parametersInQuery = computed(() => {
-  if (!apiInfo.value) return null;
-  if (!apiInfo.value.parameters) return null;
-  const data = apiInfo.value.parameters.filter(
-    (item: ParameterObject) => item.in === 'query',
-  );
 
-  return data.length > 0 ? data : null;
+const route = useRoute();
+const apiStore = useApiStore();
+
+const baseUrl = ref('');
+const apiInfo = ref({} as ApiInfo);
+const activeNames = ref<string>('200');
+const requestBodyType = ref('');
+
+const parametersInPath = computed(() => {
+  const data = apiInfo.value?.parameters?.filter((item) => item.in === 'path');
+  if (data && data.length > 0) {
+    return data;
+  }
+  return null;
 });
+
+const parametersInQuery = computed(() => {
+  const data = apiInfo.value?.parameters?.filter((item) => item.in === 'query');
+  if (data && data.length > 0) {
+    return data;
+  }
+  return null;
+});
+
 // 状态码选择
 const selectedStatusCode = ref('200');
+
+const currentResponse = computed(() => {
+  return apiInfo.value?.responses?.[selectedStatusCode.value] || null;
+});
+
 // 获取响应数据
 const responseData = computed(() => {
-  const responses = apiInfo.value?.responses;
-  if (!responses?.[selectedStatusCode.value]) {
-    return null;
-  }
+  if (!currentResponse.value) return null;
 
-  const response = responses[selectedStatusCode.value];
-
-  // 处理不同的响应内容类型
-  const content = response.content || {};
+  const content = currentResponse.value.content || {};
   const schema =
     content['application/json']?.schema ||
     content['*/*']?.schema ||
-    response.schema; // 某些旧版本的 swagger 可能直接在 response 下定义 schema
+    currentResponse.value.schema;
 
-  if (!schema) {
-    return null;
-  }
-
-  return resolveSchema(schema);
+  return schema ? resolveSchema(schema) : null;
 });
+
 // 响应示例数据
 const responseExample = computed(() => {
-  if (!responseData.value) return null;
-  return generateExample(responseData.value);
+  return responseData.value ? generateExample(responseData.value) : null;
 });
+
 // 递归获取所有字段的描述
 const getAllFieldDescriptions = (
   schema: any,
   prefix = '',
 ): Record<string, string> => {
-  let descriptions: Record<string, string> = {};
+  const descriptions: Record<string, string> = {};
 
   if (!schema) return descriptions;
 
@@ -107,7 +107,7 @@ const getAllFieldDescriptions = (
     Object.entries(schema.properties).forEach(([key, prop]: [string, any]) => {
       const nestedPath = prefix ? `${prefix}.${key}` : key;
       const nestedDescriptions = getAllFieldDescriptions(prop, nestedPath);
-      descriptions = { ...descriptions, ...nestedDescriptions };
+      Object.assign(descriptions, nestedDescriptions);
     });
   }
 
@@ -118,105 +118,104 @@ const getAllFieldDescriptions = (
         schema.items,
         `${prefix}[]`,
       );
-      descriptions = { ...descriptions, ...arrayDescriptions };
+      Object.assign(descriptions, arrayDescriptions);
     } else if (schema.items.description) {
       descriptions[`${prefix}[]`] = schema.items.description;
     }
   }
-
   return descriptions;
 };
+
 // 修改响应体描述获取
 const responseDescriptions = computed(() => {
-  if (!responseData.value) return {};
-  return getAllFieldDescriptions(responseData.value);
+  return responseData.value ? getAllFieldDescriptions(responseData.value) : {};
 });
 
 // 获取请求体数据
 const requestBody = computed(() => {
-  if (!apiInfo.value?.requestBody?.content) {
-    return null;
-  }
-  const content = apiInfo.value.requestBody.content;
-  const type = Object.keys(content || {})?.[0];
+  const content = apiInfo.value.requestBody?.content;
+  if (!content) return null;
 
-  const schema = type ? content[type].schema : '';
+  const type = Object.keys(content)[0];
+  const schema = content[type as string]?.schema;
+  if (!schema) return null;
 
   if (schema.oneOf) {
     const arr = schema.oneOf.map((item: Schema) => {
       const resolved = resolveSchema(item);
+
       if (resolved.allOf) {
         const allProperties: any = {};
         resolved.allOf.forEach((one: Schema) => {
-          if (one.$ref) {
-            const resolved = resolveSchema(one);
-            Object.assign(allProperties, resolved.properties);
-          }
-          Object.assign(allProperties, one.properties);
+          const resolvedOne = one.$ref ? resolveSchema(one) : one;
+          Object.assign(allProperties, resolvedOne.properties);
         });
         return {
           ...resolved,
           title: resolved.title || resolved.$ref?.split('/').pop() || '请求体',
-          type: resolved.type || 'object',
-          description: resolved.description || '',
           properties: allProperties,
         };
       }
+
       return {
         ...resolved,
         title: resolved.title || resolved.$ref?.split('/').pop() || '请求体',
-        type: resolved.type || 'object',
-        description: resolved.description || '',
       };
     });
-    // eslint-disable-next-line vue/no-side-effects-in-computed-properties
-    requestBodyType.value = arr[1].title;
+
     return arr;
   }
   const resolved = resolveSchema(schema);
+
   // 添加实体信息
   return {
     ...resolved,
     title: resolved.title || schema.$ref?.split('/').pop() || '请求体',
-    type: resolved.type || 'object',
-    description: resolved.description || '',
   };
+});
+
+watch(
+  requestBody,
+  (newVal) => {
+    if (Array.isArray(newVal) && newVal.length > 0 && !requestBodyType.value) {
+      requestBodyType.value = newVal[0].title;
+    }
+  },
+  { immediate: true },
+);
+
+const currentRequestBody = computed(() => {
+  if (!requestBody.value) return null;
+
+  if (Array.isArray(requestBody.value)) {
+    return (
+      requestBody.value.find((item) => item.title === requestBodyType.value) ||
+      requestBody.value[0] ||
+      null
+    );
+  }
+
+  return requestBody.value;
 });
 
 // 修改请求体描述获取
 const requestBodyDescriptions = computed(() => {
-  if (!requestBody.value) return {};
-  if (Array.isArray(requestBody.value)) {
-    const data = requestBody.value.find(
-      (item) => item.title === requestBodyType.value,
-    );
-    return getAllFieldDescriptions(data);
-  } else {
-    return getAllFieldDescriptions(requestBody.value);
-  }
+  if (!currentRequestBody.value) return {};
+  return getAllFieldDescriptions(currentRequestBody.value);
 });
 
 // 请求体示例
 const requestBodyExample = computed(() => {
-  if (!requestBody.value) return null;
-  if (Array.isArray(requestBody.value)) {
-    const data = requestBody.value.find(
-      (item) => item.title === requestBodyType.value,
-    );
-    return generateExample(data);
-  } else {
-    return generateExample(requestBody.value);
-  }
+  if (!currentRequestBody.value) return null;
+  return generateExample(currentRequestBody.value);
 });
 
 // 处理请求和响应的 schema
-const processSchema = (schema: any) => {
+const processSchema = (schema: Schema) => {
   if (!schema) return {};
 
   // 如果传入的是已经处理过的 schema，直接返回
-  if (schema.properties) {
-    return schema.properties;
-  }
+  if (schema.properties) return schema.properties;
 
   // 处理原始 schema
   const processProperties = (props: any, parentRequired: string[] = []) => {
@@ -238,17 +237,18 @@ const processSchema = (schema: any) => {
       }
 
       // 处理数组类型的属性
-      if (value.type === 'array' && value.items) {
-        result[key].items =
-          value.items.type === 'object' && value.items.properties
-            ? {
-                ...value.items,
-                properties: processProperties(
-                  value.items.properties,
-                  value.items.required || [],
-                ),
-              }
-            : value.items;
+      if (
+        value.type === 'array' &&
+        value.items?.type === 'object' &&
+        value.items.properties
+      ) {
+        result[key].items = {
+          ...value.items,
+          properties: processProperties(
+            value.items.properties,
+            value.items.required || [],
+          ),
+        };
       }
     });
 
@@ -259,13 +259,13 @@ const processSchema = (schema: any) => {
 };
 
 const responseSchema = computed(() => {
-  if (!apiInfo.value?.responses?.[selectedStatusCode.value]?.content) return {};
+  if (!currentResponse.value?.content) return {};
 
-  const content = apiInfo.value.responses[selectedStatusCode.value].content;
+  const content = currentResponse.value.content;
   const schema =
     content['application/json']?.schema ||
     content['*/*']?.schema ||
-    apiInfo.value.responses[selectedStatusCode.value].schema;
+    currentResponse.value.schema;
 
   if (!schema) return {};
 
@@ -276,13 +276,16 @@ const responseSchema = computed(() => {
     properties: processSchema(resolvedSchema),
   };
 });
+
 const handleTest = () => {
-  emits('test', apiInfo.value);
+  if (apiInfo.value) {
+    emits('test', apiInfo.value);
+  }
 };
 
 const tagName = computed(() => {
   const routeName = route.name as string;
-  return routeName ? routeName.split('*')[1] : '';
+  return routeName?.split('*')[1] || '';
 });
 
 onBeforeMount(() => {
@@ -292,385 +295,153 @@ onBeforeMount(() => {
     return;
   }
 
-  const [group, tag, operationId] = routeName.split('*') ?? [];
-  // 确保所有参数都是字符串类型
-  const safeGroup = group || '';
-  const safeTag = tag || '';
-  const safeOperationId = operationId || '';
+  const [group = '', tag = '', operationId = ''] = routeName.split('*') ?? [];
 
-  apiInfo.value = apiStore.searchPathData(safeGroup, safeTag, safeOperationId);
+  const data = apiStore.searchPathData(group, tag, operationId);
+  if (data) {
+    apiInfo.value = data;
 
-  if (apiInfo.value?.responses) {
-    activeNames.value = Object.keys(apiInfo.value.responses)[0];
+    if (data.responses) {
+      const codes = Object.keys(data.responses);
+      activeNames.value = codes[0] || '200';
+      selectedStatusCode.value = codes[0] || '200';
+    }
   }
-  baseUrl.value = apiStore?.openApi?.servers?.[0]?.url ?? '';
+  baseUrl.value = apiStore.openApi?.servers?.[0]?.url || '';
 });
+
 defineExpose({
   requestBodyType,
 });
 </script>
 
 <template>
-  <div class="relative h-full w-full overflow-y-auto p-5">
-    <div class="flex flex-col">
-      <div
-        class="text-primary dark:text-primary-light h-5 text-sm font-semibold"
-      >
-        {{ tagName }}
-      </div>
-      <h1
-        class="mt-[10px] inline-block break-all text-2xl font-bold tracking-tight text-gray-900 sm:text-3xl dark:text-gray-200"
-      >
-        {{ apiInfo.summary ?? '暂无描述' }}
-      </h1>
-      <div class="prose prose-gray dark:prose-invert mt-2 text-lg">
-        <p>{{ apiInfo?.description }}。</p>
-      </div>
-    </div>
-
-    <ElCard
-      shadow="never"
-      :body-style="{ padding: '10px' }"
-      class="sticky top-0 z-10 mt-6"
-    >
-      <div class="flex items-center justify-between">
-        <div>
-          <span
-            class="inline-flex h-[24px] max-h-[90px] items-center rounded-lg px-1.5 py-0.5 text-sm font-bold"
-            :style="{ ...methodType[apiInfo?.method?.toUpperCase()] }"
-          >
-            {{ apiInfo?.method?.toUpperCase() }}
-          </span>
-          <ElTooltip placement="top" :content="baseUrl" v-if="baseUrl">
-            <ElButton size="small" class="ml-2 !px-1">
-              <ApiLinkPrefix class="size-4" />
-            </ElButton>
-          </ElTooltip>
-          <PathSegment
-            :path="apiInfo?.path"
-            :param-style="{
-              ...methodType[apiInfo?.method?.toUpperCase()],
-              borderColor: methodType[apiInfo?.method?.toUpperCase()].color,
-            }"
-            class="ml-2"
-          />
+  <div class="relative flex h-full w-full gap-4 overflow-y-auto">
+    <div class="flex flex-1 flex-col">
+      <div class="flex flex-col p-5 pb-0">
+        <div class="text-primary text-sm font-semibold">
+          {{ tagName }}
         </div>
-        <ElButton
-          text
-          :style="{ ...methodType[apiInfo?.method?.toUpperCase()] }"
-          @click="handleTest"
-          v-if="!props.showTest"
-        >
-          调试
-          <ApiTestRun class="ml-1 size-4" />
-        </ElButton>
+        <h1 class="mt-3 text-3xl font-bold">
+          {{ apiInfo.summary ?? '暂无描述' }}
+        </h1>
+        <div class="prose prose-gray dark:prose-invert mt-2 text-lg">
+          <p>{{ apiInfo.description ?? '暂无描述' }}。</p>
+        </div>
       </div>
-    </ElCard>
-    <div class="w-full pt-5">
+
+      <div class="px-5">
+        <ElCard shadow="never" :body-style="{ padding: '10px' }" class="mt-6">
+          <div class="flex items-center justify-between">
+            <div class="font-mono">
+              <span
+                class="inline-flex items-center rounded-md px-1.5 py-1 font-bold"
+                :style="methodType[apiInfo.method.toUpperCase()]"
+              >
+                {{ apiInfo.method.toUpperCase() }}
+              </span>
+              <ElTooltip placement="top" :content="baseUrl" v-if="baseUrl">
+                <ElButton size="small" class="ml-2 !px-1">
+                  <ApiLinkPrefix class="size-4" />
+                </ElButton>
+              </ElTooltip>
+              <PathSegment
+                :path="apiInfo.path"
+                :param-style="{
+                  ...methodType[apiInfo.method.toUpperCase()],
+                  borderColor: methodType[apiInfo.method.toUpperCase()].color,
+                }"
+                class="ml-2"
+              />
+            </div>
+            <ElButton
+              text
+              size="large"
+              :style="methodType[apiInfo.method.toUpperCase()]"
+              @click="handleTest"
+              v-if="!props.showTest"
+            >
+              调试
+              <ApiTestRun class="ml-0.5 size-4" />
+            </ElButton>
+          </div>
+        </ElCard>
+      </div>
+
       <ElDescriptions
         :column="1"
-        bordered
         title="请求参数"
-        class="mt-4"
+        class="mt-4 p-5"
         v-if="parametersInPath || parametersInQuery || requestBody"
       >
         <ElDescriptionsItem v-if="parametersInPath">
-          <ElCard bordered header="Path 参数">
-            <div class="app-json-schema-viewer pl-2">
-              <div
-                v-for="item in parametersInPath"
-                :key="item.name"
-                class="index-node pb-6 last:pb-0"
-              >
-                <div class="flex items-center justify-items-start">
-                  <span class="property-name">
-                    <span
-                      class="truncate hover:underline hover:decoration-dashed"
-                      v-copy
-                    >
-                      {{ item.name }}
-                    </span>
-                  </span>
-                  &nbsp;
-                  <span v-if="item?.schema" class="text-muted-big">
-                    {{ item?.schema?.type }} &nbsp;
-                    {{
-                      item?.schema?.format ? `<${item?.schema?.format}>` : ''
-                    }}
-                    &nbsp;
-                  </span>
-                  &nbsp;
-                  <div
-                    class="index_additionalInformation flex flex-1 items-center truncate"
-                  >
-                    <div
-                      v-if="item.description && !item.description.includes('<')"
-                      class="index-additionalInformation__title"
-                    >
-                      {{ item.description }}
-                    </div>
-                    <div class="index-divider"></div>
-                  </div>
-                  <span class="index-required">必需</span>
-                </div>
-                <div class="flex flex-nowrap items-center">
-                  <span v-if="item?.schema?.minLength" class="index-value">
-                    {{
-                      `>=${item.schema.minLength} ${item.schema.type === 'string' ? '字符' : ''}`
-                    }}
-                  </span>
-                  <span v-if="item?.schema?.maxLength" class="index-value">
-                    {{
-                      `<= ${item.schema.maxLength} ${item.schema.type === 'string' ? '字符' : ''}`
-                    }}
-                  </span>
-                  <span v-if="item?.schema?.minimum" class="index-value">
-                    {{ `>= ${item.schema.minimum}` }}
-                  </span>
-                  <span v-if="item?.schema?.maximum" class="index-value">
-                    {{ `<= ${item.schema.maximum}` }}
-                  </span>
-                  <span v-if="item?.minLength" class="index-value">
-                    {{
-                      `>=${item.minLength} ${item.type === 'string' ? '字符' : ''}`
-                    }}
-                  </span>
-                  <span v-if="item?.maxLength" class="index-value">
-                    {{
-                      `<= ${item.maxLength} ${item.type === 'string' ? '字符' : ''}`
-                    }}
-                  </span>
-                  <span v-if="item?.minimum" class="index-value">
-                    {{ `>= ${item.minimum}` }}
-                  </span>
-                  <span v-if="item?.maximum" class="index-value">
-                    {{ `<= ${item.maximum}` }}
-                  </span>
-                </div>
-                <div
-                  v-if="item.description && item.description.includes('<')"
-                  class="color-[#667085] font-400 mt-2"
-                  v-html="item.description"
-                ></div>
-                <div
-                  class="mt-1 flex flex-nowrap items-center"
-                  v-if="item.default"
-                >
-                  <span class="index-key">默认值:</span>
-                  <span class="index-value">{{ item.default }}</span>
-                </div>
-                <div
-                  class="mt-1 flex flex-nowrap items-center"
-                  v-if="item.example"
-                >
-                  <span class="index-key">示例值:</span>
-                  <span class="index-value">{{ item.example }}</span>
-                </div>
-              </div>
-            </div>
+          <ElCard bordered shadow="never" header="Path 参数">
+            <ParameterView
+              v-for="item in parametersInPath"
+              :key="item.name"
+              :parameter="item"
+            />
           </ElCard>
         </ElDescriptionsItem>
         <ElDescriptionsItem v-if="parametersInQuery">
-          <ElCard bordered header="Query 参数">
-            <div class="app-json-schema-viewer pl-2">
-              <SchemaView v-if="parametersInQuery" :data="parametersInQuery" />
-              <div
-                v-for="item in parametersInQuery"
-                :key="item.name"
-                class="index-node pb-6"
-              >
-                <div class="flex items-center justify-items-start">
-                  <span v-if="item.name" class="property-name">
-                    <span
-                      class="truncate hover:underline hover:decoration-dashed"
-                      v-copy
-                    >
-                      {{ item.name }}
-                    </span>
-                  </span>
-                  <span v-if="item.schema" class="text-muted-big">
-                    <SchemaView :data="resolveSchema(item.schema)" />
-                  </span>
-
-                  <div
-                    class="index_additionalInformation flex flex-1 items-center truncate"
-                  >
-                    <div
-                      v-if="item.description && !item.description.includes('<')"
-                      class="index-additionalInformation__title"
-                    >
-                      {{ item.description }}
-                    </div>
-                    <div
-                      v-if="
-                        !item.description &&
-                        item?.schema?.items?.description &&
-                        !item?.schema?.items?.description.includes('<')
-                      "
-                      class="index-additionalInformation__title"
-                    >
-                      {{ item.schema.items.description }}
-                    </div>
-                    <div class="index-divider"></div>
-                  </div>
-                  <span v-if="item.required" class="index-required">必需</span>
-                  <span v-else class="index-optional">可选</span>
-                </div>
-                <div class="flex flex-nowrap items-center">
-                  <span v-if="item?.schema?.minLength" class="index-value">
-                    {{
-                      `>=${item.schema.minLength} ${item.schema.type === 'string' ? '字符' : ''}`
-                    }}
-                  </span>
-                  <span v-if="item?.schema?.maxLength" class="index-value">
-                    {{
-                      `<= ${item.schema.maxLength} ${item.schema.type === 'string' ? '字符' : ''}`
-                    }}
-                  </span>
-                  <span v-if="item?.schema?.minimum" class="index-value">
-                    {{ `>= ${item.schema.minimum}` }}
-                  </span>
-                  <span v-if="item?.schema?.maximum" class="index-value">
-                    {{ `<= ${item.schema.maximum}` }}
-                  </span>
-                  <span v-if="item?.minLength" class="index-value">
-                    {{
-                      `>=${item.minLength} ${item.type === 'string' ? '字符' : ''}`
-                    }}
-                  </span>
-                  <span v-if="item?.maxLength" class="index-value">
-                    {{
-                      `<= ${item.maxLength} ${item.type === 'string' ? '字符' : ''}`
-                    }}
-                  </span>
-                  <span v-if="item?.minimum" class="index-value">
-                    {{ `>= ${item.minimum}` }}
-                  </span>
-                  <span v-if="item?.maximum" class="index-value">
-                    {{ `<= ${item.maximum}` }}
-                  </span>
-                </div>
-                <div
-                  v-if="item.description && item.description.includes('<')"
-                  class="color-[#667085] font-400 mt-2"
-                  v-html="item.description"
-                ></div>
-                <div
-                  v-if="
-                    !item.description &&
-                    item?.schema?.items?.description &&
-                    item?.schema?.items?.description.includes('<')
-                  "
-                  class="color-[#667085] font-400 mt-2"
-                  v-html="item?.schema?.items.description"
-                ></div>
-                <template v-if="item?.schema?.enum">
-                  <div class="mt-1 flex flex-nowrap items-start">
-                    <span class="index-key">枚举值:</span>
-                    <span
-                      v-for="value in item.schema.enum"
-                      :key="value"
-                      class="index-value mr-2"
-                    >
-                      {{ value }}
-                    </span>
-                  </div>
-                </template>
-                <template v-if="item?.schema?.items?.enum">
-                  <div class="mt-1 flex flex-nowrap items-center">
-                    <span class="index-key">枚举值:</span>
-                    <span
-                      v-for="value in item.schema.items.enum"
-                      :key="value"
-                      class="index-value mr-2"
-                    >
-                      {{ value }}
-                    </span>
-                  </div>
-                </template>
-                <div class="mt-1 flex flex-nowrap items-center">
-                  <span v-if="item?.minimum" class="index-value mr-2">
-                    {{ `>= ${item.minimum}` }}
-                  </span>
-                  <span v-if="item?.maximum" class="index-value mr-2">
-                    {{ `<= ${item.maximum}` }}
-                  </span>
-                </div>
-                <div
-                  class="mt-1 flex flex-nowrap items-center"
-                  v-if="item.default"
-                >
-                  <span class="index-key">默认值:</span>
-                  <span class="index-value">{{ item.default }}</span>
-                </div>
-                <div
-                  class="mt-1 flex flex-nowrap items-center"
-                  v-if="item.example"
-                >
-                  <span class="index-key">示例值:</span>
-                  <span class="index-value">{{ item.example }}</span>
-                </div>
-              </div>
-            </div>
+          <ElCard bordered shadow="never" header="Query 参数">
+            <ParameterView
+              v-for="item in parametersInQuery"
+              :key="item.name"
+              :parameter="item"
+            />
           </ElCard>
         </ElDescriptionsItem>
         <ElDescriptionsItem v-if="requestBody">
-          <ElCard bordered header="Body 参数">
+          <ElCard bordered shadow="never" header="Body 参数">
             <template #header>
-              <span>Body 参数</span>
-              <ElTag class="mx-6">
-                {{
-                  Object.keys(apiInfo?.requestBody?.content || {})?.[0] ??
-                  'application/json'
-                }}
-              </ElTag>
-              <ElTag v-if="requestBodyType" type="danger">
-                {{ requestBodyType }}
-              </ElTag>
-            </template>
-            <ElRow :gutter="16">
-              <ElCol :span="props.showTest ? 24 : 14">
+              <div class="flex justify-between">
+                <div class="flex items-center gap-2">
+                  <span>Body 参数</span>
+                  <div
+                    v-if="requestBodyType"
+                    class="rounded-md bg-red-100/50 px-1.5 py-0.5 font-mono text-xs font-bold text-red-600 dark:bg-red-400/10 dark:text-red-300"
+                  >
+                    {{ requestBodyType }}
+                  </div>
+                </div>
                 <div
-                  class="app-json-schema-viewer pl-2"
-                  v-if="Array.isArray(requestBody)"
+                  class="px-2 py-0.5 font-mono text-xs text-gray-600 dark:text-gray-300"
                 >
-                  <ElRadioGroup v-model="requestBodyType" size="small">
-                    <ElRadioButton
-                      v-for="value in requestBody"
-                      :key="value.title"
-                      border
-                      :value="value.title"
-                      :label="value.title"
-                    >
-                      {{ value.title }}
-                    </ElRadioButton>
-                  </ElRadioGroup>
-                  <template v-for="(value, index) in requestBody" :key="index">
-                    <SchemaView
-                      v-if="value.title === requestBodyType"
-                      :data="value"
-                    />
-                  </template>
+                  {{
+                    Object.keys(apiInfo.requestBody.content)[0] ??
+                    'application/json'
+                  }}
                 </div>
-                <div v-else class="app-json-schema-viewer pl-2">
-                  <SchemaView :data="requestBody" />
-                </div>
-              </ElCol>
-              <ElCol :span="10" class="border-s-1" v-if="!props.showTest">
-                <h5 class="mb-4">示例</h5>
-                <JsonView
-                  :data="requestBodyExample"
-                  :descriptions="requestBodyDescriptions"
-                  :image-render="false"
-                />
-              </ElCol>
-            </ElRow>
+              </div>
+            </template>
+            <div v-if="Array.isArray(requestBody)">
+              <ElRadioGroup v-model="requestBodyType" size="small">
+                <ElRadioButton
+                  v-for="value in requestBody"
+                  :key="value.title"
+                  :value="value.title"
+                  :label="value.title"
+                >
+                  {{ value.title }}
+                </ElRadioButton>
+              </ElRadioGroup>
+              <SchemaView
+                v-if="currentRequestBody"
+                :key="requestBodyType"
+                :data="currentRequestBody"
+              />
+            </div>
+            <div v-else>
+              <SchemaView :data="requestBody" />
+            </div>
           </ElCard>
         </ElDescriptionsItem>
       </ElDescriptions>
-      <ElDescriptions :column="1" bordered title="响应结果" class="mt-4">
+
+      <ElDescriptions :column="1" title="响应结果" class="p-5">
         <ElDescriptionsItem>
-          <ElCard :body-style="{ padding: '0 20px' }">
+          <ElCard shadow="never">
             <ElCollapse
               v-if="apiInfo"
               v-model="activeNames"
@@ -678,49 +449,67 @@ defineExpose({
               style="border: none"
             >
               <ElCollapseItem
-                v-for="(item, code) in apiInfo.responses"
+                v-for="(_, code) in apiInfo.responses"
                 :key="code"
                 :name="code"
               >
-                <template #title="{ isActive }">
-                  <div
-                    class="title-wrapper"
-                    :class="[{ 'is-active': isActive }]"
-                  >
-                    {{ code }}
-                    {{ code === 200 ? '成功' : '' }}
-                  </div>
+                <template #title>
+                  {{ code }}
                 </template>
-
-                <ElRow :gutter="16">
-                  <ElCol :span="props.showTest ? 24 : 14" class="mt-6">
-                    <ElTag
-                      v-if="item.content"
-                      type="info"
-                      class="index-value rounded-sm px-2 py-1"
-                    >
-                      {{ Object.keys(item.content).join(' ') }}
-                    </ElTag>
-                    <div class="my-2">{{ item.description }}</div>
-                    <h5 class="text-5 font-500">Body</h5>
-                    <div class="app-json-schema-viewer pt-6">
-                      <SchemaView :data="responseSchema" />
-                    </div>
-                  </ElCol>
-                  <ElCol :span="10" class="border-s-1" v-if="!props.showTest">
-                    <h5 class="mb-4 mt-6">示例</h5>
-                    <JsonView
-                      :data="responseExample"
-                      :descriptions="responseDescriptions"
-                      :image-render="false"
-                    />
-                  </ElCol>
-                </ElRow>
+                <SchemaView :data="responseSchema" />
               </ElCollapseItem>
             </ElCollapse>
           </ElCard>
         </ElDescriptionsItem>
       </ElDescriptions>
+    </div>
+
+    <div class="sticky top-0 flex-1" v-if="!props.showTest">
+      <div class="p-5">
+        <ElCard
+          shadow="never"
+          class="overflow-y: auto max-h-[calc(100vh-40px)]"
+        >
+          <template #header>
+            <h4 class="m-0 text-base font-semibold">示例</h4>
+          </template>
+
+          <!-- 请求体示例 -->
+          <div v-if="requestBody" class="mb-6">
+            <h5
+              class="mb-3 text-sm font-medium text-gray-700 dark:text-gray-300"
+            >
+              请求示例
+            </h5>
+            <JsonView
+              :data="requestBodyExample"
+              :descriptions="requestBodyDescriptions"
+              :image-render="false"
+            />
+          </div>
+
+          <!-- 响应示例 -->
+          <div v-if="responseExample">
+            <h5
+              class="mb-3 text-sm font-medium text-gray-700 dark:text-gray-300"
+            >
+              响应示例
+            </h5>
+            <JsonView
+              :data="responseExample"
+              :descriptions="responseDescriptions"
+              :image-render="false"
+            />
+          </div>
+
+          <div
+            v-if="!requestBody && !responseExample"
+            class="py-8 text-center text-gray-400"
+          >
+            暂无示例数据
+          </div>
+        </ElCard>
+      </div>
     </div>
   </div>
 </template>
@@ -732,140 +521,10 @@ defineExpose({
   }
 }
 
-.app-json-schema-viewer {
-  width: 100%;
-  max-width: 800px;
-  overflow-x: hidden;
-
-  .index-node {
-    @apply relative max-w-full;
-  }
-
-  .index-child-stack {
-    @apply my-0 ms-5;
-
-    .index-node-wrap {
-      @apply border-l last:border-0;
-
-      &:last-child {
-        .index-sub-border {
-          margin-left: 0;
-          border-left: 1px solid var(--el-border-color);
-        }
-      }
-    }
-
-    .index-node {
-      @apply ps-5;
-    }
-
-    .index-sub-border {
-      position: absolute;
-      top: -1.65rem;
-      left: -1.25rem;
-      width: 1.25rem;
-      height: 2.5rem;
-      margin-left: -12px;
-      border-bottom: 1px solid var(--el-border-color);
-      border-radius: 0;
-    }
-  }
-
-  .index-key {
-    flex-grow: 0;
-    flex-shrink: 0;
-    margin-right: 4px;
-    font-weight: 400;
-    color: #667085;
-  }
-
-  .index-value {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0 6px;
-    font-size: 12px;
-    font-weight: 400;
-    line-height: 20px;
-    color: #667085;
-    word-break: break-all;
-    background: rgb(16 24 40 / 4%);
-    border-radius: 6px;
-  }
-
-  .text-muted-big {
-    font-size: 14px;
-    font-weight: 500;
-    color: #667085;
-  }
-
-  .index-additionalInformation__title {
-    margin: 0 8px;
-    color: #667085;
-  }
-
-  .property-name {
-    padding: 0 8px;
-    margin-right: 8px;
-    font-size: 12px;
-    font-weight: 600;
-    line-height: 22px;
-    color: #1890ff;
-    background-color: rgb(24 144 255 / 4%);
-    border-radius: 6px;
-  }
-
-  .el-radio-button {
-    .el-radio-button__inner {
-      border: 1px solid var(--el-border-color);
-      border-radius: var(--el-border-radius-base);
-    }
-  }
-}
-
-.index-required {
-  height: 22px;
-  padding: 0 12px;
-  font-size: 12px;
-  line-height: 22px;
-  color: #f79009;
-  white-space: nowrap;
-}
-
-.index-optional {
-  height: 22px;
-  padding: 0 12px;
-  font-size: 12px;
-  line-height: 22px;
-  color: #667085;
-  white-space: nowrap;
-}
-
-.index-divider {
-  flex: 1;
-  height: 0;
-  margin: 0 6px;
-  border: 1px dashed transparent !important;
-}
-
-.index-node:hover {
-  .index-divider {
-    border: 1px dashed var(--el-border-color) !important;
-  }
-}
-
-.el-card {
-  border-radius: 12px;
-}
-
-.el-collapse {
-  .el-collapse-item__header {
-    padding: 0 20px;
-    border-bottom: 1px solid var(--el-border-color) !important;
-  }
-
+:deep(.el-collapse-item) {
+  .el-collapse-item__header,
   .el-collapse-item__wrap {
-    padding: 0 20px 20px;
+    border: none;
   }
 }
 </style>

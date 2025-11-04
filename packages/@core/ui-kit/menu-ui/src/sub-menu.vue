@@ -3,6 +3,7 @@ import type { MenuRecordRaw } from '@vben-core/typings';
 
 import { computed } from 'vue';
 
+import { methodType } from '../../../../../apps/web-ele/src/constants/methods';
 import { MenuBadge, MenuItem, SubMenu as SubMenuComp } from './components';
 // eslint-disable-next-line import/no-self-import
 import SubMenu from './sub-menu.vue';
@@ -20,28 +21,6 @@ defineOptions({
 
 const props = withDefaults(defineProps<Props>(), {});
 
-const methodType: Record<string, any> = {
-  GET: {
-    backgroundColor: '#e3f6ed',
-    color: '#17b26a',
-  },
-  PUT: {
-    backgroundColor: '#2e90fa',
-    color: '#fff',
-  },
-  POST: {
-    backgroundColor: '#fdede4',
-    color: '#ef6820',
-  },
-  DELETE: {
-    backgroundColor: '#fde9e7',
-    color: '#f04438',
-  },
-  PATCH: {
-    backgroundColor: '#fde9f7',
-    color: '#ee46bc',
-  },
-};
 /**
  * 判断是否有子节点，动态渲染 menu-item/sub-menu-item
  */
@@ -87,7 +66,7 @@ const countLeaves = (treeData: MenuRecordRaw) => {
     <template #title>
       <span class="flex-1">{{ menu.name }}</span>
       <span
-        class="bg-blue-6 inline-flex max-w-[70px] items-center rounded-lg px-1.5 py-0.5 text-xs font-bold text-white"
+        class="inline-flex max-w-[70px] items-center rounded-md px-1.5 py-0.5 font-mono text-xs font-bold text-white"
         :style="{ ...methodType[menu?.method?.toUpperCase()] }"
         v-if="menu.method"
       >
