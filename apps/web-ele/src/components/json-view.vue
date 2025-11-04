@@ -1,5 +1,11 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, watch } from 'vue';
+import {
+  computed,
+  onBeforeMount,
+  onBeforeUnmount,
+  onMounted,
+  watch,
+} from 'vue';
 
 import { SvgCopyIcon, SvgFormatLeftIcon } from '@vben/icons';
 import { preferences } from '@vben/preferences';
@@ -74,8 +80,10 @@ const isBase64Image = (value: string): boolean => {
   return base64ImageRegex.test(value);
 };
 
-const id = `json-viewer-${Date.now()}`;
+const id = `json-viewer-${Math.random().toString(36).slice(2, 11)}-${Date.now()}`;
 let editor: any = null;
+let isDestroyed = false;
+
 // 处理 HTML 标签
 const processDescription = (desc: string) => {
   if (desc === undefined) {
@@ -177,9 +185,22 @@ const createCustomTheme = () => {
     },
   });
 };
+
+onBeforeMount(() => {
+  isDestroyed = false;
+});
+
 onMounted(() => {
+  if (isDestroyed) return;
+
   const editorContainer = document.querySelector(`#${id}`) as HTMLElement;
   if (!editorContainer) return;
+
+  if (editor) {
+    editor.dispose();
+    editor = null;
+  }
+
   createCustomTheme();
   editor = monaco.editor.create(editorContainer, {
     value: formatJsonWithComments(props.data),
@@ -274,8 +295,16 @@ watch(
 
 // 清理
 onBeforeUnmount(() => {
+  isDestroyed = true;
+
   if (editor) {
-    editor.dispose();
+    try {
+      editor.onDidContentSizeChange(() => {});
+      editor.dispose();
+      editor = null;
+    } catch (error) {
+      console.warn('Editor disposal error:', error);
+    }
   }
 });
 defineExpose({

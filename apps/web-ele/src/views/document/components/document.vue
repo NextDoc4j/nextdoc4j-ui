@@ -471,17 +471,16 @@ defineExpose({
           class="overflow-y: auto max-h-[calc(100vh-40px)]"
         >
           <template #header>
-            <h4 class="m-0 text-base font-semibold">示例</h4>
+            <div class="font-bold">示例</div>
           </template>
 
           <!-- 请求体示例 -->
           <div v-if="requestBody" class="mb-6">
-            <h5
-              class="mb-3 text-sm font-medium text-gray-700 dark:text-gray-300"
-            >
+            <div class="mb-3 text-sm text-gray-700 dark:text-gray-300">
               请求示例
-            </h5>
+            </div>
             <JsonView
+              :key="`request-${apiInfo.path}`"
               :data="requestBodyExample"
               :descriptions="requestBodyDescriptions"
               :image-render="false"
@@ -490,12 +489,11 @@ defineExpose({
 
           <!-- 响应示例 -->
           <div v-if="responseExample">
-            <h5
-              class="mb-3 text-sm font-medium text-gray-700 dark:text-gray-300"
-            >
+            <div class="mb-3 text-sm text-gray-700 dark:text-gray-300">
               响应示例
-            </h5>
+            </div>
             <JsonView
+              :key="`response-${apiInfo.path}`"
               :data="responseExample"
               :descriptions="responseDescriptions"
               :image-render="false"
