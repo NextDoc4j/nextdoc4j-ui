@@ -212,13 +212,6 @@ const hasHtmlDescription = (desc: string) => desc?.includes('<');
         >
           可选
         </div>
-
-        <!-- HTML 描述 -->
-        <div
-          v-if="value.description && hasHtmlDescription(value.description)"
-          class="mt-2 text-sm text-gray-600 dark:text-gray-400"
-          v-html="value.description"
-        ></div>
       </div>
     </div>
 
@@ -229,6 +222,13 @@ const hasHtmlDescription = (desc: string) => desc?.includes('<');
     >
       {{ value.description }}
     </div>
+
+    <!-- HTML 描述 -->
+    <div
+      v-if="value.description && hasHtmlDescription(value.description)"
+      class="mt-2 text-sm text-gray-600 dark:text-gray-400"
+      v-html="value.description"
+    ></div>
 
     <div v-if="value.enum" class="mt-6 flex items-center">
       <span class="text-xs font-medium text-gray-600 dark:text-gray-400">
