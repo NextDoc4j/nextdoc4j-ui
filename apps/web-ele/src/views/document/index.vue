@@ -50,7 +50,7 @@ const handleClose = () => {
       <Suspense>
         <template #default>
           <document
-            v-once
+            v-memo="[drawer]"
             ref="documentRef"
             @test="handleTest"
             :show-test="drawer"

@@ -4,7 +4,7 @@ import type { ApiInfo, Schema } from '#/typings/openApi';
 import { computed, onBeforeMount, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 
-import { ApiLinkPrefix, ApiTestRun } from '@vben/icons';
+import { ApiLinkPrefix, ApiTestRun, ApiTestRunning } from '@vben/icons';
 
 import {
   ElButton,
@@ -31,7 +31,7 @@ defineOptions({
   name: 'DocumentView',
 });
 
-const props = defineProps<{
+defineProps<{
   showTest: boolean;
 }>();
 
@@ -359,10 +359,18 @@ defineExpose({
               size="large"
               :style="methodType[apiInfo.method.toUpperCase()]"
               @click="handleTest"
-              v-if="!props.showTest"
+              :class="
+                showTest
+                  ? `${methodType[apiInfo.method.toUpperCase()].backgroundColor} !cursor-not-allowed opacity-50`
+                  : ''
+              "
             >
-              调试
-              <ApiTestRun class="ml-0.5 size-4" />
+              {{ showTest ? '' : '调试' }}
+              <ApiTestRunning
+                class="ml-0.5 size-4 animate-spin"
+                v-if="showTest"
+              />
+              <ApiTestRun class="ml-0.5 size-4" v-else />
             </ElButton>
           </div>
         </ElCard>
@@ -464,7 +472,7 @@ defineExpose({
       </ElDescriptions>
     </div>
 
-    <div class="sticky top-0 flex-1" v-if="!props.showTest">
+    <div class="sticky top-0 flex-1" v-if="!showTest">
       <div class="p-5">
         <ElCard
           shadow="never"
