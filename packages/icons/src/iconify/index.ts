@@ -21,3 +21,5 @@ export const MdiMinus = createIconifyIcon('mdi:minus');
 export const ApiLinkPrefix = createIconifyIcon('material-symbols:link-rounded');
 
 export const ApiTestRun = createIconifyIcon('material-symbols:play-arrow');
+
+export const ApiTestRunning = createIconifyIcon('material-symbols:refresh');
