@@ -226,7 +226,7 @@ const hasHtmlDescription = (desc: string) => desc?.includes('<');
     <!-- HTML 描述 -->
     <div
       v-if="value.description && hasHtmlDescription(value.description)"
-      class="mt-2 text-sm text-gray-600 dark:text-gray-400"
+      class="mt-4 text-sm text-gray-600 dark:text-gray-400"
       v-html="value.description"
     ></div>
 
