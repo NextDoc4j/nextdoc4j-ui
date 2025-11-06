@@ -18,7 +18,7 @@ import {
   ElTooltip,
 } from 'element-plus';
 
-import JsonView from '#/components/json-view.vue';
+import JsonViewer from '#/components/json-viewer/index.vue';
 import SchemaView from '#/components/schema-view.vue';
 import { methodType } from '#/constants/methods';
 import { useApiStore } from '#/store';
@@ -46,6 +46,8 @@ const baseUrl = ref('');
 const apiInfo = ref({} as ApiInfo);
 const activeNames = ref<string>('200');
 const requestBodyType = ref('');
+const defaultExpanded = ref(true);
+const jsonViewer = ref<InstanceType<typeof JsonViewer> | null>(null);
 
 const parametersInPath = computed(() => {
   const data = apiInfo.value?.parameters?.filter((item) => item.in === 'path');
@@ -86,49 +88,6 @@ const responseData = computed(() => {
 // 响应示例数据
 const responseExample = computed(() => {
   return responseData.value ? generateExample(responseData.value) : null;
-});
-
-// 递归获取所有字段的描述
-const getAllFieldDescriptions = (
-  schema: any,
-  prefix = '',
-): Record<string, string> => {
-  const descriptions: Record<string, string> = {};
-
-  if (!schema) return descriptions;
-
-  // 处理当前层级的描述
-  if (schema.description) {
-    descriptions[prefix] = schema.description;
-  }
-
-  // 处理对象类型的属性
-  if (schema.type === 'object' && schema.properties) {
-    Object.entries(schema.properties).forEach(([key, prop]: [string, any]) => {
-      const nestedPath = prefix ? `${prefix}.${key}` : key;
-      const nestedDescriptions = getAllFieldDescriptions(prop, nestedPath);
-      Object.assign(descriptions, nestedDescriptions);
-    });
-  }
-
-  // 处理数组类型
-  if (schema.type === 'array' && schema.items) {
-    if (schema.items.type === 'object') {
-      const arrayDescriptions = getAllFieldDescriptions(
-        schema.items,
-        `${prefix}[]`,
-      );
-      Object.assign(descriptions, arrayDescriptions);
-    } else if (schema.items.description) {
-      descriptions[`${prefix}[]`] = schema.items.description;
-    }
-  }
-  return descriptions;
-};
-
-// 修改响应体描述获取
-const responseDescriptions = computed(() => {
-  return responseData.value ? getAllFieldDescriptions(responseData.value) : {};
 });
 
 // 获取请求体数据
@@ -198,16 +157,10 @@ const currentRequestBody = computed(() => {
   return requestBody.value;
 });
 
-// 修改请求体描述获取
-const requestBodyDescriptions = computed(() => {
-  if (!currentRequestBody.value) return {};
-  return getAllFieldDescriptions(currentRequestBody.value);
-});
-
 // 请求体示例
 const requestBodyExample = computed(() => {
   if (!currentRequestBody.value) return null;
-  return generateExample(currentRequestBody.value);
+  return JSON.stringify(generateExample(currentRequestBody.value));
 });
 
 // 处理请求和响应的 schema
@@ -472,12 +425,12 @@ defineExpose({
       </ElDescriptions>
     </div>
 
-    <div class="sticky top-0 flex-1" v-if="!showTest">
+    <div
+      class="sticky top-0 max-h-[calc(100vh-40px)] flex-1 overflow-y-auto [&::-webkit-scrollbar]:hidden"
+      v-if="!showTest"
+    >
       <div class="p-5">
-        <ElCard
-          shadow="never"
-          class="overflow-y: auto max-h-[calc(100vh-40px)]"
-        >
+        <ElCard shadow="never">
           <template #header>
             <div class="font-bold">示例</div>
           </template>
@@ -487,11 +440,10 @@ defineExpose({
             <div class="mb-3 text-sm text-gray-700 dark:text-gray-300">
               请求示例
             </div>
-            <JsonView
-              :key="`request-${apiInfo.path}`"
-              :data="requestBodyExample"
-              :descriptions="requestBodyDescriptions"
-              :image-render="false"
+            <JsonViewer
+              ref="jsonViewer"
+              :json-string="requestBodyExample ?? ''"
+              :default-expanded="defaultExpanded"
             />
           </div>
 
@@ -500,11 +452,10 @@ defineExpose({
             <div class="mb-3 text-sm text-gray-700 dark:text-gray-300">
               响应示例
             </div>
-            <JsonView
-              :key="`response-${apiInfo.path}`"
-              :data="responseExample"
-              :descriptions="responseDescriptions"
-              :image-render="false"
+            <JsonViewer
+              ref="jsonViewer"
+              :json-string="JSON.stringify(responseExample)"
+              :default-expanded="defaultExpanded"
             />
           </div>
 
