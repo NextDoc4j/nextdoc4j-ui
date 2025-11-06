@@ -335,13 +335,13 @@ defineExpose({ expandAll, collapseAll });
 }
 
 .json-node:not(.has-collapse-btn) .node-header:hover {
-  background-color: rgba(187, 187, 187, 0.25);
+  background-color: rgb(187 187 187 / 25%);
 }
 
 .node-header {
   display: flex;
-  align-items: center;
   gap: 4px;
+  align-items: center;
   border-radius: 4px;
 }
 
@@ -357,9 +357,9 @@ defineExpose({ expandAll, collapseAll });
 
 .vertical-line {
   position: absolute;
-  left: 4px;
   top: 0;
   bottom: 24px;
+  left: 4px;
   width: 1px;
 }
 
@@ -441,15 +441,15 @@ defineExpose({ expandAll, collapseAll });
 }
 
 .collapse-btn {
-  background: none;
-  border: none;
-  padding: 4px 4px;
-  cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 18px;
   height: 18px;
+  padding: 4px;
+  cursor: pointer;
+  background: none;
+  border: none;
   border-radius: 4px;
 }
 
@@ -459,8 +459,8 @@ defineExpose({ expandAll, collapseAll });
 }
 
 .theme-dark .collapse-btn:hover {
-  color: #ffffff;
-  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  background: rgb(255 255 255 / 10%);
   border-color: #858585;
 }
 
@@ -471,13 +471,13 @@ defineExpose({ expandAll, collapseAll });
 
 .theme-light .collapse-btn:hover {
   color: #24292e;
-  background: rgba(0, 0, 0, 0.05);
+  background: rgb(0 0 0 / 5%);
   border-color: #959da5;
 }
 
 .collapse-icon {
-  user-select: none;
   display: inline-block;
+  user-select: none;
 }
 
 .theme-dark .key-name {
@@ -485,8 +485,8 @@ defineExpose({ expandAll, collapseAll });
 }
 
 .theme-dark .key-index {
-  color: #858585;
   font-weight: 400;
+  color: #858585;
 }
 
 .theme-light .key-name {

@@ -83,7 +83,7 @@ defineExpose({
 
 .theme-dark .json-error {
   color: #f48771;
-  background: rgba(244, 135, 113, 0.1);
+  background: rgb(244 135 113 / 10%);
 }
 
 .theme-light {
@@ -96,8 +96,8 @@ defineExpose({
 
 .json-error {
   display: flex;
-  align-items: center;
   gap: 8px;
+  align-items: center;
   padding: 8px;
   font-weight: 700;
   border-radius: 6px;
