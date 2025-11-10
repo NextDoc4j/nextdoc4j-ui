@@ -58,8 +58,8 @@ onMounted(() => {});
   <div
     class="h-full overflow-y-auto px-4 py-8 sm:px-6 lg:px-8"
     style="
-      background-color: var(--el-bg-color);
       color: var(--el-text-color-primary);
+      background-color: var(--el-bg-color);
     "
   >
     <div class="mx-auto max-w-6xl">
@@ -110,8 +110,8 @@ onMounted(() => {});
               : 'border-[var(--el-border-color)]',
           ]"
           style="
-            background-color: var(--el-bg-color-overlay);
             color: var(--el-text-color-primary);
+            background-color: var(--el-bg-color-overlay);
           "
           v-for="(item, index) in securitySchemes"
           :key="index"
