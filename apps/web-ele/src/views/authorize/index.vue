@@ -55,27 +55,45 @@ onMounted(() => {});
 </script>
 
 <template>
-  <div class="h-full overflow-y-auto bg-gray-50 px-4 py-8 sm:px-6 lg:px-8">
+  <div
+    class="h-full overflow-y-auto px-4 py-8 sm:px-6 lg:px-8"
+    style="
+      background-color: var(--el-bg-color);
+      color: var(--el-text-color-primary);
+    "
+  >
     <div class="mx-auto max-w-6xl">
       <!-- 页面标题区域 -->
       <div class="mb-8">
-        <h1 class="mb-2 text-2xl font-bold text-gray-900">全局认证配置</h1>
-        <p class="text-gray-500">
-          配置全局认证后，所有 API
-          请求将自动携带对应的认证信息，支持同时配置多种认证方式，适用于不同的接口场景。
+        <h1 class="mb-2 text-2xl font-bold text-[var(--el-text-color-primary)]">
+          全局认证配置
+        </h1>
+        <p class="text-[var(--el-text-color-secondary)]">
+          当前认证方式由 SpringDoc 配置自动生成。
+          启用全局认证后，请求将自动携带对应的认证信息，可按需配置不同类型的认证。
         </p>
       </div>
 
       <!-- 状态和操作区 -->
       <div
-        class="mb-6 flex items-center justify-between rounded-lg bg-white p-4 shadow-sm"
+        class="mb-6 flex items-center justify-between rounded-lg p-4 shadow-sm"
+        style="
+          background-color: var(--el-bg-color-overlay);
+          border: 1px solid var(--el-border-color);
+        "
       >
-        <div class="flex items-center text-sm text-gray-500">
-          <span class="mr-2 h-2 w-2 rounded-full bg-green-500"></span>
+        <div
+          class="flex items-center text-sm text-[var(--el-text-color-regular)]"
+        >
+          <span
+            class="mr-2 h-2 w-2 rounded-full bg-[var(--el-color-success)]"
+          ></span>
           已选择 {{ tokenNumber }} 个认证方式
         </div>
         <ElButton
-          class="text-sm text-gray-500 transition-colors hover:text-red-500"
+          class="text-sm transition-colors"
+          plain
+          type="danger"
           @click="clearAllToken"
         >
           清除全部认证
@@ -85,33 +103,48 @@ onMounted(() => {});
       <!-- 认证方式卡片网格 -->
       <div class="grid grid-cols-1 gap-4">
         <div
-          class="relative cursor-pointer overflow-hidden rounded-lg border-2 bg-white p-4 shadow-sm transition-all hover:shadow-md"
+          class="relative cursor-pointer overflow-hidden rounded-lg border-2 p-4 shadow-sm transition-all hover:shadow-md"
           :class="[
             value[`${index}_${item.in}`]
-              ? 'border-[--el-color-primary-light-5]'
-              : '',
+              ? 'border-[var(--el-color-primary-light-5)]'
+              : 'border-[var(--el-border-color)]',
           ]"
+          style="
+            background-color: var(--el-bg-color-overlay);
+            color: var(--el-text-color-primary);
+          "
           v-for="(item, index) in securitySchemes"
           :key="index"
           @click="handleFold(item)"
         >
           <div class="flex h-full w-full items-start">
             <div
-              class="mr-4 flex h-10 w-10 items-center justify-center rounded-lg bg-[--el-color-primary-light-9]"
+              class="mr-4 flex h-10 w-10 items-center justify-center rounded-lg"
+              style="background-color: var(--el-color-primary-light-9)"
             >
-              <i class="text-[--el-color-primary]">
+              <i class="text-[var(--el-color-primary)]">
                 <MdiLock />
               </i>
             </div>
             <div class="flex-1">
               <div class="flex h-10 flex-col justify-between">
-                <h3 class="font-medium text-gray-900">
+                <h3 class="font-medium text-[var(--el-text-color-primary)]">
                   {{ index }}（{{ item.type }}
                   {{ item.scheme ? `, ${item.scheme}` : item.scheme }}）
                 </h3>
-                <p class="text-sm text-gray-500">{{ item.description }}</p>
+                <p class="text-sm text-[var(--el-text-color-secondary)]">
+                  {{ item.description }}
+                </p>
               </div>
-              <div class="mt-2 w-[50%]" v-if="item.fold">
+              <div class="mt-4 w-[55%] space-y-2" v-if="item.fold">
+                <p
+                  class="text-sm leading-relaxed text-[var(--el-text-color-regular)]"
+                >
+                  <span class="font-medium">{{ item.name }}</span>
+                  <span class="text-[var(--el-text-color-secondary)]">
+                    （字段：{{ item.in }}）
+                  </span>
+                </p>
                 <ElInput
                   placeholder="请输入"
                   v-model.trim="value[`${index}_${item.in}`]"

@@ -394,13 +394,13 @@ onMounted(() => {
     if (securitySchemes?.[key]?.in === 'header') {
       headers.value.push({
         enabled: true,
-        name: key ?? '',
+        name: securitySchemes?.[key]?.name ?? '',
         value: useTokenStore()?.token?.[tokenKey] ?? '',
         description: securitySchemes?.[key]?.description,
       });
     } else if (securitySchemes?.[key]?.in === 'query') {
       queryParams.value.push({
-        name: key,
+        name: securitySchemes?.[key]?.name ?? '',
         enabled: true,
         value: useTokenStore()?.token?.[tokenKey] ?? '',
         description: securitySchemes?.[key]?.description,
