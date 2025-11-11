@@ -282,7 +282,7 @@ defineExpose({
           {{ apiInfo.summary ?? '暂无描述' }}
         </h1>
         <div class="prose prose-gray dark:prose-invert mt-2 text-lg">
-          <p>{{ apiInfo.description ?? '暂无描述' }}。</p>
+          <div v-html="apiInfo.description || '暂无描述'"></div>
         </div>
       </div>
 
