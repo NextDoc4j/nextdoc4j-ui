@@ -31,7 +31,7 @@ defineOptions({
   name: 'DocumentView',
 });
 
-defineProps<{
+const props = defineProps<{
   showTest: boolean;
 }>();
 
@@ -231,6 +231,9 @@ const responseSchema = computed(() => {
 });
 
 const handleTest = () => {
+  if (props.showTest) {
+    return;
+  }
   if (apiInfo.value) {
     emits('test', apiInfo.value);
   }
