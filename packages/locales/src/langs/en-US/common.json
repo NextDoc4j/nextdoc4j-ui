@@ -10,6 +10,8 @@
   "noData": "No Data",
   "refresh": "Refresh",
   "loadingMenu": "Loading Menu",
+  "copySuccess": "Copy Success",
+  "copyFailed": "Copy Failed",
   "query": "Search",
   "search": "Search",
   "enabled": "Enabled",

@@ -40,19 +40,9 @@ function collapseAll() {
   rootNode.value?.collapseAll();
 }
 
-async function copyJson() {
-  try {
-    await navigator.clipboard.writeText(JSON.stringify(parsedData.value));
-    return true;
-  } catch (error) {
-    throw new Error(error as string);
-  }
-}
-
 defineExpose({
   expandAll,
   collapseAll,
-  copyJson,
 });
 </script>
 
