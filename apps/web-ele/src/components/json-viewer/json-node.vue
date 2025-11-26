@@ -10,6 +10,8 @@ const props = defineProps<{
   depth: number;
   isLastItem?: boolean;
   keyName: null | number | string;
+  parentSchema?: any;
+  schema?: any;
   value: unknown;
 }>();
 
@@ -52,6 +54,29 @@ const countLabel = computed(() => {
 
 const openBracket = computed(() => (valueType.value === 'array' ? '[' : '{'));
 const closeBracket = computed(() => (valueType.value === 'array' ? ']' : '}'));
+
+const currentFieldSchema = computed(() => {
+  if (!props.parentSchema || props.keyName === null) {
+    return props.schema;
+  }
+
+  if (props.parentSchema.type === 'array' && props.parentSchema.items) {
+    return props.parentSchema.items;
+  }
+
+  if (
+    props.parentSchema.properties &&
+    props.parentSchema.properties[props.keyName]
+  ) {
+    return props.parentSchema.properties[props.keyName];
+  }
+
+  return null;
+});
+
+const fieldDescription = computed(() => {
+  return currentFieldSchema.value?.description || null;
+});
 
 // 数字每3位添加分隔符，包括小数
 function formatNumber(num: number): string {
@@ -317,6 +342,14 @@ defineExpose({ expandAll, collapseAll });
           <span class="bracket" @click="toggleExpand">{{ closeBracket }}</span>
           <span v-if="!isLastItem && depth > 0" class="comma">,</span>
         </template>
+
+        <span
+          v-if="fieldDescription && (isExpanded || itemCount === 0)"
+          class="field-description"
+        >
+          <span class="comment-prefix">//</span>
+          <span class="comment-content" v-html="fieldDescription"></span>
+        </span>
       </div>
 
       <div v-if="isExpanded" class="node-content">
@@ -334,6 +367,7 @@ defineExpose({ expandAll, collapseAll });
           :depth="depth + 1"
           :default-expanded="defaultExpanded"
           :is-last-item="index === entryKeys.length - 1"
+          :parent-schema="currentFieldSchema"
           style="padding-left: 32px"
         />
         <div class="node-footer">
@@ -351,6 +385,13 @@ defineExpose({ expandAll, collapseAll });
         </span>
         <span :class="valueClass" v-html="formattedValue"></span>
         <span v-if="!isLastItem" class="comma">,</span>
+        <span
+          v-if="fieldDescription && (isExpanded || itemCount === 0)"
+          class="field-description"
+        >
+          <span class="comment-prefix">//</span>
+          <span class="comment-content" v-html="fieldDescription"></span>
+        </span>
       </div>
     </template>
   </div>
@@ -588,5 +629,33 @@ defineExpose({ expandAll, collapseAll });
 
 .json-btn-copy::before {
   content: '\0192';
+}
+
+.field-description {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 12px;
+  max-width: 500px;
+  user-select: none;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.comment-prefix {
+  flex-shrink: 0;
+}
+
+.comment-content {
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.theme-dark .field-description {
+  color: #6a9955;
+}
+
+.theme-light .field-description {
+  color: #008000;
 }
 </style>

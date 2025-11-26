@@ -157,12 +157,6 @@ const currentRequestBody = computed(() => {
   return requestBody.value;
 });
 
-// 请求体示例
-const requestBodyExample = computed(() => {
-  if (!currentRequestBody.value) return null;
-  return JSON.stringify(generateExample(currentRequestBody.value));
-});
-
 // 处理请求和响应的 schema
 const processSchema = (schema: Schema) => {
   if (!schema) return {};
@@ -445,7 +439,7 @@ defineExpose({
             </div>
             <JsonViewer
               ref="jsonViewer"
-              :json-string="requestBodyExample ?? ''"
+              :schema="currentRequestBody"
               :default-expanded="defaultExpanded"
             />
           </div>
@@ -457,7 +451,7 @@ defineExpose({
             </div>
             <JsonViewer
               ref="jsonViewer"
-              :json-string="JSON.stringify(responseExample)"
+              :schema="responseData"
               :default-expanded="defaultExpanded"
             />
           </div>
