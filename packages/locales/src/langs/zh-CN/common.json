@@ -10,6 +10,8 @@
   "noData": "暂无数据",
   "refresh": "刷新",
   "loadingMenu": "加载菜单中",
+  "copySuccess": "复制成功",
+  "copyFailed": "复制失败",
   "query": "查询",
   "search": "搜索",
   "enabled": "已启用",

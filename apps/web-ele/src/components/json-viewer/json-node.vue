@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 
+import { ElMessage } from 'element-plus';
+
+import { $t } from '#/locales';
+
 const props = defineProps<{
   defaultExpanded: boolean;
   depth: number;
@@ -209,6 +213,25 @@ function collapseAll() {
   }
 }
 
+async function copyToClipboard() {
+  try {
+    const jsonString = JSON.stringify(props.value, null, 2);
+    await navigator.clipboard.writeText(jsonString);
+    ElMessage({
+      duration: 1500,
+      type: 'success',
+      message: `${$t('common.copySuccess')}`,
+    });
+  } catch (error) {
+    ElMessage({
+      duration: 1500,
+      type: 'error',
+      message: `${$t('common.copyFailed')}`,
+    });
+    console.error('Failed to copy to clipboard:', error);
+  }
+}
+
 defineExpose({ expandAll, collapseAll });
 </script>
 
@@ -228,9 +251,14 @@ defineExpose({ expandAll, collapseAll });
         <span class="bracket" @click="toggleExpand">{{ openBracket }}</span>
 
         <template v-if="isExpanded && itemCount > 0">
-          <button class="collapse-btn" @click="toggleExpand">
-            <span class="collapse-icon">−</span>
-          </button>
+          <button
+            class="json-btn-collapse collapse-btn"
+            @click="toggleExpand"
+          ></button>
+          <button
+            class="json-btn-copy collapse-btn"
+            @click="copyToClipboard"
+          ></button>
           <span class="count-label">{{ countLabel }}</span>
         </template>
 
@@ -451,6 +479,7 @@ defineExpose({ expandAll, collapseAll });
   background: none;
   border: none;
   border-radius: 4px;
+  font-size: 12px;
 }
 
 .theme-dark .collapse-btn {
@@ -551,5 +580,13 @@ defineExpose({ expandAll, collapseAll });
 .theme-light .value-array,
 .theme-light .value-object {
   color: #6a737d;
+}
+
+.json-btn-collapse::before {
+  content: '\2013';
+}
+
+.json-btn-copy::before {
+  content: '\0192';
 }
 </style>
