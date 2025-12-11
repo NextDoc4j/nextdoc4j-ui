@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 
+import { useClipboard } from '@vueuse/core';
 import { ElMessage } from 'element-plus';
 
 import { $t } from '#/locales';
@@ -17,6 +18,7 @@ const props = defineProps<{
 
 const childNodes = ref<any[]>([]);
 const isExpanded = ref(props.defaultExpanded);
+const { copy, copied } = useClipboard({ legacy: true });
 
 const valueType = computed(() => {
   if (props.value === null) {
@@ -239,21 +241,20 @@ function collapseAll() {
 }
 
 async function copyToClipboard() {
-  try {
-    const jsonString = JSON.stringify(props.value, null, 2);
-    await navigator.clipboard.writeText(jsonString);
+  const jsonString = JSON.stringify(props.value, null, 2);
+  await copy(jsonString);
+  if (copied.value) {
     ElMessage({
       duration: 1500,
       type: 'success',
       message: `${$t('common.copySuccess')}`,
     });
-  } catch (error) {
+  } else {
     ElMessage({
       duration: 1500,
       type: 'error',
       message: `${$t('common.copyFailed')}`,
     });
-    console.error('Failed to copy to clipboard:', error);
   }
 }
 
