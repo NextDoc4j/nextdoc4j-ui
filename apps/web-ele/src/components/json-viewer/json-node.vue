@@ -526,11 +526,11 @@ defineExpose({ expandAll, collapseAll });
   width: 18px;
   height: 18px;
   padding: 4px;
+  font-size: 12px;
   cursor: pointer;
   background: none;
   border: none;
   border-radius: 4px;
-  font-size: 12px;
 }
 
 .theme-dark .collapse-btn {
@@ -643,13 +643,13 @@ defineExpose({ expandAll, collapseAll });
 
 .field-description {
   display: inline-flex;
-  align-items: center;
   gap: 8px;
-  margin-left: 12px;
+  align-items: center;
   max-width: 500px;
-  user-select: none;
-  white-space: nowrap;
+  margin-left: 12px;
   font-size: 12px;
+  white-space: nowrap;
+  user-select: none;
 }
 
 .comment-prefix {
