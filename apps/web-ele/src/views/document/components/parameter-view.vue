@@ -3,6 +3,7 @@ import type { Parameter } from '#/typings/openApi';
 
 import { computed } from 'vue';
 
+import { getEnumItems } from '#/utils/enumexpand';
 import { resolveSchema } from '#/utils/schema';
 
 defineOptions({
@@ -60,6 +61,19 @@ const htmlDescription = computed(() => {
   const desc = props.parameter.description || schema.value?.items?.description;
   return hasHtmlDescription.value ? desc : null;
 });
+
+// 获取枚举项用于展示
+const enumItems = computed(() => {
+  const schemaSource = schema.value || props.parameter.schema;
+  if (!schemaSource) return [];
+
+  return getEnumItems(schemaSource);
+});
+
+// 检查是否有扩展枚举描述
+const hasExtendedEnum = computed(() => {
+  return enumItems.value.some((item) => item.description);
+});
 </script>
 
 <template>
@@ -84,7 +98,7 @@ const htmlDescription = computed(() => {
           v-if="parameter.example"
           class="flex items-center rounded-md bg-gray-100/50 px-1.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-200"
         >
-          <span class="mr-0.5 text-gray-400 dark:text-gray-500">示例值：</span>
+          <span class="mr-0.5 text-gray-400 dark:text-gray-500">示例值:</span>
           <span class="font-mono">{{ parameter.example }}</span>
         </div>
 
@@ -92,7 +106,7 @@ const htmlDescription = computed(() => {
           v-if="parameter.default"
           class="flex items-center rounded-md bg-gray-100/50 px-1.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-200"
         >
-          <span class="mr-0.5 text-gray-400 dark:text-gray-500">默认值：</span>
+          <span class="mr-0.5 text-gray-400 dark:text-gray-500">默认值:</span>
           <span class="font-mono">{{ parameter.default }}</span>
         </div>
 
@@ -101,7 +115,7 @@ const htmlDescription = computed(() => {
           class="flex items-center rounded-md bg-gray-100/50 px-1.5 py-0.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-200"
         >
           <span class="mr-0.5 text-gray-400 dark:text-gray-500">
-            取值范围：
+            取值范围:
           </span>
           <span class="font-mono">
             {{ constraints }}
@@ -123,6 +137,47 @@ const htmlDescription = computed(() => {
         class="mt-2 text-gray-600 dark:text-gray-400"
         v-html="htmlDescription"
       ></div>
+
+      <!-- 扩展枚举值展示 -->
+      <div v-if="hasExtendedEnum" class="mt-4">
+        <div class="mb-2 text-xs font-medium text-gray-600 dark:text-gray-400">
+          可用值:
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <div
+            v-for="item in enumItems"
+            :key="item.value"
+            class="bg-primary/5 inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs"
+          >
+            <span class="text-primary font-mono font-semibold">
+              {{ item.value }}
+            </span>
+            <span
+              v-if="item.description"
+              class="text-gray-600 dark:text-gray-400"
+            >
+              - {{ item.description }}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 如果没有扩展枚举,显示原有的简单枚举值 -->
+      <div
+        v-else-if="schema?.enum || schema?.items?.enum"
+        class="mt-6 flex items-center"
+      >
+        <span class="text-xs font-medium text-gray-600 dark:text-gray-400">
+          可用值:
+        </span>
+        <div
+          v-for="value in (schema?.enum || schema?.items?.enum).filter(Boolean)"
+          :key="value"
+          class="mr-2 rounded-md bg-gray-100/50 px-1.5 py-0.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-200"
+        >
+          <span class="font-mono">{{ value }}</span>
+        </div>
+      </div>
     </template>
 
     <!-- Query 参数样式 -->
@@ -145,7 +200,7 @@ const htmlDescription = computed(() => {
             class="flex items-center rounded-md bg-gray-100/50 px-1.5 py-0.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-200"
           >
             <span class="mr-0.5 text-gray-400 dark:text-gray-500">
-              示例值：
+              示例值:
             </span>
             <span class="font-mono">{{ parameter.example }}</span>
           </div>
@@ -155,7 +210,7 @@ const htmlDescription = computed(() => {
             class="flex items-center rounded-md bg-gray-100/50 px-1.5 py-0.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-200"
           >
             <span class="mr-0.5 text-gray-400 dark:text-gray-500">
-              默认值：
+              默认值:
             </span>
             <span class="font-mono">{{ parameter.default }}</span>
           </div>
@@ -165,7 +220,7 @@ const htmlDescription = computed(() => {
             class="flex items-center rounded-md bg-gray-100/50 px-1.5 py-0.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-200"
           >
             <span class="mr-0.5 text-gray-400 dark:text-gray-500">
-              取值范围：
+              取值范围:
             </span>
             <span class="font-mono">
               {{ constraints }}
@@ -194,12 +249,38 @@ const htmlDescription = computed(() => {
         class="mt-2 text-sm text-gray-600 dark:text-gray-400"
         v-html="htmlDescription"
       ></div>
+
+      <!-- 扩展枚举值展示 -->
+      <div v-if="hasExtendedEnum" class="mt-4">
+        <div class="mb-2 text-xs font-medium text-gray-600 dark:text-gray-400">
+          可用值:
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <div
+            v-for="item in enumItems"
+            :key="item.value"
+            class="bg-primary/5 inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs"
+          >
+            <span class="text-primary font-mono font-semibold">
+              {{ item.value }}
+            </span>
+            <span
+              v-if="item.description"
+              class="text-gray-600 dark:text-gray-400"
+            >
+              - {{ item.description }}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 如果没有扩展枚举,显示原有的简单枚举值 -->
       <div
-        v-if="schema?.enum || schema?.items?.enum"
+        v-else-if="schema?.enum || schema?.items?.enum"
         class="mt-6 flex items-center"
       >
         <span class="text-xs font-medium text-gray-600 dark:text-gray-400">
-          可用值：
+          可用值:
         </span>
         <div
           v-for="value in (schema?.enum || schema?.items?.enum).filter(Boolean)"

@@ -5,6 +5,7 @@ import { useClipboard } from '@vueuse/core';
 import { ElMessage } from 'element-plus';
 
 import { $t } from '#/locales';
+import { parseExtendedEnum } from '#/utils/enumexpand';
 
 const props = defineProps<{
   defaultExpanded: boolean;
@@ -76,8 +77,19 @@ const currentFieldSchema = computed(() => {
   return null;
 });
 
+// 获取字段描述(包含枚举信息)
 const fieldDescription = computed(() => {
-  return currentFieldSchema.value?.description || null;
+  const schema = currentFieldSchema.value;
+  if (!schema) return null;
+
+  const originalDesc = schema.description || '';
+  const enumInfo = parseExtendedEnum(schema);
+
+  if (enumInfo) {
+    return originalDesc ? `${originalDesc} (${enumInfo})` : `(${enumInfo})`;
+  }
+
+  return originalDesc || null;
 });
 
 // 数字每3位添加分隔符，包括小数
@@ -349,7 +361,7 @@ defineExpose({ expandAll, collapseAll });
           class="field-description"
         >
           <span class="comment-prefix">//</span>
-          <span class="comment-content" v-html="fieldDescription"></span>
+          <span class="comment-content">{{ fieldDescription }}</span>
         </span>
       </div>
 
@@ -386,12 +398,9 @@ defineExpose({ expandAll, collapseAll });
         </span>
         <span :class="valueClass" v-html="formattedValue"></span>
         <span v-if="!isLastItem" class="comma">,</span>
-        <span
-          v-if="fieldDescription && (isExpanded || itemCount === 0)"
-          class="field-description"
-        >
+        <span v-if="fieldDescription" class="field-description">
           <span class="comment-prefix">//</span>
-          <span class="comment-content" v-html="fieldDescription"></span>
+          <span class="comment-content">{{ fieldDescription }}</span>
         </span>
       </div>
     </template>

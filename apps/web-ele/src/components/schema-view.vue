@@ -5,6 +5,8 @@ import { SvgCaretRightIcon } from '@vben/icons';
 
 import { ElTooltip } from 'element-plus';
 
+import { getEnumItems } from '#/utils/enumexpand';
+
 defineOptions({
   name: 'SchemaView',
 });
@@ -79,6 +81,17 @@ const getConstraints = (value: any) => {
 
 // 判断描述是否包含 HTML
 const hasHtmlDescription = (desc: string) => desc?.includes('<');
+
+// 获取枚举项列表
+const getPropertyEnumItems = (value: any) => {
+  return getEnumItems(value);
+};
+
+// 检查是否有扩展枚举
+const hasExtendedEnum = (value: any) => {
+  const items = getPropertyEnumItems(value);
+  return items.some((item) => item.description);
+};
 </script>
 
 <template>
@@ -158,7 +171,7 @@ const hasHtmlDescription = (desc: string) => desc?.includes('<');
           v-if="!isExpandable(value) && value.example"
           class="flex items-center rounded-md bg-gray-100/50 px-1.5 py-0.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-200"
         >
-          <span class="mr-0.5 text-gray-400 dark:text-gray-500">示例值：</span>
+          <span class="mr-0.5 text-gray-400 dark:text-gray-500">示例值:</span>
           <ElTooltip placement="top" :content="String(value.example)">
             <span class="max-w-24 truncate font-mono">
               {{ value.example }}
@@ -170,7 +183,7 @@ const hasHtmlDescription = (desc: string) => desc?.includes('<');
           v-if="!isExpandable(value) && value.default"
           class="flex items-center rounded-md bg-gray-100/50 px-1.5 py-0.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-200"
         >
-          <span class="mr-0.5 text-gray-400 dark:text-gray-500">默认值：</span>
+          <span class="mr-0.5 text-gray-400 dark:text-gray-500">默认值:</span>
           <span class="font-mono">{{ value.default }}</span>
         </div>
 
@@ -179,7 +192,7 @@ const hasHtmlDescription = (desc: string) => desc?.includes('<');
           class="flex items-center rounded-md bg-gray-100/50 px-1.5 py-0.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-200"
         >
           <span class="mr-0.5 text-gray-400 dark:text-gray-500">
-            取值范围：
+            取值范围:
           </span>
           <span class="font-mono">
             {{ getConstraints(value) }}
@@ -191,7 +204,7 @@ const hasHtmlDescription = (desc: string) => desc?.includes('<');
           class="flex items-center rounded-md bg-gray-100/50 px-1.5 py-0.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-200"
         >
           <span class="mr-0.5 text-gray-400 dark:text-gray-500">
-            正则匹配：
+            正则匹配:
           </span>
           <ElTooltip placement="top" :content="String(value.pattern)">
             <span class="max-w-24 truncate font-mono">
@@ -230,9 +243,34 @@ const hasHtmlDescription = (desc: string) => desc?.includes('<');
       v-html="value.description"
     ></div>
 
-    <div v-if="value.enum" class="mt-6 flex items-center">
+    <!-- 扩展枚举值展示 - 优先显示 -->
+    <div v-if="hasExtendedEnum(value)" class="mt-4">
+      <div class="mb-2 text-xs font-medium text-gray-600 dark:text-gray-400">
+        可用值:
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <div
+          v-for="item in getPropertyEnumItems(value)"
+          :key="item.value"
+          class="bg-primary/5 inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs"
+        >
+          <span class="text-primary font-mono font-semibold">
+            {{ item.value }}
+          </span>
+          <span
+            v-if="item.description"
+            class="text-gray-600 dark:text-gray-400"
+          >
+            - {{ item.description }}
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 普通枚举值展示 - 仅当没有扩展枚举时显示 -->
+    <div v-else-if="value.enum" class="mt-6 flex items-center">
       <span class="text-xs font-medium text-gray-600 dark:text-gray-400">
-        可用值：
+        可用值:
       </span>
       <div
         v-for="item in value.enum"
