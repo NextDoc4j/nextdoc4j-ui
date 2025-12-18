@@ -15,10 +15,7 @@ const props = defineProps<{
 }>();
 
 const schema = computed(() => {
-  const s = props.parameter.schema
-    ? resolveSchema(props.parameter.schema)
-    : null;
-  return s;
+  return props.parameter.schema ? resolveSchema(props.parameter.schema) : null;
 });
 
 const isPathParam = computed(() => props.parameter.in === 'path');

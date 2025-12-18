@@ -26,6 +26,24 @@ import { generateExample, resolveSchema } from '#/utils/schema';
 
 import ParameterView from './parameter-view.vue';
 import PathSegment from './path-segment.vue';
+import SecurityView from './security-view.vue';
+
+// 权限工具函数
+interface SecurityMetadata {
+  permissions?: Array<{
+    mode: string;
+    orType?: string;
+    orValues?: string[];
+    type?: string;
+    values: string[];
+  }>;
+  roles?: Array<{
+    mode: string;
+    type?: string;
+    values: string[];
+  }>;
+  ignore?: boolean;
+}
 
 defineOptions({
   name: 'DocumentView',
@@ -39,6 +57,22 @@ const emits = defineEmits<{
   test: [data: ApiInfo];
 }>();
 
+const parseSecurityMetadata = (apiInfo: any): null | SecurityMetadata => {
+  if (!apiInfo) return null;
+  return (
+    (apiInfo['x-nextdoc4j-security'] as SecurityMetadata | undefined) || null
+  );
+};
+
+const hasSecurityRequirement = (apiInfo: any): boolean | undefined => {
+  const metadata = parseSecurityMetadata(apiInfo);
+  if (!metadata || metadata.ignore) return false;
+  const hasPermissions =
+    metadata.permissions && metadata.permissions.length > 0;
+  const hasRoles = metadata.roles && metadata.roles.length > 0;
+  return hasPermissions || hasRoles;
+};
+
 const route = useRoute();
 const apiStore = useApiStore();
 
@@ -48,6 +82,10 @@ const activeNames = ref<string>('200');
 const requestBodyType = ref('');
 const defaultExpanded = ref(true);
 const jsonViewer = ref<InstanceType<typeof JsonViewer> | null>(null);
+
+// 权限信息
+const securityMetadata = computed(() => parseSecurityMetadata(apiInfo.value));
+const hasSecurityReq = computed(() => hasSecurityRequirement(apiInfo.value));
 
 const parametersInPath = computed(() => {
   const data = apiInfo.value?.parameters?.filter((item) => item.in === 'path');
@@ -65,14 +103,12 @@ const parametersInQuery = computed(() => {
   return null;
 });
 
-// 状态码选择
 const selectedStatusCode = ref('200');
 
 const currentResponse = computed(() => {
   return apiInfo.value?.responses?.[selectedStatusCode.value] || null;
 });
 
-// 获取响应数据
 const responseData = computed(() => {
   if (!currentResponse.value) return null;
 
@@ -85,12 +121,10 @@ const responseData = computed(() => {
   return schema ? resolveSchema(schema) : null;
 });
 
-// 响应示例数据
 const responseExample = computed(() => {
   return responseData.value ? generateExample(responseData.value) : null;
 });
 
-// 获取请求体数据
 const requestBody = computed(() => {
   const content = apiInfo.value.requestBody?.content;
   if (!content) return null;
@@ -126,7 +160,6 @@ const requestBody = computed(() => {
   }
   const resolved = resolveSchema(schema);
 
-  // 添加实体信息
   return {
     ...resolved,
     title: resolved.title || schema.$ref?.split('/').pop() || '请求体',
@@ -157,14 +190,11 @@ const currentRequestBody = computed(() => {
   return requestBody.value;
 });
 
-// 处理请求和响应的 schema
 const processSchema = (schema: Schema) => {
   if (!schema) return {};
 
-  // 如果传入的是已经处理过的 schema，直接返回
   if (schema.properties) return schema.properties;
 
-  // 处理原始 schema
   const processProperties = (props: any, parentRequired: string[] = []) => {
     const result: Record<string, any> = {};
     if (!props) return result;
@@ -175,7 +205,6 @@ const processSchema = (schema: Schema) => {
         required: parentRequired.includes(key),
       };
 
-      // 处理对象类型的属性
       if (value.type === 'object' && value.properties) {
         result[key].properties = processProperties(
           value.properties,
@@ -183,7 +212,6 @@ const processSchema = (schema: Schema) => {
         );
       }
 
-      // 处理数组类型的属性
       if (
         value.type === 'array' &&
         value.items?.type === 'object' &&
@@ -216,7 +244,6 @@ const responseSchema = computed(() => {
 
   if (!schema) return {};
 
-  // 如果是引用类型，需要解析引用
   const resolvedSchema = resolveSchema(schema);
   return {
     type: 'object',
@@ -326,6 +353,13 @@ defineExpose({
         </ElCard>
       </div>
 
+      <!-- 权限要求 -->
+      <div v-if="hasSecurityReq && securityMetadata" class="p-5">
+        <ElCard shadow="never" header="访问权限">
+          <SecurityView :metadata="securityMetadata" />
+        </ElCard>
+      </div>
+
       <ElDescriptions
         :column="1"
         title="请求参数"
@@ -432,7 +466,6 @@ defineExpose({
             <div class="font-bold">示例</div>
           </template>
 
-          <!-- 请求体示例 -->
           <div v-if="requestBody" class="mb-6">
             <div class="mb-3 text-sm text-gray-700 dark:text-gray-300">
               请求示例
@@ -444,7 +477,6 @@ defineExpose({
             />
           </div>
 
-          <!-- 响应示例 -->
           <div v-if="responseExample">
             <div class="mb-3 text-sm text-gray-700 dark:text-gray-300">
               响应示例
