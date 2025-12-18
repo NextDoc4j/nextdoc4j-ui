@@ -54,7 +54,7 @@ const formatMode = (mode: string) => {
     <div v-else class="security-content">
       <!-- 角色 -->
       <div v-if="metadata.roles?.length" class="security-item">
-        <span class="label">角色：</span>
+        <span class="label">角色校验：</span>
         <div class="value-content">
           <template v-for="(roleGroup, i) in metadata.roles" :key="i">
             <template v-for="(value, j) in roleGroup.values" :key="`${i}-${j}`">
@@ -79,7 +79,7 @@ const formatMode = (mode: string) => {
 
       <!-- 权限字符 -->
       <div v-if="metadata.permissions?.length" class="security-item">
-        <span class="label">权限字符：</span>
+        <span class="label">权限校验：</span>
         <div class="value-content">
           <template v-for="(permGroup, i) in metadata.permissions" :key="i">
             <template v-if="permGroup.values.length > 0">
@@ -106,12 +106,12 @@ const formatMode = (mode: string) => {
         </div>
       </div>
 
-      <!-- 或者角色 -->
+      <!-- 角色校验 -->
       <div
         v-if="metadata.permissions?.some((p) => p.orValues?.length)"
         class="security-item"
       >
-        <span class="label">或者角色：</span>
+        <span class="label">角色校验：</span>
         <div class="value-content">
           <template v-for="(permGroup, i) in metadata.permissions" :key="i">
             <template v-if="permGroup.orValues?.length">
