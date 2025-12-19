@@ -239,11 +239,15 @@ onMounted(() => {
     foldingStrategy: 'indentation',
     contextmenu: false,
   });
-  // 添加高度自适应
+  // 添加高度自适应，设置合理的默认高度
   const updateEditorHeight = () => {
     if (!editorContainer) return;
     const contentHeight = editor.getContentHeight();
-    editorContainer.style.height = `${contentHeight}px`;
+    const defaultHeight = 500; // 默认高度，避免内容少时留白过多
+
+    // 使用默认高度和内容高度的最大值，确保不会小于默认值
+    const targetHeight = Math.max(defaultHeight, Math.min(contentHeight));
+    editorContainer.style.height = `${targetHeight}px`;
     editor.layout();
   };
 
