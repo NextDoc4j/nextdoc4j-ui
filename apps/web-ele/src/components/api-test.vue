@@ -442,7 +442,12 @@ onMounted(() => {
                 </ElTooltip>
               </template>
             </ElInput>
-            <ElButton type="primary" class="ml-2" @click="sendRequest">
+            <ElButton
+              type="primary"
+              class="ml-2"
+              :loading="loading"
+              @click="sendRequest"
+            >
               发送
             </ElButton>
           </div>

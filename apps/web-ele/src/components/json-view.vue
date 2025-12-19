@@ -272,6 +272,15 @@ const handleFormat = () => {
     }
   }
 };
+const handleCopy = async () => {
+  try {
+    const value = editor.getValue();
+    await navigator.clipboard.writeText(value);
+    ElMessage.success('复制成功');
+  } catch {
+    ElMessage.error('复制失败');
+  }
+};
 
 // 监听数据变化
 watch(
@@ -318,7 +327,7 @@ defineExpose({
       class="absolute right-0 top-0 z-[2] hidden cursor-pointer group-hover:flex"
     >
       <ElTooltip content="复制" placement="top" v-if="copyable">
-        <div v-copy="JSON.stringify(data)" class="mx-2 size-8">
+        <div @click="handleCopy" class="mx-2 size-8">
           <SvgCopyIcon />
         </div>
       </ElTooltip>
