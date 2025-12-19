@@ -13,6 +13,9 @@ defineOptions({ name: 'Home' });
 const apiStore = useApiStore();
 const { info, openapi, paths, components } = apiStore.openApi!;
 const brand = apiStore.openApi?.['x-nextdoc4j']?.brand;
+
+// 获取应用版本
+const appVersion = import.meta.env.VITE_APP_VERSION || '1.1.3';
 const apiCount = computed(() => {
   let count = 0;
   Object.entries(paths).forEach(([, value]) => {
@@ -110,6 +113,11 @@ const handleClick = (item: RouteRecordRaw) => {
             class="transform rounded-2xl border border-[var(--el-color-warning-light-3)] px-2 py-1 text-[var(--el-color-warning-light-3)] hover:-translate-y-1"
           >
             OpenAPI {{ openapi ?? '' }}
+          </span>
+          <span
+            class="transform rounded-2xl border border-[var(--el-color-success-light-3)] px-2 py-1 text-[var(--el-color-success-light-3)] hover:-translate-y-1"
+          >
+            Nextdoc4j v{{ appVersion }}
           </span>
         </div>
       </div>
