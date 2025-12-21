@@ -58,6 +58,7 @@ const responseTab = ref('Body');
 
 // 组件状态
 const loading = ref(false);
+const responseLoading = ref(false);
 const requestUrl = ref('');
 
 const queryParams = ref<Array<TableParamsObject>>([]);
@@ -156,6 +157,7 @@ const handleClose = (e: any) => {
 
 async function sendRequest() {
   loading.value = true;
+  responseLoading.value = true;
   const startTime = performance.now(); // 记录开始时间;
 
   try {
@@ -209,16 +211,14 @@ async function sendRequest() {
       }
       case 'json': {
         if (props.requestBody) {
-          const example = bodyTabRef.value.getExample() ?? '';
-          bodyData = example;
+          bodyData = bodyTabRef.value.getExample() ?? '';
         }
         requestHeaders.append('Content-Type', 'application/json');
         break;
       }
       case 'raw': {
         if (props.requestBody) {
-          const example = bodyTabRef.value.getExample() ?? '';
-          bodyData = example;
+          bodyData = bodyTabRef.value.getExample() ?? '';
         }
         requestHeaders.append('Content-Type', 'text/plain');
         break;
@@ -234,8 +234,7 @@ async function sendRequest() {
       }
       case 'xml': {
         if (props.requestBody) {
-          const example = bodyTabRef.value.getExample() ?? '';
-          bodyData = example;
+          bodyData = bodyTabRef.value.getExample() ?? '';
         }
         requestHeaders.append('Content-Type', 'text/xml');
         break;
@@ -309,6 +308,7 @@ async function sendRequest() {
     };
   } finally {
     loading.value = false;
+    responseLoading.value = false;
   }
 }
 
@@ -526,9 +526,10 @@ onMounted(() => {
         <div class="mb-4 flex justify-between px-4 pt-2">
           <span class="font-medium">返回结果</span>
           <ElSpace
-            v-if="responseStatus.type !== 'default'"
+            v-if="responseStatus.type !== 'default' && !responseLoading"
             class="text-xs text-[--el-color-success]"
           >
+            <!-- 正常状态 -->
             <ElTooltip
               :content="`HTTP 状态码: ${responseStatus.type}`"
               placement="top"
@@ -542,43 +543,78 @@ onMounted(() => {
               <span>{{ responseSize }}</span>
             </ElTooltip>
           </ElSpace>
+          <!-- responseLoading 时右上角不显示任何内容，由中间区域的大Loading覆盖 -->
         </div>
         <div class="w-full flex-1 overflow-hidden">
-          <ElTabs
-            v-model="responseTab"
-            v-if="responseStatus.type !== 'default'"
+          <!-- 请求Loading状态 -->
+          <div
+            v-if="responseLoading"
+            class="flex h-full items-center justify-center"
           >
-            <ElTabPane name="Body" label="Body">
-              <template #label>
-                <span class="px-2 font-normal">Body </span>
-              </template>
-              <JsonView
-                :data="responseData"
-                :descriptions="responseDescriptions"
-                :image-render="true"
-                class="response-body"
-              />
-            </ElTabPane>
-            <ElTabPane name="Headers" label="Headers">
-              <template #label>
-                <span class="px-2 font-normal">Headers </span>
-                <span v-if="responseHeaders.length > 0" class="highlight">
-                  {{ responseHeaders.length }}
-                </span>
-              </template>
-              <div class="response-headers">
-                <ElTable border :data="responseHeaders">
-                  <ElTableColumn label="参数名" prop="name" />
-                  <ElTableColumn label="参数值" prop="value" />
-                </ElTable>
+            <div class="flex flex-col items-center gap-3">
+              <div class="loading-spinner">
+                <svg
+                  class="animate-spin"
+                  width="40"
+                  height="40"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    fill="#409EFF"
+                    d="M12,4V2A10,10 0 0,0 2,12H4A8,8 0 0,1 12,4Z"
+                  />
+                </svg>
               </div>
-            </ElTabPane>
-          </ElTabs>
-          <ElEmpty v-else :image-size="80">
-            <template #description>
-              <span class="text-sm">点击"发送"按钮获取返回结果</span>
-            </template>
-          </ElEmpty>
+              <div class="loading-text">
+                <span class="text-base text-gray-600">正在获取响应数据</span>
+                <span class="loading-dots">
+                  <span class="dot">.</span>
+                  <span class="dot">.</span>
+                  <span class="dot">.</span>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 响应结果 -->
+          <template v-else>
+            <ElTabs
+              v-model="responseTab"
+              v-if="responseStatus.type !== 'default'"
+            >
+              <ElTabPane name="Body" label="Body">
+                <template #label>
+                  <span class="px-2 font-normal">Body </span>
+                </template>
+                <JsonView
+                  :data="responseData"
+                  :descriptions="responseDescriptions"
+                  :image-render="true"
+                  class="response-body"
+                  :loading="responseLoading"
+                />
+              </ElTabPane>
+              <ElTabPane name="Headers" label="Headers">
+                <template #label>
+                  <span class="px-2 font-normal">Headers </span>
+                  <span v-if="responseHeaders.length > 0" class="highlight">
+                    {{ responseHeaders.length }}
+                  </span>
+                </template>
+                <div class="response-headers">
+                  <ElTable border :data="responseHeaders">
+                    <ElTableColumn label="参数名" prop="name" />
+                    <ElTableColumn label="参数值" prop="value" />
+                  </ElTable>
+                </div>
+              </ElTabPane>
+            </ElTabs>
+            <ElEmpty v-else :image-size="80">
+              <template #description>
+                <span class="text-sm">点击"发送"按钮获取返回结果</span>
+              </template>
+            </ElEmpty>
+          </template>
         </div>
       </div>
     </Pane>
@@ -657,6 +693,51 @@ onMounted(() => {
       height: 100%;
       overflow-y: auto;
     }
+  }
+}
+
+/* Loading 动画样式 */
+.loading-text {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.loading-dots {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.loading-dots .dot {
+  color: #409eff;
+  animation: dot-pulse 1.5s infinite;
+  animation-fill-mode: both;
+}
+
+.loading-dots .dot:nth-child(1) {
+  animation-delay: 0s;
+}
+
+.loading-dots .dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.loading-dots .dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes dot-pulse {
+  0% {
+    opacity: 0.2;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+  100% {
+    opacity: 0.2;
+    transform: translateY(0);
   }
 }
 </style>

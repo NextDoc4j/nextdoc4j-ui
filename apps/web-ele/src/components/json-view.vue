@@ -21,6 +21,7 @@ const props = withDefaults(
     descriptions?: Record<string, string>;
     imageRender?: boolean;
     language?: string;
+    loading?: boolean;
     oneOf?: boolean;
     readOnly?: boolean;
   }>(),
@@ -30,6 +31,7 @@ const props = withDefaults(
     oneOf: false,
     language: 'json',
     imageRender: false,
+    loading: false,
     descriptions: () => ({}),
   },
 );
@@ -341,11 +343,24 @@ defineExpose({
         </div>
       </ElTooltip>
     </div>
+
     <!-- 主要内容区域：JSON 编辑器和图片预览并排显示 -->
     <div class="flex gap-4">
       <!-- JSON 编辑器 -->
-      <div class="flex-1">
+      <div class="relative flex-1">
         <div :id="id"></div>
+        <!-- Loading 覆盖层 -->
+        <div
+          v-if="loading"
+          class="absolute inset-0 z-10 flex items-center justify-center bg-white bg-opacity-75"
+        >
+          <svg class="animate-spin" width="24" height="24" viewBox="0 0 24 24">
+            <path
+              fill="#409EFF"
+              d="M12,4V2A10,10 0 0,0 2,12H4A8,8 0 0,1 12,4Z"
+            />
+          </svg>
+        </div>
       </div>
 
       <!-- Base64 图片预览区域 -->
