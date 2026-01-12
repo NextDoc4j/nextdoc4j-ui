@@ -36,10 +36,17 @@ export interface OpenAPISpec {
     markdown?: MarkDownDes[];
     version?: string;
   };
+  'x-nextdoc4j-aggregation'?: AggregationExtension;
   servers?: {
     description: string;
     url: string;
   }[];
+}
+
+// 聚合模式扩展
+export interface AggregationExtension {
+  aggregation: boolean;
+  docPath: string;
 }
 
 export interface Brand {

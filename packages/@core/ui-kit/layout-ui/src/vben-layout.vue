@@ -366,10 +366,6 @@ const showHeaderToggleButton = computed(() => {
   );
 });
 
-const showHeaderLogo = computed(() => {
-  return !isSideMode.value || isMixedNav.value || props.isMobile;
-});
-
 watch(
   () => props.isMobile,
   (val) => {
@@ -513,6 +509,7 @@ const idMainContent = ELEMENT_ID_MAIN_CONTENT;
         <slot name="mixed-menu"></slot>
       </template>
       <template v-else>
+        <slot name="menu-before"></slot>
         <slot name="menu"></slot>
       </template>
 

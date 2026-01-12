@@ -287,6 +287,9 @@ const headerSlots = computed(() => {
       </LayoutHeader>
     </template>
     <!-- 侧边菜单区域 -->
+    <template #menu-before>
+      <slot name="menu-before"></slot>
+    </template>
     <template #menu>
       <LayoutMenu
         :accordion="preferences.navigation.accordion"

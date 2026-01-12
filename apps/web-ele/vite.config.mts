@@ -16,7 +16,8 @@ export default defineConfig(async () => {
           '/api': {
             changeOrigin: true,
             rewrite: (path) => path.replace(/^\/api/, ''),
-            target: 'https://demo-api.nextdoc4j.top',
+            target: 'http://localhost:9000',
+            // target: 'https://demo-api.nextdoc4j.top',
             ws: true,
           },
         },
