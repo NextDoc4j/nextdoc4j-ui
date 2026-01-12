@@ -26,6 +26,7 @@ import { Pane, Splitpanes } from 'splitpanes';
 import JsonView from '#/components/json-view.vue';
 import { methodType } from '#/constants/methods';
 import { useApiStore, useTokenStore } from '#/store';
+import { useAggregationStore } from '#/store/aggregation';
 
 import bodyParams from './body-params.vue';
 import paramsTable from './params-table.vue';
@@ -169,7 +170,16 @@ async function sendRequest() {
       }
     });
 
-    const finalUrl = new URL(window.origin + apiURL + url);
+    // 获取聚合模式下的服务前缀
+    const aggregationStore = useAggregationStore();
+    let servicePrefix = '';
+    if (aggregationStore.isAggregation && aggregationStore.currentService) {
+      // 从服务 URL 中提取前缀，如 "/file/v3/api-docs" -> "/file"
+      const serviceUrl = aggregationStore.currentService.url;
+      servicePrefix = serviceUrl.replace('/v3/api-docs', '');
+    }
+
+    const finalUrl = new URL(window.origin + apiURL + servicePrefix + url);
 
     // 添加查询参数
     queryParams.value
@@ -622,6 +632,23 @@ onMounted(() => {
 </template>
 
 <style lang="scss" scoped>
+@keyframes dot-pulse {
+  0% {
+    opacity: 0.2;
+    transform: translateY(0);
+  }
+
+  50% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+
+  100% {
+    opacity: 0.2;
+    transform: translateY(0);
+  }
+}
+
 .api-tester {
   display: flex;
   flex-direction: column;
@@ -699,8 +726,8 @@ onMounted(() => {
 /* Loading 动画样式 */
 .loading-text {
   display: flex;
-  align-items: center;
   gap: 2px;
+  align-items: center;
 }
 
 .loading-dots {
@@ -724,20 +751,5 @@ onMounted(() => {
 
 .loading-dots .dot:nth-child(3) {
   animation-delay: 0.4s;
-}
-
-@keyframes dot-pulse {
-  0% {
-    opacity: 0.2;
-    transform: translateY(0);
-  }
-  50% {
-    opacity: 1;
-    transform: translateY(-2px);
-  }
-  100% {
-    opacity: 0.2;
-    transform: translateY(0);
-  }
 }
 </style>
