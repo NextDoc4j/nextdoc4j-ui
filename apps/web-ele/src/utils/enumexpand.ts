@@ -77,5 +77,5 @@ export function getEnumItems(schema: any): EnumItem[] {
     return [];
   }
 
-  return extendedEnum.items.filter((item) => item && item.value);
+  return extendedEnum.items.filter(Boolean);
 }
