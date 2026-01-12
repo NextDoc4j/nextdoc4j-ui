@@ -280,6 +280,8 @@ function handleMouseleave() {
       <slot name="logo"></slot>
     </div>
     <VbenScrollbar :style="contentStyle" shadow shadow-border>
+      <!-- 菜单前的内容 -->
+      <slot name="menu-before"></slot>
       <slot></slot>
     </VbenScrollbar>
 
