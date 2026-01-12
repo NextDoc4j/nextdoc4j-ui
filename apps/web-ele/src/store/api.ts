@@ -17,17 +17,25 @@ export const useApiStore = defineStore('api', () => {
   const openApi = ref<OpenAPISpec>();
   const swaggerConfig = ref<SwaggerConfig>();
   const markDownGroup = ref<MarkDownGroup>({} as MarkDownGroup);
+
   const initConfig = (
     data: ApiData,
     api: OpenAPISpec,
     config: SwaggerConfig,
   ) => {
-    if (isInitConfig.value) return;
     apiData.value = data;
     isInitConfig.value = true;
     openApi.value = api;
     swaggerConfig.value = config;
   };
+
+  /**
+   * 重置配置（用于切换微服务时重新初始化）
+   */
+  const resetConfig = () => {
+    isInitConfig.value = false;
+  };
+
   const searchPathData = (group: string, tag: string, operationId: string) => {
     const paths = apiData.value[group]?.[tag];
     const data = paths?.find((item) => item.operationId === operationId);
@@ -48,6 +56,7 @@ export const useApiStore = defineStore('api', () => {
     openApi,
     searchPathData,
     initConfig,
+    resetConfig,
     initMarkDown,
     searchMarkDown,
   };

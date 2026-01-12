@@ -11,22 +11,36 @@ import { useApiStore } from '#/store';
 defineOptions({ name: 'Home' });
 
 const apiStore = useApiStore();
-const { info, openapi, paths, components } = apiStore.openApi!;
-const brand = apiStore.openApi?.['x-nextdoc4j']?.brand;
+
+// 使用 computed 让数据响应式更新，当 apiStore 变化时自动更新
+const openApi = computed(() => apiStore.openApi);
+const info = computed(() => openApi.value?.info);
+const openapi = computed(() => openApi.value?.openapi);
+const paths = computed(() => openApi.value?.paths || {});
+const components = computed(() => openApi.value?.components || { schemas: {} });
+const swaggerConfig = computed(() => apiStore.swaggerConfig);
+const brand = computed(() => openApi.value?.['x-nextdoc4j']?.brand);
 
 // 获取应用版本 - 从后端 x-nextdoc4j.version 读取，默认版本兜底
-const appVersion = apiStore.openApi?.['x-nextdoc4j']?.version || '1.0.0';
+const appVersion = computed(
+  () => openApi.value?.['x-nextdoc4j']?.version || '1.0.0',
+);
+
 const apiCount = computed(() => {
   let count = 0;
-  Object.entries(paths).forEach(([, value]) => {
+  Object.entries(paths.value).forEach(([, value]) => {
     count += Object.keys(value).length;
   });
   return count;
 });
+
 const entityCount = computed(() => {
-  return Object.keys(components.schemas).length;
+  return Object.keys(components.value.schemas).length;
 });
-const groupCount = Object.keys(apiStore.swaggerConfig?.urls ?? {}).length;
+
+const groupCount = computed(() => {
+  return Object.keys(swaggerConfig.value?.urls ?? {}).length;
+});
 const router = useRouter();
 const navList = computed(() => {
   const rootChildren =

@@ -1,13 +1,25 @@
 <script lang="ts" setup>
+import type { TabDefinition } from '@vben/types';
+
 import type { ServiceItem } from '#/store/aggregation';
 
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
+
+import { useAccessStore, useTabbarStore } from '@vben/stores';
 
 import { storeToRefs } from 'pinia';
 
+import { generateAccess } from '#/router/access';
+import { accessRoutes } from '#/router/routes';
 import { useAggregationStore } from '#/store/aggregation';
+import { useApiStore } from '#/store/api';
 
 const aggregationStore = useAggregationStore();
+const accessStore = useAccessStore();
+const apiStore = useApiStore();
+const tabbarStore = useTabbarStore();
+const router = useRouter();
 
 const { isAggregation, services, currentService } =
   storeToRefs(aggregationStore);
@@ -25,12 +37,74 @@ const closeDropdown = () => {
   isOpen.value = false;
 };
 
-const handleSelect = (service: ServiceItem) => {
+/**
+ * 切换服务（更新 store，触发 watch）
+ */
+const handleSelect = async (service: ServiceItem) => {
+  // 如果点击的是当前服务，不做处理
+  if (service.url === currentService.value?.url) {
+    closeDropdown();
+    return;
+  }
+
+  // 保存当前服务的标签页状态
+  const currentTabs = tabbarStore.getTabs;
+  const currentTabKey = router.currentRoute.value.fullPath;
+  aggregationStore.saveCurrentTabsState(
+    currentTabs as TabDefinition[],
+    currentTabKey,
+  );
+
+  // 切换服务（会触发 watch）
   aggregationStore.switchService(service);
   closeDropdown();
-  // 切换服务后刷新页面以重新加载路由
-  window.location.reload();
 };
+
+/**
+ * 监听服务切换，重新生成路由和加载标签页
+ */
+watch(currentService, async (newService, oldService) => {
+  if (!newService || !oldService || newService.url === oldService.url) {
+    return;
+  }
+
+  try {
+    // 0. 先确定目标路径，避免中间状态闪烁
+    const targetTabsState = aggregationStore.getServiceTabsState(newService);
+    const targetPath = targetTabsState.currentTab || '/home';
+
+    // 1. 重置 apiStore
+    apiStore.resetConfig();
+
+    // 2. 清空当前标签页
+    await tabbarStore.closeAllTabs(router);
+
+    // 3. 重新生成路由（使用完整的 generateAccessible 流程）
+    const { accessibleMenus, accessibleRoutes } = await generateAccess({
+      roles: [],
+      router,
+      routes: accessRoutes,
+    });
+
+    // 4. 更新 accessStore
+    accessStore.setAccessMenus(accessibleMenus);
+    accessStore.setAccessRoutes(accessibleRoutes);
+    accessStore.setIsAccessChecked(true);
+
+    // 5. 恢复标签页并跳转
+    if (targetTabsState.tabs.length > 0) {
+      // 恢复标签页
+      targetTabsState.tabs.forEach((tab) => {
+        tabbarStore.addTab(tab as TabDefinition);
+      });
+    }
+
+    // 6. 一次性跳转到目标路径（避免中间状态）
+    await router.replace(targetPath);
+  } catch (error) {
+    console.error('Error switching service:', error);
+  }
+});
 
 // 点击外部关闭下拉框
 const handleClickOutside = (event: MouseEvent) => {
