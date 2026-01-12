@@ -14,8 +14,8 @@ const apiStore = useApiStore();
 const { info, openapi, paths, components } = apiStore.openApi!;
 const brand = apiStore.openApi?.['x-nextdoc4j']?.brand;
 
-// 获取应用版本
-const appVersion = import.meta.env.VITE_APP_VERSION || '1.1.3';
+// 获取应用版本 - 从后端 x-nextdoc4j.version 读取，默认版本兜底
+const appVersion = apiStore.openApi?.['x-nextdoc4j']?.version || '1.0.0';
 const apiCount = computed(() => {
   let count = 0;
   Object.entries(paths).forEach(([, value]) => {

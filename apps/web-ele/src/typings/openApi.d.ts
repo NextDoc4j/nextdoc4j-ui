@@ -34,6 +34,7 @@ export interface OpenAPISpec {
   'x-nextdoc4j': {
     brand?: Brand;
     markdown?: MarkDownDes[];
+    version?: string;
   };
   servers?: {
     description: string;
