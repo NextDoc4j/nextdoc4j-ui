@@ -11,11 +11,7 @@ import type {
 
 import { updatePreferences } from '@vben/preferences';
 
-import {
-  getOpenAPI,
-  getOpenAPIConfig,
-  getServiceOpenAPIConfig,
-} from '#/api/core/openApi';
+import { getOpenAPIConfig } from '#/api/core/openApi';
 import { baseRequestClient } from '#/api/request';
 import { useApiStore } from '#/store';
 import { useAggregationStore } from '#/store/aggregation';
@@ -28,7 +24,15 @@ interface TagGroups {
 export const fetchMenuListAsync: () => Promise<
   RouteRecordStringComponent<string>[]
 > = async () => {
-  const { data } = await getOpenAPI();
+  const aggregationStore = useAggregationStore();
+
+  // 使用缓存获取主配置
+  const { openApi: data } = await aggregationStore.getMainConfig();
+
+  if (!data) {
+    throw new Error('Failed to load OpenAPI data');
+  }
+
   const { 'x-nextdoc4j-aggregation': aggregation } = data;
 
   // 检测聚合模式
@@ -37,7 +41,8 @@ export const fetchMenuListAsync: () => Promise<
   }
 
   // 原有的单应用模式
-  return fetchSingleAppRoutes(data);
+  const { config } = await aggregationStore.getMainConfig();
+  return fetchSingleAppRoutes(data, config);
 };
 
 /**
@@ -46,24 +51,38 @@ export const fetchMenuListAsync: () => Promise<
 const fetchAggregationRoutes: () => Promise<
   RouteRecordStringComponent<string>[]
 > = async () => {
-  const aggregationStore = useAggregationStore();
+  return fetchAggregationRoutesImpl();
+};
 
-  // 初始化聚合模式（获取服务列表）
+/**
+ * 聚合模式路由生成实现（导出供外部调用）
+ * 用于服务切换时重新生成路由
+ */
+export const fetchAggregationRoutesImpl: () => Promise<
+  RouteRecordStringComponent<string>[]
+> = async () => {
+  const aggregationStore = useAggregationStore();
+  const apiStore = useApiStore();
+
+  // 初始化聚合模式（获取服务列表，使用缓存）
   await aggregationStore.initAggregation();
 
   const currentService = aggregationStore.currentService;
+
   if (!currentService) {
     // 如果没有服务，返回空路由
     return [];
   }
 
-  // 获取当前选中服务的 OpenAPI 数据
-  const serviceDocUrl = currentService.url;
-  const { data: serviceData } =
-    await baseRequestClient.get<OpenAPISpec>(serviceDocUrl);
+  // 使用缓存获取服务数据
+  const { openApi: serviceData, config } =
+    await aggregationStore.getServiceData(currentService);
 
-  // 获取当前服务的 swagger-config
-  const { data: config } = await getServiceOpenAPIConfig(serviceDocUrl);
+  // 检查服务数据是否有效
+  if (!serviceData || !serviceData.paths) {
+    console.error('Invalid service data:', serviceData);
+    return [];
+  }
 
   const {
     paths,
@@ -125,18 +144,19 @@ const fetchAggregationRoutes: () => Promise<
 
       if (filterUrls.length > 0) {
         // 获取服务前缀（如 "/file" from "/file/v3/api-docs"）
-        const servicePrefix = serviceDocUrl.replace('/v3/api-docs', '');
+        const servicePrefix = currentService.url.replace('/v3/api-docs', '');
 
-        // 并行请求所有分组的文档，需要拼接服务前缀
-        const fetchList = filterUrls.map(({ url }) => {
-          // url 格式: "/v3/api-docs/user"
-          // 需要拼接为: "/file/v3/api-docs/user"
-          const fullUrl = `${servicePrefix}${url}`;
-          return baseRequestClient.get(fullUrl);
-        });
-        const dataList = await Promise.all(fetchList);
+        // 使用缓存并行请求所有分组的文档
+        const dataList = await Promise.all(
+          filterUrls.map(({ url }) => {
+            // url 格式: "/v3/api-docs/user"
+            // 需要拼接为: "/file/v3/api-docs/user"
+            const fullUrl = `${servicePrefix}${url}`;
+            return aggregationStore.getServiceGroupDoc(currentService, fullUrl);
+          }),
+        );
 
-        dataList.forEach(({ data }, index) => {
+        dataList.forEach((data, index) => {
           const { paths: groupPaths, components: groupComponents } = data;
           const tagGroups = apiByTag(groupPaths);
 
@@ -227,7 +247,11 @@ const fetchAggregationRoutes: () => Promise<
   }
 
   return new Promise((resolve) => {
-    useApiStore().initConfig(allPath, serviceData, config);
+    // 更新聚合 store 中的 apiData
+    aggregationStore.updateServiceApiData(currentService.url, allPath);
+
+    // 初始化 api store（确保组件能正常使用）
+    apiStore.initConfig(allPath, serviceData, config);
 
     const routes: RouteRecordStringComponent<string>[] = [
       {
@@ -271,7 +295,8 @@ const fetchAggregationRoutes: () => Promise<
  */
 const fetchSingleAppRoutes: (
   data: OpenAPISpec,
-) => Promise<RouteRecordStringComponent<string>[]> = async (data) => {
+  config?: SwaggerConfig,
+) => Promise<RouteRecordStringComponent<string>[]> = async (data, config) => {
   const entries: RouteRecordStringComponent<string>[] = [];
   const { paths, components, 'x-nextdoc4j': xNextdoc4j, security } = data;
   const { access, allPath } = initGroupRoute(paths);
@@ -305,7 +330,12 @@ const fetchSingleAppRoutes: (
       children: entries,
     },
   ];
-  const { data: config } = await getOpenAPIConfig();
+
+  // 如果没有传入 config，则请求获取
+  if (!config) {
+    const { data: configData } = await getOpenAPIConfig();
+    config = configData;
+  }
   const { urls } = config;
   if (urls) {
     try {
