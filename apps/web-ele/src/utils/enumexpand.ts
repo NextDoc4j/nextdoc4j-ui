@@ -10,6 +10,21 @@ export interface ExtendedEnum {
 }
 
 /**
+ * 检查枚举项是否有效
+ * @param item - 枚举项对象
+ * @returns 是否有效
+ */
+function isValidEnumItem(item: EnumItem | null | undefined): boolean {
+  return (
+    item !== null &&
+    item !== undefined &&
+    'value' in item &&
+    item.value !== undefined &&
+    item.value !== null
+  );
+}
+
+/**
  * 解析扩展枚举信息
  * @param schema - 包含枚举信息的 schema 对象
  * @returns 格式化后的枚举描述字符串
@@ -25,7 +40,7 @@ export function parseExtendedEnum(schema: any): null | string {
 
   // 过滤掉空对象并格式化为 "value - description"
   const formattedItems = extendedEnum.items
-    .filter((item) => item && item.value) // 过滤空对象和无效项
+    .filter((item) => isValidEnumItem(item)) // 使用统一的过滤函数
     .map((item) => {
       if (item.description) {
         return `${item.value} - ${item.description}`;
@@ -77,5 +92,5 @@ export function getEnumItems(schema: any): EnumItem[] {
     return [];
   }
 
-  return extendedEnum.items.filter(Boolean);
+  return extendedEnum.items.filter((item) => isValidEnumItem(item));
 }
