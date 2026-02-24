@@ -217,9 +217,20 @@ export const processSchema = (schema: Schema) => {
               format: resolved.title,
             },
           ];
-        } else {
-          return [key, item];
         }
+
+        if (item.type === 'array' && item.items?.$ref) {
+          const resolvedItems = resolveSchema(item.items);
+          return [
+            key,
+            {
+              ...item,
+              items: resolvedItems,
+            },
+          ];
+        }
+
+        return [key, item];
       }),
     );
     Object.assign(allProperties, properties);
@@ -235,9 +246,20 @@ export const processSchema = (schema: Schema) => {
               format: resolved.title,
             },
           ];
-        } else {
-          return [key, item];
         }
+
+        if (item.type === 'array' && item.items?.$ref) {
+          const resolvedItems = resolveSchema(item.items);
+          return [
+            key,
+            {
+              ...item,
+              items: resolvedItems,
+            },
+          ];
+        }
+
+        return [key, item];
       }),
     );
     Object.assign(allProperties, properties);
