@@ -22,7 +22,7 @@ const route = useRoute();
 const apiStore = useApiStore();
 const nav = ref();
 const md = new MarkdownIt({
-  html: false, // 禁止原始 HTML
+  html: true, // 禁止原始 HTML
   xhtmlOut: true,
   linkify: true, // 自动识别链接
   breaks: true, // 换行转 <br>
