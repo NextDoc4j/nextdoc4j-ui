@@ -18,22 +18,39 @@ const { refresh } = useRefresh();
 
 const securitySchemes = computed(() => {
   const authType = apiStore.openApi?.components?.securitySchemes ?? {};
-  Object.entries(authType).map(([key]) => {
-    return {
-      ...authType[key],
-      fold: true,
-    };
-  });
-  return authType;
+  return Object.fromEntries(
+    Object.entries(authType).map(([key, value]) => [
+      key,
+      {
+        ...value,
+        fold: (value as SecuritySchemeObject & { fold?: boolean }).fold ?? true,
+      },
+    ]),
+  );
 });
 const value = ref(tokenStore.token);
+
+const resolveIn = (item: SecuritySchemeObject & { fold?: boolean }) => {
+  if (item.in) {
+    return item.in;
+  }
+  if (item.type === 'http') {
+    return 'header';
+  }
+  return 'header';
+};
+
+const tokenKey = (
+  name: number | string,
+  item: SecuritySchemeObject & { fold?: boolean },
+) => `${name}_${resolveIn(item)}`;
 
 const handleToken = (value: null | string, key: string) => {
   tokenStore.setToken(value, key);
   refresh();
 };
 
-const handleFold = (data: SecuritySchemeObject & { fold: boolean }) => {
+const handleFold = (data: SecuritySchemeObject & { fold?: boolean }) => {
   data.fold = !data.fold;
 };
 
@@ -105,7 +122,7 @@ onMounted(() => {});
         <div
           class="relative cursor-pointer overflow-hidden rounded-lg border-2 p-4 shadow-sm transition-all hover:shadow-md"
           :class="[
-            value[`${index}_${item.in}`]
+            value[tokenKey(index, item)]
               ? 'border-[var(--el-color-primary-light-5)]'
               : 'border-[var(--el-border-color)]',
           ]"
@@ -142,12 +159,12 @@ onMounted(() => {});
                 >
                   <span class="font-medium">{{ item.name }}</span>
                   <span class="text-[var(--el-text-color-secondary)]">
-                    （字段：{{ item.in }}）
+                    （字段：{{ resolveIn(item) }}）
                   </span>
                 </p>
                 <ElInput
                   placeholder="请输入"
-                  v-model.trim="value[`${index}_${item.in}`]"
+                  v-model.trim="value[tokenKey(index, item)]"
                   @click.stop=""
                   @keydown.stop=""
                   @keyup.stop=""
@@ -158,8 +175,8 @@ onMounted(() => {});
                     plain
                     @click.stop="
                       handleToken(
-                        value[`${index}_${item.in}`] ?? null,
-                        `${index}_${item.in}`,
+                        value[tokenKey(index, item)] ?? null,
+                        tokenKey(index, item),
                       )
                     "
                   >
@@ -168,7 +185,7 @@ onMounted(() => {});
                   <ElButton
                     type="primary"
                     plain
-                    @click.stop="handleToken(null, `${index}_${item.in}`)"
+                    @click.stop="handleToken(null, tokenKey(index, item))"
                   >
                     清除
                   </ElButton>

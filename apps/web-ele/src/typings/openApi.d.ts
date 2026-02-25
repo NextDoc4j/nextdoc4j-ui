@@ -1,10 +1,21 @@
 // OpenAPI相关类型定义
 export interface SwaggerConfig {
   configUrl: string;
-  urls: Array<{
-    name: string;
-    url: string;
-  }>;
+  urls: SwaggerServiceItem[];
+  'x-nextdoc4j-gateway'?: {
+    globalSecuritySchemes?: Record<string, SecuritySchemeObject>;
+    services?: SwaggerServiceItem[];
+  };
+}
+
+export interface SwaggerServiceItem {
+  name: string;
+  url: string;
+  contextPath?: string;
+  disabled?: boolean;
+  reason?: string;
+  serviceId?: string;
+  status?: 'DOWN' | 'UNKNOWN' | 'UP';
 }
 export type Paths = Record<string, PathItem>;
 
@@ -175,10 +186,11 @@ export type PathMenuItem = OperationObject & {
 // 添加 SecurityScheme 对象类型定义
 export interface SecuritySchemeObject {
   type: string;
-  in: string;
-  name: string;
-  scheme: string;
-  description: string;
+  in?: 'cookie' | 'header' | 'query';
+  name?: string;
+  scheme?: string;
+  description?: string;
+  bearerFormat?: string;
 }
 
 export interface ApiInfo {

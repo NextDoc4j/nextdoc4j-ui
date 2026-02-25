@@ -1,5 +1,6 @@
 import type { RouteRecordStringComponent } from '@vben/types';
 
+import type { ServiceItem } from '#/store/aggregation';
 import type {
   Brand,
   MarkDownDes,
@@ -74,9 +75,19 @@ export const fetchAggregationRoutesImpl: () => Promise<
     return [];
   }
 
-  // 使用缓存获取服务数据
-  const { openApi: serviceData, config } =
-    await aggregationStore.getServiceData(currentService);
+  // 获取可用服务数据（首个服务不可用时自动回退到后续服务）
+  let selectedService: ServiceItem;
+  let serviceData: OpenAPISpec;
+  let config: SwaggerConfig;
+  try {
+    const data = await aggregationStore.getAvailableServiceData(currentService);
+    selectedService = data.service;
+    serviceData = data.openApi;
+    config = data.config;
+  } catch (error) {
+    console.error('No available services for aggregation mode:', error);
+    return [];
+  }
 
   // 检查服务数据是否有效
   if (!serviceData || !serviceData.paths) {
@@ -144,7 +155,7 @@ export const fetchAggregationRoutesImpl: () => Promise<
 
       if (filterUrls.length > 0) {
         // 获取服务前缀（如 "/file" from "/file/v3/api-docs"）
-        const servicePrefix = currentService.url.replace('/v3/api-docs', '');
+        const servicePrefix = selectedService.url.replace('/v3/api-docs', '');
 
         // 使用缓存并行请求所有分组的文档
         const dataList = await Promise.all(
@@ -152,7 +163,10 @@ export const fetchAggregationRoutesImpl: () => Promise<
             // url 格式: "/v3/api-docs/user"
             // 需要拼接为: "/file/v3/api-docs/user"
             const fullUrl = `${servicePrefix}${url}`;
-            return aggregationStore.getServiceGroupDoc(currentService, fullUrl);
+            return aggregationStore.getServiceGroupDoc(
+              selectedService,
+              fullUrl,
+            );
           }),
         );
 
@@ -248,7 +262,7 @@ export const fetchAggregationRoutesImpl: () => Promise<
 
   return new Promise((resolve) => {
     // 更新聚合 store 中的 apiData
-    aggregationStore.updateServiceApiData(currentService.url, allPath);
+    aggregationStore.updateServiceApiData(selectedService.url, allPath);
 
     // 初始化 api store（确保组件能正常使用）
     apiStore.initConfig(allPath, serviceData, config);

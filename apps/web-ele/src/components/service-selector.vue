@@ -41,6 +41,10 @@ const closeDropdown = () => {
  * 切换服务（更新 store，触发 watch）
  */
 const handleSelect = async (service: ServiceItem) => {
+  if (service.disabled) {
+    return;
+  }
+
   // 如果点击的是当前服务，不做处理
   if (service.url === currentService.value?.url) {
     closeDropdown();
@@ -154,10 +158,14 @@ onUnmounted(() => {
           v-for="service in services"
           :key="service.url"
           class="selector-item"
-          :class="{ 'is-active': currentService?.url === service.url }"
+          :class="{
+            'is-active': currentService?.url === service.url,
+            'is-disabled': service.disabled,
+          }"
           @click="handleSelect(service)"
         >
           <span class="item-name">{{ service.name }}</span>
+          <span v-if="service.disabled" class="item-status">不可用</span>
           <svg
             v-if="currentService?.url === service.url"
             class="item-check"
@@ -273,6 +281,16 @@ onUnmounted(() => {
   background-color: hsl(var(--accent) / 80%);
 }
 
+.selector-item.is-disabled {
+  color: hsl(var(--muted-foreground));
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.selector-item.is-disabled:hover {
+  background-color: transparent;
+}
+
 .selector-item.is-active {
   font-weight: 500;
   color: hsl(var(--primary));
@@ -289,6 +307,11 @@ onUnmounted(() => {
   flex-shrink: 0;
   width: 16px;
   height: 16px;
+}
+
+.item-status {
+  margin-right: 4px;
+  font-size: 12px;
 }
 
 /* 过渡动画 */
