@@ -1,6 +1,11 @@
 import type { TabDefinition } from '@vben/types';
 
-import type { ApiData, OpenAPISpec, SwaggerConfig } from '#/typings/openApi';
+import type {
+  ApiData,
+  OpenAPISpec,
+  SwaggerConfig,
+  SwaggerServiceItem,
+} from '#/typings/openApi';
 
 import { ref } from 'vue';
 
@@ -15,6 +20,11 @@ const STORAGE_TABS_KEY = 'nextdoc4j-service-tabs';
 export interface ServiceItem {
   name: string;
   url: string;
+  contextPath?: string;
+  disabled?: boolean;
+  reason?: string;
+  serviceId?: string;
+  status?: 'DOWN' | 'UNKNOWN' | 'UP';
 }
 
 /**
@@ -76,6 +86,49 @@ export const useAggregationStore = defineStore('aggregation', () => {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(service));
     } catch {
       // ignore
+    }
+  };
+
+  const buildServiceItem = (item: SwaggerServiceItem): ServiceItem => ({
+    name: item.name,
+    url: item.url,
+    contextPath: item.contextPath,
+    disabled: item.disabled ?? false,
+    reason: item.reason,
+    serviceId: item.serviceId,
+    status: item.status ?? 'UNKNOWN',
+  });
+
+  const updateServiceStatus = (
+    serviceUrl: string,
+    patch: Partial<ServiceItem>,
+  ) => {
+    services.value = services.value.map((service) =>
+      service.url === serviceUrl ? { ...service, ...patch } : service,
+    );
+
+    if (currentService.value?.url === serviceUrl) {
+      currentService.value =
+        services.value.find((service) => service.url === serviceUrl) || null;
+    }
+  };
+
+  const probeServiceAvailability = async (service: ServiceItem) => {
+    try {
+      await baseRequestClient.get(service.url, { timeout: 3000 });
+      updateServiceStatus(service.url, {
+        disabled: false,
+        reason: '',
+        status: 'UP',
+      });
+      return true;
+    } catch (error: any) {
+      updateServiceStatus(service.url, {
+        disabled: true,
+        reason: error?.message || 'Service unavailable',
+        status: 'DOWN',
+      });
+      return false;
     }
   };
 
@@ -183,7 +236,7 @@ export const useAggregationStore = defineStore('aggregation', () => {
   /**
    * 更新微服务的 apiData
    */
-  const updateServiceApiData = (serviceUrl: string, apiData: ApiData) => {
+  const updateServiceApiData = (serviceUrl: string, apiData: TagGroups) => {
     const cache = serviceCache.value.get(serviceUrl);
     if (cache) {
       cache.apiData = apiData;
@@ -263,10 +316,12 @@ export const useAggregationStore = defineStore('aggregation', () => {
       const { config } = await getMainConfig();
 
       if (config.urls && config.urls.length > 0) {
-        services.value = config.urls.map((item) => ({
-          name: item.name,
-          url: item.url,
-        }));
+        services.value = config.urls.map((item) => buildServiceItem(item));
+
+        // 预探测服务可用性，并同步为 UI 状态
+        await Promise.all(
+          services.value.map((service) => probeServiceAvailability(service)),
+        );
 
         // 尝试从 localStorage 恢复之前选择的服务
         const storedService = getStoredService();
@@ -276,8 +331,16 @@ export const useAggregationStore = defineStore('aggregation', () => {
           storedService &&
           services.value.find((s) => s.url === storedService.url);
 
-        // 默认选中第一个服务
-        currentService.value = validStoredService || services.value[0] || null;
+        // 只优先选择可用服务；如果都不可用，回退到列表第一项
+        const firstEnabledService =
+          services.value.find((service) => !service.disabled) || null;
+        currentService.value =
+          (validStoredService && !validStoredService.disabled
+            ? validStoredService
+            : null) ||
+          firstEnabledService ||
+          services.value[0] ||
+          null;
       }
     } catch (error) {
       console.error('Failed to load aggregation config:', error);
@@ -291,9 +354,53 @@ export const useAggregationStore = defineStore('aggregation', () => {
    * @param service 服务项
    */
   const switchService = (service: ServiceItem) => {
+    if (service.disabled) {
+      return;
+    }
     currentService.value = service;
     // 保存到 localStorage
     storeService(service);
+  };
+
+  /**
+   * 获取可用服务的文档数据（自动容错回退）
+   */
+  const getAvailableServiceData = async (preferred?: null | ServiceItem) => {
+    const candidateServices = [
+      ...(preferred ? [preferred] : []),
+      ...services.value.filter(
+        (service) => !preferred || service.url !== preferred.url,
+      ),
+    ];
+
+    let latestError: null | unknown = null;
+    for (const service of candidateServices) {
+      try {
+        const data = await getServiceData(service);
+        updateServiceStatus(service.url, {
+          disabled: false,
+          reason: '',
+          status: 'UP',
+        });
+        if (!currentService.value || currentService.value.url !== service.url) {
+          currentService.value = service;
+          storeService(service);
+        }
+        return {
+          service,
+          ...data,
+        };
+      } catch (error: any) {
+        latestError = error;
+        updateServiceStatus(service.url, {
+          disabled: true,
+          reason: error?.message || 'Service unavailable',
+          status: 'DOWN',
+        });
+      }
+    }
+
+    throw latestError || new Error('No available service');
   };
 
   /**
@@ -326,6 +433,7 @@ export const useAggregationStore = defineStore('aggregation', () => {
     getMainConfig,
     getServiceData,
     getServiceGroupDoc,
+    getAvailableServiceData,
     updateServiceApiData,
     saveCurrentTabsState,
     getServiceTabsState,

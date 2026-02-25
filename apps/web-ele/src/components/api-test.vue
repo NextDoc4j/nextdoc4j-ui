@@ -395,27 +395,56 @@ const formDataParams = ref<Array<ParamsType>>([]);
 const urlEncodedParams = ref<Array<ParamsType>>([]);
 
 onMounted(() => {
-  const security = props?.security?.[0] ?? {};
+  const securityList = Array.isArray(props.security) ? props.security : [];
   const openApi = useApiStore().openApi;
   const securitySchemes = openApi?.components?.securitySchemes ?? {};
   baseUrl.value = openApi?.servers?.[0]?.url;
-  Object.entries(security).forEach(([key]) => {
-    const tokenKey = `${key}_${securitySchemes?.[key]?.in}`;
-    if (securitySchemes?.[key]?.in === 'header') {
-      headers.value.push({
-        enabled: true,
-        name: securitySchemes?.[key]?.name ?? '',
-        value: useTokenStore()?.token?.[tokenKey] ?? '',
-        description: securitySchemes?.[key]?.description,
-      });
-    } else if (securitySchemes?.[key]?.in === 'query') {
-      queryParams.value.push({
-        name: securitySchemes?.[key]?.name ?? '',
-        enabled: true,
-        value: useTokenStore()?.token?.[tokenKey] ?? '',
-        description: securitySchemes?.[key]?.description,
-        type: securitySchemes?.[key]?.type,
-      });
+
+  const securityKeys = new Set<string>();
+  securityList.forEach((securityItem) => {
+    Object.keys(securityItem || {}).forEach((key) => securityKeys.add(key));
+  });
+
+  securityKeys.forEach((key) => {
+    const securityScheme = securitySchemes?.[key];
+    const securityIn =
+      securityScheme?.in || (securityScheme?.type === 'http' ? 'header' : '');
+    const tokenKey = `${key}_${securityIn}`;
+
+    switch (securityIn) {
+      case 'cookie': {
+        cookies.value.push({
+          name: securityScheme?.name ?? '',
+          enabled: true,
+          value: useTokenStore()?.token?.[tokenKey] ?? '',
+          description: securityScheme?.description ?? '',
+          type: securityScheme?.type,
+        });
+
+        break;
+      }
+      case 'header': {
+        headers.value.push({
+          enabled: true,
+          name: securityScheme?.name ?? 'Authorization',
+          value: useTokenStore()?.token?.[tokenKey] ?? '',
+          description: securityScheme?.description ?? '',
+        });
+
+        break;
+      }
+      case 'query': {
+        queryParams.value.push({
+          name: securityScheme?.name ?? '',
+          enabled: true,
+          value: useTokenStore()?.token?.[tokenKey] ?? '',
+          description: securityScheme?.description ?? '',
+          type: securityScheme?.type,
+        });
+
+        break;
+      }
+      // No default
     }
   });
 });
