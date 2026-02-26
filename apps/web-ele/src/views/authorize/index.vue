@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { SecuritySchemeObject } from '#/typings/openApi';
 
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 
 import { useRefresh } from '@vben/hooks';
 import { MdiLock, MdiMinus, MdiPlus } from '@vben/icons';
@@ -16,18 +16,30 @@ const apiStore = useApiStore();
 const tokenStore = useTokenStore();
 const { refresh } = useRefresh();
 
-const securitySchemes = computed(() => {
-  const authType = apiStore.openApi?.components?.securitySchemes ?? {};
-  return Object.fromEntries(
-    Object.entries(authType).map(([key, value]) => [
-      key,
-      {
-        ...value,
-        fold: (value as SecuritySchemeObject & { fold?: boolean }).fold ?? true,
-      },
-    ]),
-  );
-});
+// 使用 ref 而不是 computed，以便可以修改 fold 状态
+const securitySchemes = ref<
+  Record<string, SecuritySchemeObject & { fold?: boolean }>
+>({});
+
+// 监听 apiStore.openApi 变化，更新 securitySchemes
+watch(
+  () => apiStore.openApi,
+  (openApi) => {
+    const authType = openApi?.components?.securitySchemes ?? {};
+    securitySchemes.value = Object.fromEntries(
+      Object.entries(authType).map(([key, value]) => [
+        key,
+        {
+          ...value,
+          fold:
+            (value as SecuritySchemeObject & { fold?: boolean }).fold ?? false,
+        },
+      ]),
+    );
+  },
+  { immediate: true, deep: true },
+);
+
 const value = ref(tokenStore.token);
 
 const resolveIn = (item: SecuritySchemeObject & { fold?: boolean }) => {
