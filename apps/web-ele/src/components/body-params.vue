@@ -53,6 +53,30 @@ export interface ParamsType {
   format?: string;
   type?: string;
   description?: string;
+  contentType?: string;
+}
+
+// 根据参数类型推断默认的 Content-Type
+function inferContentType(type?: string, format?: string): string | undefined {
+  // 优先检查 format 是否为 binary（文件类型）
+  if (format === 'binary') {
+    return 'application/octet-stream';
+  }
+  if (!type) return undefined;
+  switch (type) {
+    case 'file':
+      return 'application/octet-stream';
+    case 'string':
+    case 'number':
+    case 'integer':
+    case 'boolean':
+      return 'text/plain';
+    case 'object':
+    case 'array':
+      return 'application/json';
+    default:
+      return undefined;
+  }
 }
 // 请求体类型
 const bodyType = ref<BodyType>();
@@ -167,6 +191,12 @@ onMounted(() => {
             : properties[key].format,
         description: properties[key].description,
         type: properties[key].type,
+        contentType: inferContentType(
+              properties[key].type,
+              properties[key].type === 'array'
+                ? properties[key]?.items?.format
+                : properties[key].format,
+            ),
       });
     });
   } else if (props.requestBody.content['multipart/form-data']) {
@@ -193,6 +223,12 @@ onMounted(() => {
               : properties[key].format,
           description: properties[key].description,
           type: properties[key].type,
+          contentType: inferContentType(
+              properties[key].type,
+              properties[key].type === 'array'
+                ? properties[key]?.items?.format
+                : properties[key].format,
+            ),
         });
       });
     }
@@ -221,6 +257,12 @@ onMounted(() => {
               : properties[key].format,
           description: properties[key].description,
           type: properties[key].type,
+          contentType: inferContentType(
+              properties[key].type,
+              properties[key].type === 'array'
+                ? properties[key]?.items?.format
+                : properties[key].format,
+            ),
         });
       });
     }
@@ -276,11 +318,11 @@ defineExpose({
 
     <div class="body-editor">
       <template v-if="bodyType === 'form-data'">
-        <params-table :table-data="formDataParams" />
+        <params-table :table-data="formDataParams" show-content-type />
       </template>
 
       <template v-if="bodyType === 'x-www-form-urlencoded'">
-        <params-table :table-data="urlEncodedParams" />
+        <params-table :table-data="urlEncodedParams" show-content-type />
       </template>
 
       <template v-if="bodyType === 'json'">
