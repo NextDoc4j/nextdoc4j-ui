@@ -164,113 +164,76 @@ const handleExceed: UploadProps['onExceed'] = (files) => {
 };
 
 onMounted(() => {
-  if (props.requestBody === undefined) {
+  if (!props.requestBody || !props.requestBody.content) {
     bodyType.value = 'none';
-  } else if (props.requestBody.content['application/json']) {
-    bodyType.value = 'json';
-    const schema = props.requestBody.content['application/json'].schema;
-    let properties: Record<string, any>;
-    properties = schema?.properties ?? {};
-    if (schema.$ref) {
-      // 解析 ref
-      const resolved = resolveSchema(schema);
-      properties = resolved.properties ?? {};
-    }
-    Object.keys(properties).forEach((key) => {
-      if (
-        (properties[key]?.format === 'binary' ||
-          properties[key]?.items?.format === 'binary') &&
-        bodyType.value !== 'form-data'
-      ) {
-        bodyType.value = 'form-data';
-      }
-      // eslint-disable-next-line vue/no-mutating-props
-      props.formDataParams.push({
-        name: key,
-        enabled: true,
-        value: '',
-        format:
-          properties[key].type === 'array'
-            ? properties[key]?.items?.format
-            : properties[key].format,
-        description: properties[key].description,
-        type: properties[key].type,
-        contentType: inferContentType(
-          properties[key].type,
-          properties[key].type === 'array'
-            ? properties[key]?.items?.format
-            : properties[key].format,
-        ),
-      });
-    });
-  } else if (props.requestBody.content['multipart/form-data']) {
-    bodyType.value = 'form-data';
-    const schema = props.requestBody.content['multipart/form-data'].schema;
-    let properties = schema?.properties ?? {};
-    let type = schema?.type;
-    if (schema.$ref) {
-      // 解析 ref
-      const resolved = resolveSchema(schema);
-      properties = resolved.properties ?? {};
-      type = resolved.type;
-    }
-    if (type === 'object') {
-      Object.keys(properties).forEach((key) => {
-        // eslint-disable-next-line vue/no-mutating-props
-        props.formDataParams.push({
-          name: key,
-          enabled: true,
-          value: '',
-          format:
-            properties[key].type === 'array'
-              ? properties[key]?.items?.format
-              : properties[key].format,
-          description: properties[key].description,
-          type: properties[key].type,
-          contentType: inferContentType(
-            properties[key].type,
-            properties[key].type === 'array'
-              ? properties[key]?.items?.format
-              : properties[key].format,
-          ),
-        });
-      });
-    }
-  } else if (props.requestBody.content['application/x-www-form-urlencoded']) {
-    bodyType.value = 'x-www-form-urlencoded';
-    const schema =
-      props.requestBody.content['application/x-www-form-urlencoded'].schema;
-    let properties = schema?.properties ?? {};
-    let type = schema?.type;
-    if (schema.$ref) {
-      // 解析 ref
-      const resolved = resolveSchema(schema);
-      properties = resolved.properties ?? {};
-      type = resolved.type;
-    }
-    if (type === 'object') {
-      Object.keys(properties).forEach((key) => {
-        // eslint-disable-next-line vue/no-mutating-props
-        props.formDataParams.push({
-          name: key,
-          enabled: true,
-          value: '',
-          format:
-            properties[key].type === 'array'
-              ? properties[key]?.items?.format
-              : properties[key].format,
-          description: properties[key].description,
-          type: properties[key].type,
-          contentType: inferContentType(
-            properties[key].type,
-            properties[key].type === 'array'
-              ? properties[key]?.items?.format
-              : properties[key].format,
-          ),
-        });
-      });
+    return;
+  }
+
+  // 遍历所有 content 类型，找第一个有实际内容的 schema
+  const content = props.requestBody.content;
+  const types = Object.keys(content);
+  let foundType = '';
+  let schema = null;
+  for (const t of types) {
+    const s = content[t]?.schema;
+    // 检查 schema 是否有实际内容（properties 或 $ref）
+    if (s && (s.properties || s.$ref || s.items)) {
+      foundType = t;
+      schema = s;
+      break;
     }
   }
+
+  if (!schema) {
+    bodyType.value = 'none';
+    return;
+  }
+
+  // 根据找到的类型设置 bodyType
+  if (foundType.includes('json')) {
+    bodyType.value = 'json';
+  } else if (foundType.includes('multipart')) {
+    bodyType.value = 'form-data';
+  } else if (foundType.includes('x-www-form-urlencoded')) {
+    bodyType.value = 'x-www-form-urlencoded';
+  }
+
+  // 处理 schema
+  let properties: Record<string, any> = schema?.properties ?? {};
+  if (schema?.$ref) {
+    const resolved = resolveSchema(schema);
+    properties = resolved.properties ?? {};
+  }
+
+  // 检查是否有 binary 格式的字段，有则切换到 form-data
+  const hasBinaryField = Object.values(properties).some(
+    (p: any) => p?.format === 'binary' || p?.items?.format === 'binary',
+  );
+  if (hasBinaryField) {
+    bodyType.value = 'form-data';
+  }
+
+  // 遍历属性添加到 formDataParams
+  Object.keys(properties).forEach((key) => {
+    // eslint-disable-next-line vue/no-mutating-props
+    props.formDataParams.push({
+      name: key,
+      enabled: true,
+      value: '',
+      format:
+        properties[key].type === 'array'
+          ? properties[key]?.items?.format
+          : properties[key].format,
+      description: properties[key].description,
+      type: properties[key].type,
+      contentType: inferContentType(
+        properties[key].type,
+        properties[key].type === 'array'
+          ? properties[key]?.items?.format
+          : properties[key].format,
+      ),
+    });
+  });
 });
 
 defineExpose({

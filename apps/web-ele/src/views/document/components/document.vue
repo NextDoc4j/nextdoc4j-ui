@@ -131,12 +131,21 @@ const requestBody = computed(() => {
   const content = apiInfo.value.requestBody?.content;
   if (!content) return null;
 
-  const type = Object.keys(content)[0];
-  const schema = content[type as string]?.schema;
+  // 遍历所有 content 类型，找第一个有实际内容的 schema
+  const types = Object.keys(content);
+  let schema = null;
+  for (const t of types) {
+    const s = content[t]?.schema;
+    // 检查 schema 是否有实际内容（properties 或 $ref）
+    if (s && (s.properties || s.$ref || s.items)) {
+      schema = s;
+      break;
+    }
+  }
   if (!schema) return null;
 
   if (schema.oneOf) {
-    const arr = schema.oneOf.map((item: Schema) => {
+    return schema.oneOf.map((item: Schema) => {
       const resolved = resolveSchema(item);
 
       if (resolved.allOf) {
@@ -157,8 +166,6 @@ const requestBody = computed(() => {
         title: resolved.title || resolved.$ref?.split('/').pop() || '请求体',
       };
     });
-
-    return arr;
   }
   const resolved = resolveSchema(schema);
 
@@ -166,6 +173,20 @@ const requestBody = computed(() => {
     ...resolved,
     title: resolved.title || schema.$ref?.split('/').pop() || '请求体',
   };
+});
+
+// 获取 body 的实际 content type（用于显示）
+const requestBodyContentType = computed(() => {
+  const content = apiInfo.value.requestBody?.content;
+  if (!content) return 'application/json';
+  const types = Object.keys(content);
+  for (const t of types) {
+    const s = content[t]?.schema;
+    if (s && (s.properties || s.$ref || s.items)) {
+      return t;
+    }
+  }
+  return types[0] || 'application/json';
 });
 
 watch(
@@ -422,10 +443,7 @@ defineExpose({
                 <div
                   class="px-2 py-0.5 font-mono text-xs text-gray-600 dark:text-gray-300"
                 >
-                  {{
-                    Object.keys(apiInfo.requestBody.content)[0] ??
-                    'application/json'
-                  }}
+                  {{ requestBodyContentType }}
                 </div>
               </div>
             </template>
