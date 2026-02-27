@@ -653,6 +653,25 @@ $namespace: vben;
     .#{$namespace}-menu__icon {
       margin-right: 0;
     }
+
+    // 折叠时隐藏菜单文字
+    .#{$namespace}-menu__name {
+      width: 0;
+      height: 0;
+      margin: 0;
+      overflow: hidden;
+      opacity: 0;
+    }
+
+    // 折叠时隐藏子菜单标题
+    .#{$namespace}-sub-menu-content__title {
+      width: 0;
+      height: 0;
+      margin: 0;
+      overflow: hidden;
+      opacity: 0;
+    }
+
     .#{$namespace}-sub-menu__icon-arrow {
       display: none;
     }
