@@ -37,6 +37,7 @@
     }
   },
   "dependencies": {
+    "@iconify/vue": "catalog:",
     "@vben-core/composables": "workspace:*",
     "@vben-core/icons": "workspace:*",
     "@vben-core/shadcn-ui": "workspace:*",

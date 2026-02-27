@@ -6,6 +6,8 @@ import { computed, onBeforeUnmount, onMounted, reactive, useSlots } from 'vue';
 import { useNamespace } from '@vben-core/composables';
 import { VbenTooltip } from '@vben-core/shadcn-ui';
 
+import { Icon as IconifyIcon } from '@iconify/vue';
+
 import { MenuBadge } from '../components';
 import { useMenu, useMenuContext, useSubMenuContext } from '../hooks';
 
@@ -27,6 +29,15 @@ const subMenu = useSubMenuContext();
 const { parentMenu, parentPaths } = useMenu();
 
 const active = computed(() => props.path === rootMenu?.activePath);
+
+/**
+ * 判断是否为 Vue 组件
+ */
+const isIconComponent = computed(() => {
+  const { icon } = props;
+  if (!icon) return false;
+  return typeof icon !== 'string';
+});
 
 const isTopLevelMenuItem = computed(
   () => parentMenu.value?.type.name === 'Menu',
@@ -96,7 +107,18 @@ onBeforeUnmount(() => {
     >
       <template #trigger>
         <div :class="[nsMenu.be('tooltip', 'trigger')]">
-          <!-- <VbenIcon :class="nsMenu.e('icon')" :icon="menuIcon" fallback /> -->
+          <!-- Vue 组件图标 -->
+          <component
+            :is="props.icon"
+            v-if="isIconComponent && props.icon"
+            :class="nsMenu.e('icon')"
+          />
+          <!-- 字符串图标 (iconify) -->
+          <IconifyIcon
+            v-else-if="props.icon"
+            :icon="props.icon"
+            :class="nsMenu.e('icon')"
+          />
           <slot></slot>
           <span :class="nsMenu.e('name')">
             <slot name="title"></slot>
@@ -111,7 +133,18 @@ onBeforeUnmount(() => {
         class="right-2"
         v-bind="props"
       />
-      <!-- <VbenIcon :class="nsMenu.e('icon')" :icon="menuIcon" /> -->
+      <!-- Vue 组件图标 -->
+      <component
+        :is="props.icon"
+        v-if="isIconComponent && props.icon"
+        :class="nsMenu.e('icon')"
+      />
+      <!-- 字符串图标 (iconify) -->
+      <IconifyIcon
+        v-else-if="props.icon"
+        :icon="props.icon"
+        :class="nsMenu.e('icon')"
+      />
       <slot></slot>
       <slot name="title"></slot>
     </div>

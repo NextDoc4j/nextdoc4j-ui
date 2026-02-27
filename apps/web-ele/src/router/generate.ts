@@ -10,6 +10,12 @@ import type {
   SwaggerConfig,
 } from '#/typings/openApi';
 
+import {
+  SvgMenuApiIcon,
+  SvgMenuDocumentIcon,
+  SvgMenuEntityIcon,
+  SvgMenuSafetyIcon,
+} from '@vben/icons';
 import { updatePreferences } from '@vben/preferences';
 
 import { getOpenAPIConfig } from '#/api/core/openApi';
@@ -273,6 +279,7 @@ export const fetchAggregationRoutesImpl: () => Promise<
         path: '/document',
         component: '/views/document/index.vue',
         meta: {
+          icon: SvgMenuApiIcon,
           title: '接口文档',
         },
         children: access,
@@ -282,6 +289,7 @@ export const fetchAggregationRoutesImpl: () => Promise<
         path: '/entity',
         component: '/views/entity/index.vue',
         meta: {
+          icon: SvgMenuEntityIcon,
           title: '实体模型',
         },
         children: accessEntries,
@@ -292,6 +300,7 @@ export const fetchAggregationRoutesImpl: () => Promise<
     if (security) {
       routes.unshift({
         meta: {
+          icon: SvgMenuSafetyIcon,
           title: '全局认证',
         },
         name: '全局认证',
@@ -450,6 +459,7 @@ const fetchSingleAppRoutes: (
         path: '/document',
         component: '/views/document/index.vue',
         meta: {
+          icon: SvgMenuApiIcon,
           title: '接口文档',
         },
         children: access,
@@ -459,6 +469,7 @@ const fetchSingleAppRoutes: (
         path: '/entity',
         component: '/views/entity/index.vue',
         meta: {
+          icon: SvgMenuEntityIcon,
           title: '实体模型',
         },
         children: accessEntries,
@@ -468,6 +479,7 @@ const fetchSingleAppRoutes: (
     if (security) {
       routes.unshift({
         meta: {
+          icon: SvgMenuSafetyIcon,
           title: '全局认证',
         },
         name: '全局认证',
@@ -552,6 +564,7 @@ const initMarkdown = (markdowns: MarkDownDes[]) => {
         path: '/markdown',
         component: '/views/markdown/index.vue',
         meta: {
+          icon: SvgMenuDocumentIcon,
           title: '其它文档',
         },
         children: menus,

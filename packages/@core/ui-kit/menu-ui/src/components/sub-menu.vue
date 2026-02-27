@@ -169,10 +169,6 @@ function handleMouseleave(deepDispatch = false) {
   }
 }
 
-const menuIcon = computed(() =>
-  active.value ? props.activeIcon || props.icon : props.icon,
-);
-
 const item = reactive({
   active,
   parentPaths,
@@ -217,7 +213,9 @@ onBeforeUnmount(() => {
       >
         <template #trigger>
           <SubMenuContent
+            :active-icon="props.activeIcon"
             :class="is('active', active)"
+            :icon="props.icon"
             :is-menu-more="isSubMenuMore"
             :is-top-level-menu-submenu="isTopLevelMenuSubmenu"
             :level="currentLevel"
@@ -247,7 +245,9 @@ onBeforeUnmount(() => {
 
     <template v-else>
       <SubMenuContent
+        :active-icon="props.activeIcon"
         :class="is('active', active)"
+        :icon="props.icon"
         :is-menu-more="isSubMenuMore"
         :is-top-level-menu-submenu="isTopLevelMenuSubmenu"
         :level="currentLevel"
