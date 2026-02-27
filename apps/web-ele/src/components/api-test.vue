@@ -214,8 +214,12 @@ async function sendRequest() {
               if (h.contentType === 'application/json') {
                 // JSON 类型需要序列化，并用 Blob 设置 Content-Type
                 try {
-                  const jsonStr = JSON.stringify(typeof value === 'string' ? JSON.parse(value) : value);
-                  const blob = new Blob([jsonStr], { type: 'application/json' });
+                  const jsonStr = JSON.stringify(
+                    typeof value === 'string' ? JSON.parse(value) : value,
+                  );
+                  const blob = new Blob([jsonStr], {
+                    type: 'application/json',
+                  });
                   formData.append(h.name, blob);
                   return; // 已处理，直接返回
                 } catch {
