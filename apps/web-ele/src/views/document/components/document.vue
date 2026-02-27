@@ -6,6 +6,7 @@ import { useRoute } from 'vue-router';
 
 import { ApiLinkPrefix, ApiTestRun, ApiTestRunning } from '@vben/icons';
 
+import { useClipboard } from '@vueuse/core';
 import {
   ElButton,
   ElCard,
@@ -13,6 +14,7 @@ import {
   ElCollapseItem,
   ElDescriptions,
   ElDescriptionsItem,
+  ElMessage,
   ElRadioButton,
   ElRadioGroup,
   ElTooltip,
@@ -251,6 +253,21 @@ const responseSchema = computed(() => {
   };
 });
 
+// 复制功能
+const { copy: copyToClipboard } = useClipboard();
+
+// 复制 baseUrl
+async function handleCopyBaseUrl() {
+  await copyToClipboard(baseUrl.value);
+  ElMessage.success('Base URL 已复制');
+}
+
+// 复制 path
+async function handleCopyPath() {
+  await copyToClipboard(apiInfo.value.path);
+  ElMessage.success('Path 已复制');
+}
+
 const handleTest = () => {
   if (props.showTest) {
     return;
@@ -318,18 +335,23 @@ defineExpose({
                 {{ apiInfo.method.toUpperCase() }}
               </span>
               <ElTooltip placement="top" :content="baseUrl" v-if="baseUrl">
-                <ElButton size="small" class="ml-2 !px-1">
+                <ElButton
+                  size="small"
+                  class="ml-2 !px-1"
+                  @click="handleCopyBaseUrl"
+                >
                   <ApiLinkPrefix class="size-4" />
                 </ElButton>
               </ElTooltip>
-              <PathSegment
-                :path="apiInfo.path"
-                :param-style="{
-                  ...methodType[apiInfo.method.toUpperCase()],
-                  borderColor: methodType[apiInfo.method.toUpperCase()].color,
-                }"
-                class="ml-2"
-              />
+              <span @click="handleCopyPath" class="ml-2 cursor-pointer">
+                <PathSegment
+                  :path="apiInfo.path"
+                  :param-style="{
+                    ...methodType[apiInfo.method.toUpperCase()],
+                    borderColor: methodType[apiInfo.method.toUpperCase()].color,
+                  }"
+                />
+              </span>
             </div>
             <ElButton
               text

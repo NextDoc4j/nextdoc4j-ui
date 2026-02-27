@@ -2,7 +2,6 @@ import { createIconifyIcon } from '@vben-core/icons';
 
 import './load.js';
 
-
 const SvgCaretRightIcon = createIconifyIcon('svg:caret-right');
 const SvgCloseIcon = createIconifyIcon('svg:close-duotone');
 const SvgCopyIcon = createIconifyIcon('svg:copy');
