@@ -58,9 +58,11 @@ const countLeaves = (treeData: MenuRecordRaw) => {
   <MenuItem
     v-if="!hasChildren"
     :key="menu.path"
+    :active-icon="menu.activeIcon"
     :badge="menu.badge"
     :badge-type="menu.badgeType"
     :badge-variants="menu.badgeVariants"
+    :icon="menu.icon"
     :path="menu.path"
   >
     <template #title>
@@ -74,7 +76,13 @@ const countLeaves = (treeData: MenuRecordRaw) => {
       </span>
     </template>
   </MenuItem>
-  <SubMenuComp v-else :key="`${menu.path}_sub`" :path="menu.path">
+  <SubMenuComp
+    v-else
+    :key="`${menu.path}_sub`"
+    :active-icon="menu.activeIcon"
+    :icon="menu.icon"
+    :path="menu.path"
+  >
     <template #content>
       <MenuBadge
         :badge="menu.badge"

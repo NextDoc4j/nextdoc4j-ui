@@ -6,6 +6,8 @@ import { computed } from 'vue';
 import { useNamespace } from '@vben-core/composables';
 import { ChevronDown, ChevronRight } from '@vben-core/icons';
 
+import { Icon as IconifyIcon } from '@iconify/vue';
+
 import { useMenuContext } from '../hooks';
 
 interface Props extends MenuItemProps {
@@ -23,6 +25,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const rootMenu = useMenuContext();
 const { b, e, is } = useNamespace('sub-menu-content');
+const nsMenu = useNamespace('menu');
 
 const opened = computed(() => {
   return rootMenu?.openedMenus.includes(props.path);
@@ -60,6 +63,15 @@ const iconComp = computed(() => {
 const iconArrowStyle = computed(() => {
   return opened.value ? { transform: `rotate(180deg)` } : {};
 });
+
+/**
+ * 判断是否为 Vue 组件
+ */
+const isIconComponent = computed(() => {
+  const { icon } = props;
+  if (!icon) return false;
+  return typeof icon !== 'string';
+});
 </script>
 <template>
   <div
@@ -71,12 +83,18 @@ const iconArrowStyle = computed(() => {
   >
     <slot></slot>
 
-    <!-- <VbenIcon
-      v-if="!isMenuMore"
+    <!-- Vue 组件图标 -->
+    <component
+      :is="props.icon"
+      v-if="isIconComponent && props.icon && !isMenuMore"
       :class="nsMenu.e('icon')"
-      :icon="() => 'API'"
-      fallback
-    /> -->
+    />
+    <!-- 字符串图标 (iconify) -->
+    <IconifyIcon
+      v-else-if="props.icon && !isMenuMore"
+      :icon="props.icon"
+      :class="nsMenu.e('icon')"
+    />
     <div :class="[e('title')]">
       <slot name="title"></slot>
     </div>

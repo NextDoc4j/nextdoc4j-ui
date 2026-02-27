@@ -1189,6 +1189,9 @@ importers:
 
   packages/@core/ui-kit/menu-ui:
     dependencies:
+      '@iconify/vue':
+        specifier: 'catalog:'
+        version: 5.0.0(vue@3.5.17(typescript@5.8.3))
       '@vben-core/composables':
         specifier: workspace:*
         version: link:../../composables

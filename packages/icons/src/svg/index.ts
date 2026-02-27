@@ -17,6 +17,11 @@ const SvgCopyIcon = createIconifyIcon('svg:copy');
 const SvgFormatLeftIcon = createIconifyIcon('svg:format-left');
 const SvgExchangeIcon = createIconifyIcon('svg:exchange');
 const SvgApiPrefixIcon = createIconifyIcon('svg:api-prefix');
+const SvgMenuApiIcon = createIconifyIcon('svg:menu-api');
+const SvgMenuDocumentIcon = createIconifyIcon('svg:menu-document');
+const SvgMenuEntityIcon = createIconifyIcon('svg:menu-entity');
+const SvgMenuHomeIcon = createIconifyIcon('svg:menu-home');
+const SvgMenuSafetyIcon = createIconifyIcon('svg:menu-safety');
 
 export {
   SvgAntdvLogoIcon,
@@ -34,4 +39,9 @@ export {
   SvgDownloadIcon,
   SvgExchangeIcon,
   SvgFormatLeftIcon,
+  SvgMenuApiIcon,
+  SvgMenuDocumentIcon,
+  SvgMenuEntityIcon,
+  SvgMenuHomeIcon,
+  SvgMenuSafetyIcon,
 };
