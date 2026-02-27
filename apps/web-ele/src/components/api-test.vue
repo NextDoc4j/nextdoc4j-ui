@@ -208,12 +208,28 @@ async function sendRequest() {
           formDataParams.value
             .filter((h) => h.enabled && h.name)
             .forEach((h) => {
-              if (Array.isArray(h.value) && h.value.length > 0) {
-                h.value.forEach((item) => {
+              let value = h.value;
+
+              // 根据 contentType 处理值
+              if (h.contentType === 'application/json') {
+                // JSON 类型需要序列化，并用 Blob 设置 Content-Type
+                try {
+                  const jsonStr = JSON.stringify(typeof value === 'string' ? JSON.parse(value) : value);
+                  const blob = new Blob([jsonStr], { type: 'application/json' });
+                  formData.append(h.name, blob);
+                  return; // 已处理，直接返回
+                } catch {
+                  // 如果解析失败，直接字符串化
+                  value = String(value);
+                }
+              }
+
+              if (Array.isArray(value) && value.length > 0) {
+                value.forEach((item) => {
                   formData.append(h.name, item);
                 });
               } else {
-                formData.append(h.name, h.value);
+                formData.append(h.name, value);
               }
             });
         }

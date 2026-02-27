@@ -34,6 +34,7 @@ interface ParamItem {
   format?: string;
   required?: boolean;
   enum?: number[] | string[];
+  contentType?: string;
   schema?: {
     enum?: number[] | string[];
     format?: string;
@@ -45,8 +46,18 @@ interface ParamItem {
   };
 }
 
+// 内容类型选项
+const contentTypeOptions = [
+  { label: 'application/octet-stream', value: 'application/octet-stream' },
+  { label: 'application/json', value: 'application/json' },
+  { label: 'application/xml', value: 'application/xml' },
+  { label: 'text/plain', value: 'text/plain' },
+  { label: 'text/html', value: 'text/html' },
+];
+
 const props = defineProps<{
   tableData: ParamItem[];
+  showContentType?: boolean;
 }>();
 const tableRef = ref();
 const fileList = ref([]);
@@ -88,7 +99,7 @@ function remove(index: number) {
 // 添加参数
 function add() {
   // eslint-disable-next-line vue/no-mutating-props
-  props.tableData.push({ name: '', value: '', enabled: true });
+  props.tableData.push({ name: '', value: '', enabled: true, contentType: undefined });
 }
 
 // 全选控制，保护必填参数
@@ -202,6 +213,23 @@ const handleExceed: UploadProps['onExceed'] = (files) => {
               <SvgCloseIcon class="ml-[-12px] size-3" />
             </ElIcon>
           </div>
+        </template>
+      </ElTableColumn>
+      <ElTableColumn v-if="showContentType" prop="contentType" label="内容类型" width="180">
+        <template #default="{ row }">
+          <ElSelect
+            v-model="row.contentType"
+            placeholder="自动"
+            clearable
+            size="small"
+          >
+            <ElOption
+              v-for="option in contentTypeOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
+          </ElSelect>
         </template>
       </ElTableColumn>
     </ElTable>
