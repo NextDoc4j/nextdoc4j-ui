@@ -64,18 +64,22 @@ function inferContentType(type?: string, format?: string): string | undefined {
   }
   if (!type) return undefined;
   switch (type) {
-    case 'file':
-      return 'application/octet-stream';
-    case 'string':
-    case 'number':
-    case 'integer':
-    case 'boolean':
-      return 'text/plain';
-    case 'object':
     case 'array':
+    case 'object': {
       return 'application/json';
-    default:
+    }
+    case 'boolean':
+    case 'integer':
+    case 'number':
+    case 'string': {
+      return 'text/plain';
+    }
+    case 'file': {
+      return 'application/octet-stream';
+    }
+    default: {
       return undefined;
+    }
   }
 }
 // 请求体类型
@@ -192,11 +196,11 @@ onMounted(() => {
         description: properties[key].description,
         type: properties[key].type,
         contentType: inferContentType(
-              properties[key].type,
-              properties[key].type === 'array'
-                ? properties[key]?.items?.format
-                : properties[key].format,
-            ),
+          properties[key].type,
+          properties[key].type === 'array'
+            ? properties[key]?.items?.format
+            : properties[key].format,
+        ),
       });
     });
   } else if (props.requestBody.content['multipart/form-data']) {
@@ -224,11 +228,11 @@ onMounted(() => {
           description: properties[key].description,
           type: properties[key].type,
           contentType: inferContentType(
-              properties[key].type,
-              properties[key].type === 'array'
-                ? properties[key]?.items?.format
-                : properties[key].format,
-            ),
+            properties[key].type,
+            properties[key].type === 'array'
+              ? properties[key]?.items?.format
+              : properties[key].format,
+          ),
         });
       });
     }
@@ -258,11 +262,11 @@ onMounted(() => {
           description: properties[key].description,
           type: properties[key].type,
           contentType: inferContentType(
-              properties[key].type,
-              properties[key].type === 'array'
-                ? properties[key]?.items?.format
-                : properties[key].format,
-            ),
+            properties[key].type,
+            properties[key].type === 'array'
+              ? properties[key]?.items?.format
+              : properties[key].format,
+          ),
         });
       });
     }
