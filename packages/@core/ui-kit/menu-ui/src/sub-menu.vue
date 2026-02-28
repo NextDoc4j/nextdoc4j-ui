@@ -3,6 +3,8 @@ import type { MenuRecordRaw } from '@vben-core/typings';
 
 import { computed } from 'vue';
 
+import { VbenTooltip } from '@vben-core/shadcn-ui';
+
 import { methodType } from '../../../../../apps/web-ele/src/constants/methods';
 import { MenuBadge, MenuItem, SubMenu as SubMenuComp } from './components';
 // eslint-disable-next-line import/no-self-import
@@ -28,6 +30,13 @@ const hasChildren = computed(() => {
   const { menu } = props;
   return (
     Reflect.has(menu, 'children') && !!menu.children && menu.children.length > 0
+  );
+});
+
+const showEntityDescriptionTooltip = computed(() => {
+  const { menu } = props;
+  return (
+    !hasChildren.value && !!menu.description && menu.path.startsWith('/entity/')
   );
 });
 
@@ -66,7 +75,20 @@ const countLeaves = (treeData: MenuRecordRaw) => {
     :path="menu.path"
   >
     <template #title>
-      <span class="flex-1">{{ menu.name }}</span>
+      <VbenTooltip
+        v-if="showEntityDescriptionTooltip"
+        side="right"
+        :content-class="['max-w-[360px] text-left leading-5']"
+      >
+        <template #trigger>
+          <span class="min-w-0 flex-1 truncate">{{ menu.name }}</span>
+        </template>
+        <div class="space-y-1">
+          <div class="font-medium">{{ menu.name }}</div>
+          <div class="text-xs opacity-80">{{ menu.description }}</div>
+        </div>
+      </VbenTooltip>
+      <span v-else class="flex-1">{{ menu.name }}</span>
       <span
         class="inline-flex max-w-[70px] items-center rounded-md px-1.5 py-0.5 font-mono text-xs font-bold text-white"
         :style="{ ...methodType[menu?.method?.toUpperCase()] }"
