@@ -91,7 +91,17 @@
       "close": "关闭",
       "noResults": "未找到搜索结果",
       "noRecent": "没有搜索历史",
-      "recent": "搜索历史"
+      "recent": "搜索历史",
+      "clearRecent": "清空历史",
+      "filterAll": "全部",
+      "filterApi": "接口",
+      "filterEntity": "实体",
+      "filterMarkdown": "文档",
+      "filterSystem": "系统",
+      "sourceAll": "所有接口",
+      "sourceGroup": "分组接口",
+      "groupLabel": "分组",
+      "groupAll": "全部"
     },
     "lockScreen": {
       "title": "锁定屏幕",

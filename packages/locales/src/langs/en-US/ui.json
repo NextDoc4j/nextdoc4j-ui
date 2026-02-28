@@ -91,7 +91,17 @@
       "close": "Close",
       "noResults": "No Search Results Found",
       "noRecent": "No Search History",
-      "recent": "Search History"
+      "recent": "Search History",
+      "clearRecent": "Clear History",
+      "filterAll": "All",
+      "filterApi": "API",
+      "filterEntity": "Entity",
+      "filterMarkdown": "Doc",
+      "filterSystem": "System",
+      "sourceAll": "All APIs",
+      "sourceGroup": "Grouped",
+      "groupLabel": "Group",
+      "groupAll": "All"
     },
     "lockScreen": {
       "title": "Lock Screen",

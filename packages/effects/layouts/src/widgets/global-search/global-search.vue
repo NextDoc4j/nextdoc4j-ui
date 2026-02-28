@@ -98,7 +98,7 @@ onMounted(() => {
   <div>
     <Modal
       :fullscreen-button="false"
-      class="w-[600px]"
+      class="w-[760px]"
       header-class="py-2 border-b"
     >
       <template #title>

@@ -63,10 +63,12 @@ function generateMenus(
     const resultPath = hideChildrenInMenu ? redirect || path : link || path;
 
     return {
+      apiPath: meta?.apiPath,
       activeIcon,
       badge,
       badgeType,
       badgeVariants,
+      description: meta?.description,
       icon,
       name,
       method: meta?.method ?? '',
@@ -74,6 +76,7 @@ function generateMenus(
       parent: route.parent,
       parents: route.parents,
       path: resultPath,
+      searchText: meta?.searchText,
       show: !meta.hideInMenu,
       children: resultChildren,
     };
