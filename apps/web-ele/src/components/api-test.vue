@@ -145,6 +145,8 @@ const responseStatus = ref({ code: 0, text: '-', type: 'default' });
 const responseTime = ref(0);
 const responseSize = ref('0 B');
 const responseData = ref<any>(null);
+const responseMimeType = ref('');
+const responseLanguage = ref('json');
 const responseHeaders = ref<
   Array<{ enabled: boolean; name: string; value: string }>
 >([]);
@@ -155,6 +157,258 @@ const handleClose = (e: any) => {
   e.stopPropagation();
   emit('cancel');
 };
+
+const normalizeContentType = (contentType: null | string) => {
+  return (contentType || '').split(';')[0]?.trim().toLowerCase() || '';
+};
+
+const isJsonContentType = (contentType: string) => {
+  return contentType.includes('/json') || contentType.endsWith('+json');
+};
+
+const isXmlContentType = (contentType: string) => {
+  return contentType.includes('/xml') || contentType.endsWith('+xml');
+};
+
+const isTextContentType = (contentType: string) => {
+  if (contentType.startsWith('text/')) {
+    return true;
+  }
+
+  return [
+    'application/graphql',
+    'application/javascript',
+    'application/x-javascript',
+    'application/x-www-form-urlencoded',
+    'application/yaml',
+    'application/x-yaml',
+    'text/yaml',
+  ].some((type) => contentType.includes(type));
+};
+
+const isBinaryContentType = (contentType: string) => {
+  if (!contentType) return false;
+  if (
+    isJsonContentType(contentType) ||
+    isXmlContentType(contentType) ||
+    isTextContentType(contentType) ||
+    contentType.endsWith('+yaml') ||
+    contentType.endsWith('+yml')
+  ) {
+    return false;
+  }
+  if (
+    contentType.startsWith('audio/') ||
+    contentType.startsWith('font/') ||
+    contentType.startsWith('image/') ||
+    contentType.startsWith('video/')
+  ) {
+    return true;
+  }
+
+  return [
+    'application/msword',
+    'application/octet-stream',
+    'application/pdf',
+    'application/vnd',
+    'application/x-7z-compressed',
+    'application/x-bzip',
+    'application/x-gzip',
+    'application/x-rar-compressed',
+    'application/zip',
+  ].some((type) => contentType.includes(type));
+};
+
+const isAttachmentResponse = (response: Response) => {
+  const disposition = response.headers.get('Content-Disposition') || '';
+  return /attachment/i.test(disposition) || /filename\*?=/i.test(disposition);
+};
+
+const looksLikeXml = (text: string) => {
+  return /^<\?xml|^<[a-zA-Z_][\w:.-]*[\s>]/.test(text.trim());
+};
+
+const looksLikeJson = (text: string) => {
+  const value = text.trim();
+  if (!value) return false;
+  return (
+    (value.startsWith('{') && value.endsWith('}')) ||
+    (value.startsWith('[') && value.endsWith(']'))
+  );
+};
+
+const prettyFormatXml = (xmlString: string) => {
+  const xml = xmlString.replaceAll(/>\s*</g, '><').trim();
+  if (!xml) return xmlString;
+
+  const parts = xml.replaceAll(/(>)(<)(\/*)/g, '$1\n$2$3').split('\n');
+  let indent = 0;
+
+  return parts
+    .map((part) => {
+      const line = part.trim();
+      if (!line) return '';
+
+      if (line.startsWith('</')) {
+        indent = Math.max(indent - 1, 0);
+      }
+
+      const padding = '  '.repeat(indent);
+      const result = `${padding}${line}`;
+
+      if (
+        line.startsWith('<') &&
+        !line.startsWith('</') &&
+        !line.endsWith('/>') &&
+        !line.includes('</')
+      ) {
+        indent += 1;
+      }
+      return result;
+    })
+    .filter(Boolean)
+    .join('\n');
+};
+
+const formatXml = (text: string) => {
+  if (!text) return '';
+  try {
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(text, 'application/xml');
+    const parseError = xmlDoc.querySelector('parsererror');
+    if (parseError) {
+      return text;
+    }
+    const serialized = new XMLSerializer().serializeToString(xmlDoc);
+    return prettyFormatXml(serialized);
+  } catch {
+    return text;
+  }
+};
+
+const parseUrlEncodedBody = (text: string) => {
+  const params = new URLSearchParams(text);
+  const result: Record<string, string | string[]> = {};
+  params.forEach((value, key) => {
+    const current = result[key];
+    if (current === undefined) {
+      result[key] = value;
+      return;
+    }
+    if (Array.isArray(current)) {
+      current.push(value);
+      return;
+    }
+    result[key] = [current, value];
+  });
+  return result;
+};
+
+const resolveResponseLanguage = (contentType: string) => {
+  if (isJsonContentType(contentType)) return 'json';
+  if (isXmlContentType(contentType)) return 'xml';
+  if (contentType.includes('x-www-form-urlencoded')) return 'json';
+  if (contentType.includes('html')) return 'html';
+  if (
+    contentType.includes('javascript') ||
+    contentType.includes('ecmascript')
+  ) {
+    return 'javascript';
+  }
+  if (contentType.includes('yaml') || contentType.includes('yml'))
+    return 'yaml';
+  return 'plaintext';
+};
+
+async function parseResponseBody(response: Response, requestUrl: string) {
+  const contentType = normalizeContentType(
+    response.headers.get('content-type'),
+  );
+  const language = resolveResponseLanguage(contentType);
+
+  if (response.status === 204 || response.status === 205) {
+    return {
+      contentType,
+      data: '',
+      language: 'plaintext',
+    };
+  }
+
+  if (isAttachmentResponse(response) || isBinaryContentType(contentType)) {
+    const blob = await response.blob();
+    const filename = getDownloadFilename(response, requestUrl);
+    downloadBlob(blob, filename);
+    return {
+      contentType,
+      data: {
+        contentType: contentType || blob.type || 'application/octet-stream',
+        filename,
+        size: formatSize(blob.size),
+        tip: '检测到二进制响应，已自动下载文件',
+      },
+      language: 'json',
+    };
+  }
+
+  const rawText = await response.text();
+
+  if (!rawText) {
+    return {
+      contentType,
+      data: '',
+      language,
+    };
+  }
+
+  if (
+    isJsonContentType(contentType) ||
+    (!contentType && looksLikeJson(rawText))
+  ) {
+    try {
+      return {
+        contentType,
+        data: JSON.parse(rawText),
+        language: 'json',
+      };
+    } catch {
+      return {
+        contentType,
+        data: rawText,
+        language: 'plaintext',
+      };
+    }
+  }
+
+  if (isXmlContentType(contentType) || looksLikeXml(rawText)) {
+    return {
+      contentType,
+      data: formatXml(rawText),
+      language: 'xml',
+    };
+  }
+
+  if (contentType.includes('x-www-form-urlencoded')) {
+    return {
+      contentType,
+      data: parseUrlEncodedBody(rawText),
+      language: 'json',
+    };
+  }
+
+  if (isTextContentType(contentType) || !contentType) {
+    return {
+      contentType,
+      data: rawText,
+      language,
+    };
+  }
+
+  return {
+    contentType,
+    data: rawText,
+    language: 'plaintext',
+  };
+}
 
 async function sendRequest() {
   loading.value = true;
@@ -259,7 +513,10 @@ async function sendRequest() {
             .filter((h) => h.enabled && h.name)
             .forEach((h) => searchParams.append(h.name, h.value));
         }
-        requestHeaders.append('Content-Type', 'x-www-form-urlencoded');
+        requestHeaders.append(
+          'Content-Type',
+          'application/x-www-form-urlencoded',
+        );
         break;
       }
       case 'xml': {
@@ -286,21 +543,11 @@ async function sendRequest() {
             ? searchParams
             : bodyData || undefined,
     });
-    // 处理响应
-    // 根据Content-Type自动选择解析方式
-    const contentType = response.headers.get('content-type');
-    let responseBody;
-    if (contentType && contentType.includes('application/json')) {
-      responseBody = await response.json();
-    } else if (contentType && contentType.includes('text/plain')) {
-      responseBody = await response.text();
-    } else {
-      responseBody = await response.blob();
-      downloadBlob(
-        responseBody,
-        getDownloadFilename(response, requestUrl.value),
-      );
-    }
+    // 处理响应：按 content-type 自动解析 JSON/XML/Text/Form/Binary
+    const parsedResponse = await parseResponseBody(
+      response,
+      finalUrl.toString(),
+    );
 
     responseTime.value = Number((performance.now() - startTime).toFixed(2));
     responseStatus.value = {
@@ -308,7 +555,9 @@ async function sendRequest() {
       text: `${response.status} ${response.statusText}`,
       type: response.ok ? 'success' : 'error',
     };
-    responseData.value = responseBody;
+    responseData.value = parsedResponse.data;
+    responseMimeType.value = parsedResponse.contentType || '-';
+    responseLanguage.value = parsedResponse.language || 'plaintext';
 
     const header = Object.fromEntries(response.headers.entries());
     responseHeaders.value = [];
@@ -320,14 +569,10 @@ async function sendRequest() {
       });
     }
     // 计算响应大小
-    let size;
-    if (typeof responseBody === 'string') {
-      size = responseBody.length * 2; // 字符串按UTF-16计算
-    } else if (responseBody instanceof Blob) {
-      size = responseBody.size;
-    } else {
-      size = JSON.stringify(responseBody).length * 2;
-    }
+    const size =
+      typeof parsedResponse.data === 'string'
+        ? parsedResponse.data.length * 2 // 字符串按UTF-16计算
+        : JSON.stringify(parsedResponse.data ?? '').length * 2;
     responseSize.value = formatSize(size);
   } catch (error: any) {
     ElMessage.error(error?.msg || '请求失败');
@@ -336,6 +581,9 @@ async function sendRequest() {
       text: error?.msg || '请求失败',
       type: 'error',
     };
+    responseData.value = null;
+    responseMimeType.value = '-';
+    responseLanguage.value = 'plaintext';
   } finally {
     loading.value = false;
     responseLoading.value = false;
@@ -392,7 +640,7 @@ function getDownloadFilename(response: Response, url: string): string {
   }
   // 备选 url 获取
   if (!filename) {
-    const pathname = new URL(url).pathname;
+    const pathname = new URL(url, window.location.origin).pathname;
     filename = pathname.split('/').pop() || 'download';
   }
   // 去除非法字符
@@ -601,6 +849,9 @@ onMounted(() => {
             <ElTooltip content="大小" placement="top">
               <span>{{ responseSize }}</span>
             </ElTooltip>
+            <ElTooltip content="响应类型" placement="top">
+              <span>{{ responseMimeType }}</span>
+            </ElTooltip>
           </ElSpace>
           <!-- responseLoading 时右上角不显示任何内容，由中间区域的大Loading覆盖 -->
         </div>
@@ -649,6 +900,7 @@ onMounted(() => {
                   :data="responseData"
                   :descriptions="responseDescriptions"
                   :image-render="true"
+                  :language="responseLanguage"
                   class="response-body"
                   :loading="responseLoading"
                 />
