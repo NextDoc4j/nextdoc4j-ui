@@ -3,10 +3,6 @@ import type { Router, RouteRecordRaw } from 'vue-router';
 
 interface RouteMeta {
   /**
-   * API 原始路径（用于搜索与展示）
-   */
-  apiPath?: string;
-  /**
    * 激活图标（菜单/tab）
    */
   activeIcon?: string;
@@ -24,6 +20,10 @@ interface RouteMeta {
    * @default 0
    */
   affixTabOrder?: number;
+  /**
+   * API 原始路径（用于搜索与展示）
+   */
+  apiPath?: string;
   /**
    * 需要特定的角色标识才可以访问
    * @default []
