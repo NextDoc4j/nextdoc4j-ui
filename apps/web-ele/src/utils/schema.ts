@@ -159,9 +159,10 @@ export function generateExample(schema: Schema): any {
   }
 
   // 处理 oneOf
-  if (schema.type === 'oneOf' && schema.items?.length > 0) {
+  if (schema.oneOf && schema.oneOf.length > 0) {
     // 返回第一个选项的示例
-    return generateExample(schema.items[0]);
+    const [firstSchema] = schema.oneOf;
+    return firstSchema ? generateExample(firstSchema) : null;
   }
   const example: Record<string, any> = {};
 

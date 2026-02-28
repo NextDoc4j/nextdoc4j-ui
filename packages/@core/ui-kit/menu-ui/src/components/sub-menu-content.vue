@@ -72,6 +72,10 @@ const isIconComponent = computed(() => {
   if (!icon) return false;
   return typeof icon !== 'string';
 });
+
+const iconName = computed(() => {
+  return typeof props.icon === 'string' ? props.icon : undefined;
+});
 </script>
 <template>
   <div
@@ -91,8 +95,8 @@ const isIconComponent = computed(() => {
     />
     <!-- 字符串图标 (iconify) -->
     <IconifyIcon
-      v-else-if="props.icon && !isMenuMore"
-      :icon="props.icon"
+      v-else-if="iconName && !isMenuMore"
+      :icon="iconName"
       :class="nsMenu.e('icon')"
     />
     <div :class="[e('title')]">

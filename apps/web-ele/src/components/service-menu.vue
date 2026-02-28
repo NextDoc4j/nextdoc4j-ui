@@ -1,10 +1,11 @@
 <script lang="ts" setup>
-import type { MenuRecordRaw } from '@vben/types';
+import type { MenuRecordRaw, ThemeModeType } from '@vben/types';
 
 import { computed } from 'vue';
 
-// 导入原有的 LayoutMenu 组件
-import { Menu } from '@vben-core/menu-ui';
+import { LayoutMenu as Menu } from '@vben/layouts';
+
+import { storeToRefs } from 'pinia';
 
 import ServiceSelector from '#/components/service-selector.vue';
 import { useAggregationStore } from '#/store/aggregation';
@@ -16,9 +17,9 @@ interface Props {
   collapseShowTitle?: boolean;
   defaultActive?: string;
   menus?: MenuRecordRaw[];
-  mode?: string;
+  mode?: 'horizontal' | 'vertical';
   rounded?: boolean;
-  theme?: string;
+  theme?: ThemeModeType;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -29,7 +30,7 @@ const props = withDefaults(defineProps<Props>(), {
   menus: () => [],
   mode: 'vertical',
   rounded: false,
-  theme: '',
+  theme: undefined,
 });
 
 const emit = defineEmits<{

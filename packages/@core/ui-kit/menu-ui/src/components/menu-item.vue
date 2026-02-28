@@ -39,6 +39,10 @@ const isIconComponent = computed(() => {
   return typeof icon !== 'string';
 });
 
+const iconName = computed(() => {
+  return typeof props.icon === 'string' ? props.icon : undefined;
+});
+
 const isTopLevelMenuItem = computed(
   () => parentMenu.value?.type.name === 'Menu',
 );
@@ -115,8 +119,8 @@ onBeforeUnmount(() => {
           />
           <!-- 字符串图标 (iconify) -->
           <IconifyIcon
-            v-else-if="props.icon"
-            :icon="props.icon"
+            v-else-if="iconName"
+            :icon="iconName"
             :class="nsMenu.e('icon')"
           />
           <slot></slot>
@@ -141,8 +145,8 @@ onBeforeUnmount(() => {
       />
       <!-- 字符串图标 (iconify) -->
       <IconifyIcon
-        v-else-if="props.icon"
-        :icon="props.icon"
+        v-else-if="iconName"
+        :icon="iconName"
         :class="nsMenu.e('icon')"
       />
       <slot></slot>
