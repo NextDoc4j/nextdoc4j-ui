@@ -34,22 +34,22 @@ interface MenuRecordRaw extends MenuRecordBadgeRaw {
    */
   activeIcon?: string;
   /**
+   * API 原始路径（用于搜索与展示）
+   */
+  apiPath?: string;
+  /**
    * 子菜单
    */
   children?: MenuRecordRaw[];
+  /**
+   * 描述信息（用于搜索与展示）
+   */
+  description?: string;
   /**
    * 是否禁用菜单
    * @default false
    */
   disabled?: boolean;
-  /**
-   * API 原始路径（用于搜索与展示）
-   */
-  apiPath?: string;
-  /**
-   * 描述信息（用于搜索与展示）
-   */
-  description?: string;
   /**
    * 图标名
    */

@@ -461,7 +461,8 @@ const fetchSingleAppRoutes: (
             if (!entityGroup.children) {
               entityGroup.children = [];
             }
-            const schemaDescription = components?.schemas?.[key]?.description || '';
+            const schemaDescription =
+              components?.schemas?.[key]?.description || '';
             entityGroup.children.push({
               component: '/views/entity/index.vue',
               name: `${tag}*${key}`,
