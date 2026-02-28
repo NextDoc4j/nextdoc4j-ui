@@ -1,10 +1,11 @@
 <script lang="ts" setup>
-import type { MenuRecordRaw, RouteRecordRaw } from '@vben/types';
+import type { MenuRecordRaw } from '@vben/types';
 
 import { computed } from 'vue';
 import { useRouter } from 'vue-router';
 
 import { preferences } from '@vben/preferences';
+import { useAccessStore } from '@vben/stores';
 
 import { useApiStore } from '#/store';
 
@@ -41,15 +42,20 @@ const entityCount = computed(() => {
 const groupCount = computed(() => {
   return Object.keys(swaggerConfig.value?.urls ?? {}).length;
 });
+
 const router = useRouter();
+const accessStore = useAccessStore();
+
 const navList = computed(() => {
-  const rootChildren =
-    router.options.routes.find((i) => i.path === '/')?.children ?? [];
-  const documentChildren =
-    rootChildren.find((i) => i.path === '/document')?.children ?? [];
-  return documentChildren.filter((i) => i.name !== 'all');
+  const documentMenu = accessStore.accessMenus.find(
+    (menu) => menu.path === '/document',
+  );
+  return (documentMenu?.children ?? []).filter(
+    (menu) => menu.path !== '/document/all' && menu.name !== 'all',
+  );
 });
-const countLeaves = (treeData: RouteRecordRaw) => {
+
+const countLeaves = (treeData: MenuRecordRaw) => {
   let count = 0;
 
   function traverse(node: MenuRecordRaw) {
@@ -70,7 +76,8 @@ const countLeaves = (treeData: RouteRecordRaw) => {
 
   return count;
 };
-const handleClick = (item: RouteRecordRaw) => {
+
+const handleClick = (item: MenuRecordRaw) => {
   router.push(item.path);
 };
 </script>
@@ -234,7 +241,7 @@ const handleClick = (item: RouteRecordRaw) => {
           @click="handleClick(item)"
         >
           <h3 class="truncate text-sm text-[var(--el-text-color-primary)]">
-            {{ item.meta?.title }}
+            {{ item.name }}
           </h3>
           <span
             class="bg-[var(--el-color-primary)]/10 border-[var(--el-color-primary)]/30 inline-block rounded-xl border px-2 text-xs text-[var(--el-color-primary)]"

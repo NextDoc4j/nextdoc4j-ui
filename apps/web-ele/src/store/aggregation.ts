@@ -1,7 +1,6 @@
 import type { TabDefinition } from '@vben/types';
 
 import type {
-  ApiData,
   OpenAPISpec,
   SwaggerConfig,
   SwaggerServiceItem,
@@ -31,10 +30,10 @@ export interface ServiceItem {
  * 微服务缓存数据结构
  */
 interface ServiceCache {
-  openApi: OpenAPISpec;
-  config: SwaggerConfig;
-  apiData: ApiData;
-  groupDocs?: Map<string, OpenAPISpec>; // 分组文档缓存
+  openApi?: OpenAPISpec;
+  config?: SwaggerConfig;
+  apiData: ServiceApiData;
+  groupDocs: Map<string, OpenAPISpec>; // 分组文档缓存
 }
 
 /**
@@ -44,6 +43,14 @@ interface ServiceTabsState {
   tabs: TabDefinition[];
   currentTab: null | string;
 }
+
+interface ServiceData {
+  apiData: ServiceApiData;
+  config: SwaggerConfig;
+  openApi: OpenAPISpec;
+}
+
+type ServiceApiData = Record<string, Record<string, any[]>>;
 
 export const useAggregationStore = defineStore('aggregation', () => {
   const isAggregation = ref(false);
@@ -59,6 +66,7 @@ export const useAggregationStore = defineStore('aggregation', () => {
 
   // 微服务数据缓存
   const serviceCache = ref<Map<string, ServiceCache>>(new Map());
+  const serviceDataPending = ref<Map<string, Promise<ServiceData>>>(new Map());
 
   // 各微服务的标签页状态
   const serviceTabsState = ref<Map<string, ServiceTabsState>>(new Map());
@@ -113,9 +121,32 @@ export const useAggregationStore = defineStore('aggregation', () => {
     }
   };
 
+  const getOrCreateServiceCache = (serviceUrl: string): ServiceCache => {
+    const cache = serviceCache.value.get(serviceUrl);
+    if (cache) {
+      return cache;
+    }
+
+    const created: ServiceCache = {
+      apiData: {},
+      groupDocs: new Map(),
+    };
+    serviceCache.value.set(serviceUrl, created);
+    return created;
+  };
+
+  const resolveResponseData = <T>(response: unknown): T => {
+    return ((response as any)?.data ?? response) as T;
+  };
+
   const probeServiceAvailability = async (service: ServiceItem) => {
     try {
-      await baseRequestClient.get(service.url, { timeout: 3000 });
+      const openApiResponse = await baseRequestClient.get<{
+        data: OpenAPISpec;
+      }>(service.url, { timeout: 3000 });
+      const cache = getOrCreateServiceCache(service.url);
+      cache.openApi = resolveResponseData<OpenAPISpec>(openApiResponse);
+
       updateServiceStatus(service.url, {
         disabled: false,
         reason: '',
@@ -162,43 +193,46 @@ export const useAggregationStore = defineStore('aggregation', () => {
    */
   const getServiceData = async (
     service: ServiceItem,
-  ): Promise<{
-    apiData: ApiData;
-    config: SwaggerConfig;
-    openApi: OpenAPISpec;
-  }> => {
+  ): Promise<ServiceData> => {
     const cacheKey = service.url;
-
-    const cached = serviceCache.value.get(cacheKey);
-    if (cached) {
-      return cached;
+    const pending = serviceDataPending.value.get(cacheKey);
+    if (pending) {
+      return pending;
     }
 
-    // 获取服务文档 - baseRequestClient 返回 AxiosResponse，需要 .data 获取实际数据
-    const openApiResponse = await baseRequestClient.get<{
-      data: OpenAPISpec;
-    }>(service.url);
-    const openApi = (openApiResponse as any).data || openApiResponse;
+    const task = (async (): Promise<ServiceData> => {
+      const cache = getOrCreateServiceCache(cacheKey);
 
-    // 获取服务配置
-    const configResponse = await baseRequestClient.get<{
-      data: SwaggerConfig;
-    }>(`${service.url}/swagger-config`);
-    const config = (configResponse as any).data || configResponse;
+      // 首次进入聚合页时，probe 已经拉过 openApi，这里只做增量补全
+      if (!cache.openApi) {
+        const openApiResponse = await baseRequestClient.get<{
+          data: OpenAPISpec;
+        }>(service.url);
+        cache.openApi = resolveResponseData<OpenAPISpec>(openApiResponse);
+      }
 
-    // 构建 apiData（这里需要返回，后续由路由生成逻辑填充）
-    const apiData: ApiData = {};
+      if (!cache.config) {
+        const configResponse = await baseRequestClient.get<{
+          data: SwaggerConfig;
+        }>(`${service.url}/swagger-config`);
+        cache.config = resolveResponseData<SwaggerConfig>(configResponse);
+      }
 
-    const cacheData: ServiceCache = {
-      openApi,
-      config,
-      apiData,
-      groupDocs: new Map(),
-    };
+      if (!cache.openApi || !cache.config) {
+        throw new Error('Incomplete service cache data');
+      }
 
-    serviceCache.value.set(cacheKey, cacheData);
+      return {
+        apiData: cache.apiData,
+        config: cache.config,
+        openApi: cache.openApi,
+      };
+    })().finally(() => {
+      serviceDataPending.value.delete(cacheKey);
+    });
 
-    return cacheData;
+    serviceDataPending.value.set(cacheKey, task);
+    return task;
   };
 
   /**
@@ -209,13 +243,9 @@ export const useAggregationStore = defineStore('aggregation', () => {
     groupUrl: string,
   ): Promise<OpenAPISpec> => {
     const cacheKey = service.url;
-    const cache = serviceCache.value.get(cacheKey);
+    const cache = getOrCreateServiceCache(cacheKey);
 
-    if (!cache) {
-      throw new Error('Service cache not found');
-    }
-
-    const cachedDoc = cache.groupDocs?.get(groupUrl);
+    const cachedDoc = cache.groupDocs.get(groupUrl);
     if (cachedDoc) {
       return cachedDoc;
     }
@@ -225,9 +255,6 @@ export const useAggregationStore = defineStore('aggregation', () => {
     );
     const data = (response as any).data || response;
 
-    if (!cache.groupDocs) {
-      cache.groupDocs = new Map();
-    }
     cache.groupDocs.set(groupUrl, data);
 
     return data;
@@ -236,7 +263,10 @@ export const useAggregationStore = defineStore('aggregation', () => {
   /**
    * 更新微服务的 apiData
    */
-  const updateServiceApiData = (serviceUrl: string, apiData: TagGroups) => {
+  const updateServiceApiData = (
+    serviceUrl: string,
+    apiData: ServiceApiData,
+  ) => {
     const cache = serviceCache.value.get(serviceUrl);
     if (cache) {
       cache.apiData = apiData;
@@ -413,6 +443,7 @@ export const useAggregationStore = defineStore('aggregation', () => {
     isInit.value = false;
     mainConfigCache.value = {};
     serviceCache.value.clear();
+    serviceDataPending.value.clear();
     serviceTabsState.value.clear();
     try {
       localStorage.removeItem(STORAGE_KEY);
