@@ -3,6 +3,10 @@ import type { Router, RouteRecordRaw } from 'vue-router';
 
 interface RouteMeta {
   /**
+   * API 原始路径（用于搜索与展示）
+   */
+  apiPath?: string;
+  /**
    * 激活图标（菜单/tab）
    */
   activeIcon?: string;
@@ -43,6 +47,10 @@ interface RouteMeta {
     | 'success'
     | 'warning'
     | string;
+  /**
+   * 描述信息（用于搜索与展示）
+   */
+  description?: string;
   /**
    * 路由的完整路径作为key（默认true）
    */
@@ -121,6 +129,10 @@ interface RouteMeta {
    * 菜单所携带的参数
    */
   query?: Recordable;
+  /**
+   * 搜索索引文本（用于扩展搜索）
+   */
+  searchText?: string;
   /**
    * 标题名称
    */

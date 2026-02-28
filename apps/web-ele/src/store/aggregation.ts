@@ -298,6 +298,23 @@ export const useAggregationStore = defineStore('aggregation', () => {
   };
 
   /**
+   * 仅更新指定服务的当前激活标签路径
+   */
+  const setServiceCurrentTab = (serviceUrl: string, currentTab: string) => {
+    const state = serviceTabsState.value.get(serviceUrl) || {
+      tabs: [],
+      currentTab: null,
+    };
+
+    serviceTabsState.value.set(serviceUrl, {
+      ...state,
+      currentTab,
+    });
+
+    persistTabsState();
+  };
+
+  /**
    * 持久化标签页状态到 localStorage
    */
   const persistTabsState = () => {
@@ -466,6 +483,7 @@ export const useAggregationStore = defineStore('aggregation', () => {
     updateServiceApiData,
     saveCurrentTabsState,
     getServiceTabsState,
+    setServiceCurrentTab,
     initAggregation,
     switchService,
     reset,
