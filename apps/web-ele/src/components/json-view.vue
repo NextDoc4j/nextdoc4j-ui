@@ -99,6 +99,9 @@ const processDescription = (desc: string) => {
 // 格式化 JSON 并添加注释
 const formatJsonWithComments = (data: any) => {
   const jsonStr = JSON.stringify(data, null, 2);
+  if (typeof jsonStr !== 'string') {
+    return '';
+  }
   const lines = jsonStr.split('\n');
 
   // 获取字段的完整路径
@@ -149,6 +152,22 @@ const formatJsonWithComments = (data: any) => {
       return line;
     })
     .join('\n');
+};
+
+const resolveEditorValue = (data: any, language: string) => {
+  if (language === 'json') {
+    return formatJsonWithComments(data);
+  }
+
+  if (typeof data === 'string') {
+    return data;
+  }
+
+  try {
+    return JSON.stringify(data, null, 2) ?? '';
+  } catch {
+    return String(data ?? '');
+  }
 };
 
 // 创建自定义主题
@@ -205,7 +224,7 @@ onMounted(() => {
 
   createCustomTheme();
   editor = monaco.editor.create(editorContainer, {
-    value: formatJsonWithComments(props.data),
+    value: resolveEditorValue(props.data, props.language),
     language: props.language,
     theme:
       preferences.theme.mode === 'dark'
@@ -265,6 +284,13 @@ const getEditorValue = () => {
   return editor.getValue();
 };
 const handleFormat = () => {
+  if (!editor) return;
+
+  if (props.language !== 'json') {
+    editor.getAction('editor.action.formatDocument').run();
+    return;
+  }
+
   try {
     // 验证JSON有效性
     JSON.parse(editor.getValue());
@@ -293,10 +319,23 @@ watch(
   () => props.data,
   (newData) => {
     if (editor) {
-      editor.setValue(formatJsonWithComments(newData));
+      editor.setValue(resolveEditorValue(newData, props.language));
     }
   },
   { deep: true },
+);
+
+watch(
+  () => props.language,
+  (newLanguage) => {
+    if (!editor) return;
+
+    const model = editor.getModel();
+    if (model) {
+      monaco.editor.setModelLanguage(model, newLanguage || 'plaintext');
+    }
+    editor.setValue(resolveEditorValue(props.data, newLanguage || 'plaintext'));
+  },
 );
 
 watch(
