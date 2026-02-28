@@ -43,6 +43,14 @@ interface MenuRecordRaw extends MenuRecordBadgeRaw {
    */
   disabled?: boolean;
   /**
+   * API 原始路径（用于搜索与展示）
+   */
+  apiPath?: string;
+  /**
+   * 描述信息（用于搜索与展示）
+   */
+  description?: string;
+  /**
    * 图标名
    */
   icon?: Component | string;
@@ -70,6 +78,10 @@ interface MenuRecordRaw extends MenuRecordBadgeRaw {
    * 菜单路径，唯一，可当作key
    */
   path: string;
+  /**
+   * 搜索索引文本（用于扩展搜索）
+   */
+  searchText?: string;
   /**
    * 是否显示菜单
    * @default true

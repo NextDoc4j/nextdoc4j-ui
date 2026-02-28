@@ -1,17 +1,19 @@
 <script setup lang="ts">
 import type { MenuRecordRaw } from '@vben/types';
 
-import { nextTick, onMounted, ref, shallowRef, watch } from 'vue';
+import { computed, nextTick, onMounted, ref, shallowRef, watch } from 'vue';
 import { useRouter } from 'vue-router';
 
 import { SearchX, X } from '@vben/icons';
 import { $t } from '@vben/locales';
-import { mapTree, traverseTreeValues, uniqueByField } from '@vben/utils';
+import { isString } from '@vben/utils';
 
 import { VbenIcon, VbenScrollbar } from '@vben-core/shadcn-ui';
 import { isHttpUrl } from '@vben-core/shared/utils';
 
 import { onKeyStroke, useLocalStorage, useThrottleFn } from '@vueuse/core';
+
+import { methodType } from '../../../../../../apps/web-ele/src/constants/methods';
 
 defineOptions({
   name: 'SearchPanel',
@@ -27,13 +29,61 @@ const props = withDefaults(
 const emit = defineEmits<{ close: [] }>();
 
 const router = useRouter();
-const searchHistory = useLocalStorage<MenuRecordRaw[]>(
+type SearchCategory = 'api' | 'entity' | 'markdown' | 'system';
+type SearchFilter = 'all' | SearchCategory;
+type SearchSource = 'all' | 'group' | 'none';
+
+interface SearchItem {
+  apiPath?: string;
+  breadcrumb: string;
+  category: SearchCategory;
+  description?: string;
+  icon?: MenuRecordRaw['icon'];
+  method?: string;
+  operationId?: string;
+  path: string;
+  searchText?: string;
+  source: SearchSource;
+  title: string;
+}
+
+interface SearchHistoryItem {
+  apiPath?: string;
+  breadcrumb: string;
+  category: SearchCategory;
+  description?: string;
+  icon?: MenuRecordRaw['icon'];
+  method?: string;
+  operationId?: string;
+  path: string;
+  searchText?: string;
+  source: SearchSource;
+  title: string;
+}
+
+interface GroupedSearchItem {
+  category: SearchCategory;
+  items: Array<SearchItem & { displayIndex: number }>;
+}
+
+const searchHistory = useLocalStorage<SearchHistoryItem[]>(
   `__search-history-${location.hostname}__`,
   [],
 );
 const activeIndex = ref(-1);
-const searchItems = shallowRef<MenuRecordRaw[]>([]);
-const searchResults = ref<MenuRecordRaw[]>([]);
+const selectedFilter = ref<SearchFilter>('all');
+const searchItems = shallowRef<SearchItem[]>([]);
+const searchResults = ref<SearchItem[]>([]);
+
+const filterOptions = computed<Array<{ label: string; value: SearchFilter }>>(
+  () => [
+    { value: 'all', label: $t('ui.widgets.search.filterAll') },
+    { value: 'api', label: $t('ui.widgets.search.filterApi') },
+    { value: 'entity', label: $t('ui.widgets.search.filterEntity') },
+    { value: 'markdown', label: $t('ui.widgets.search.filterMarkdown') },
+    { value: 'system', label: $t('ui.widgets.search.filterSystem') },
+  ],
+);
 
 const handleSearch = useThrottleFn(search, 200);
 
@@ -51,27 +101,62 @@ function search(searchKey: string) {
   // 使用搜索关键词创建正则表达式
   const reg = createSearchReg(searchKey);
 
-  // 初始化结果数组
-  const results: MenuRecordRaw[] = [];
+  const lowerKey = searchKey.toLowerCase();
+  const scored = searchItems.value
+    .map((item) => {
+      const title = item.title.toLowerCase();
+      const breadcrumb = item.breadcrumb.toLowerCase();
+      const path = item.path.toLowerCase();
+      const apiPath = (item.apiPath || '').toLowerCase();
+      const description = (item.description || '').toLowerCase();
+      const searchText = (item.searchText || '').toLowerCase();
+      let score = 0;
 
-  // 遍历搜索项
-  traverseTreeValues(searchItems.value, (item) => {
-    // 如果菜单项的名称匹配正则表达式，将其添加到结果数组中
-    if (reg.test(item.name?.toLowerCase())) {
-      results.push(item);
-    }
-  });
+      if (title === lowerKey) {
+        score += 140;
+      }
+      if (title.startsWith(lowerKey)) {
+        score += 120;
+      }
+      if (title.includes(lowerKey)) {
+        score += 90;
+      }
+      if (reg.test(title)) {
+        score += 60;
+      }
+      if (breadcrumb.includes(lowerKey)) {
+        score += 30;
+      }
+      if (path.includes(lowerKey)) {
+        score += 20;
+      }
+      if (apiPath.includes(lowerKey)) {
+        score += 80;
+      }
+      if (description.includes(lowerKey)) {
+        score += 45;
+      }
+      if (searchText.includes(lowerKey)) {
+        score += 55;
+      }
+      if ((item.method || '').toLowerCase().includes(lowerKey)) {
+        score += 25;
+      }
+      if ((item.operationId || '').toLowerCase().includes(lowerKey)) {
+        score += 35;
+      }
+      // 同名接口优先展示分组路由，降低 all 兜底路由排序
+      if (item.category === 'api' && item.source === 'all') {
+        score -= 5;
+      }
+      return { item, score };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score);
 
-  // 更新搜索结果
-  searchResults.value = results;
-
-  // 如果有搜索结果，设置索引为 0
-  if (results.length > 0) {
-    activeIndex.value = 0;
-  }
-
-  // 赋值索引为 0
-  activeIndex.value = 0;
+  searchResults.value = deduplicateApiResults(
+    scored.map((entry) => entry.item),
+  );
 }
 
 // When the keyboard up and down keys move to an invisible place
@@ -87,18 +172,14 @@ function scrollIntoView() {
 }
 
 // enter keyboard event
-async function handleEnter() {
-  if (searchResults.value.length === 0) {
-    return;
-  }
-  const result = searchResults.value;
-  const index = activeIndex.value;
+async function handleEnter(index = activeIndex.value) {
+  const result = renderedItems.value;
   if (result.length === 0 || index < 0) {
     return;
   }
   const to = result[index];
   if (to) {
-    searchHistory.value.push(to);
+    addSearchHistory(to);
     handleClose();
     await nextTick();
     if (isHttpUrl(to.path)) {
@@ -111,23 +192,23 @@ async function handleEnter() {
 
 // Arrow key up
 function handleUp() {
-  if (searchResults.value.length === 0) {
+  if (renderedItems.value.length === 0) {
     return;
   }
   activeIndex.value--;
   if (activeIndex.value < 0) {
-    activeIndex.value = searchResults.value.length - 1;
+    activeIndex.value = renderedItems.value.length - 1;
   }
   scrollIntoView();
 }
 
 // Arrow key down
 function handleDown() {
-  if (searchResults.value.length === 0) {
+  if (renderedItems.value.length === 0) {
     return;
   }
   activeIndex.value++;
-  if (activeIndex.value > searchResults.value.length - 1) {
+  if (activeIndex.value > renderedItems.value.length - 1) {
     activeIndex.value = 0;
   }
   scrollIntoView();
@@ -140,19 +221,52 @@ function handleClose() {
 }
 
 // Activate when the mouse moves to a certain line
-function handleMouseenter(e: MouseEvent) {
-  const index = (e.target as HTMLElement)?.dataset.index;
-  activeIndex.value = Number(index);
+function handleMouseenter(index: number) {
+  activeIndex.value = index;
 }
 
 function removeItem(index: number) {
-  if (props.keyword) {
-    searchResults.value.splice(index, 1);
-  } else {
-    searchHistory.value.splice(index, 1);
-  }
+  const currentItem = renderedItems.value[index];
+  if (!currentItem) return;
+
+  searchHistory.value = searchHistory.value.filter(
+    (item) => item.path !== currentItem.path,
+  );
+  searchResults.value = searchResults.value.filter(
+    (item) => item.path !== currentItem.path,
+  );
+
   activeIndex.value = Math.max(activeIndex.value - 1, 0);
   scrollIntoView();
+}
+
+function addSearchHistory(item: SearchItem) {
+  const historyItem: SearchHistoryItem = {
+    apiPath: item.apiPath,
+    breadcrumb: item.breadcrumb,
+    category: item.category,
+    description: item.description,
+    icon: item.icon,
+    method: item.method,
+    operationId: item.operationId,
+    path: item.path,
+    searchText: item.searchText,
+    source: item.source,
+    title: item.title,
+  };
+
+  const nextHistory = searchHistory.value.filter(
+    (history) => history.path !== historyItem.path,
+  );
+  nextHistory.unshift(historyItem);
+  searchHistory.value = nextHistory.slice(0, 20);
+}
+
+function clearSearchHistory() {
+  searchHistory.value = [];
+  if (!isSearching.value) {
+    searchResults.value = [];
+  }
 }
 
 // 存储所有需要转义的特殊字符
@@ -190,29 +304,319 @@ function createSearchReg(key: string) {
   return new RegExp(`.*${keys}.*`);
 }
 
+function getPathSegments(path: string) {
+  return path.split('/').filter(Boolean);
+}
+
+function resolveCategory(path: string): SearchCategory {
+  if (path.startsWith('/document')) return 'api';
+  if (path.startsWith('/entity')) return 'entity';
+  if (path.startsWith('/markdown')) return 'markdown';
+  return 'system';
+}
+
+function resolveSearchSource(path: string): {
+  operationId?: string;
+  source: SearchSource;
+} {
+  const segments = getPathSegments(path);
+  if (segments[0] !== 'document' || segments.length < 4) {
+    return { source: 'none' };
+  }
+  return {
+    source: segments[1] === 'all' ? 'all' : 'group',
+    operationId: segments[segments.length - 1],
+  };
+}
+
+function normalizeMenuName(name: string) {
+  return isString(name) ? $t(name) : String(name ?? '');
+}
+
+function buildSearchIndex(
+  menus: MenuRecordRaw[],
+  parents: string[] = [],
+): SearchItem[] {
+  const items: SearchItem[] = [];
+
+  menus.forEach((menu) => {
+    const title = normalizeMenuName(menu.name);
+    const breadcrumbParts = [...parents, title].filter(Boolean);
+    const path = menu.path || '';
+    const category = resolveCategory(path);
+    const { source, operationId } = resolveSearchSource(path);
+    const hasChildren = Boolean(menu.children?.length);
+
+    // 仅索引末级菜单，避免出现“接口文档/所有接口/用户管理”这类上级项
+    if (path && !hasChildren) {
+      items.push({
+        apiPath: menu.apiPath,
+        breadcrumb: breadcrumbParts.join(' / '),
+        category,
+        description: menu.description,
+        icon: menu.icon,
+        method: menu.method,
+        operationId,
+        path,
+        searchText: menu.searchText,
+        source,
+        title,
+      });
+    }
+
+    if (menu.children?.length) {
+      items.push(...buildSearchIndex(menu.children, breadcrumbParts));
+    }
+  });
+
+  return items;
+}
+
+function deduplicateApiResults(results: SearchItem[]) {
+  const output: SearchItem[] = [];
+  const apiSeen = new Map<string, SearchItem>();
+  const seenPath = new Set<string>();
+
+  results.forEach((item) => {
+    if (!item.path) return;
+
+    if (item.category === 'api' && item.operationId) {
+      const apiKey = `${(item.method || '').toLowerCase()}:${item.operationId}`;
+      const existing = apiSeen.get(apiKey);
+
+      if (!existing) {
+        apiSeen.set(apiKey, item);
+        output.push(item);
+        return;
+      }
+
+      if (existing.source === 'all' && item.source === 'group') {
+        const index = output.findIndex((entry) => entry.path === existing.path);
+        if (index !== -1) {
+          output[index] = item;
+        }
+        apiSeen.set(apiKey, item);
+      }
+      return;
+    }
+
+    if (seenPath.has(item.path)) {
+      return;
+    }
+    seenPath.add(item.path);
+    output.push(item);
+  });
+
+  return output;
+}
+
+function normalizeHistoryItems(items: SearchHistoryItem[]) {
+  return items
+    .map((item) => {
+      const legacyItem = item as SearchHistoryItem & { name?: string };
+      const title = item.title || normalizeMenuName(legacyItem.name || '');
+      const sourceInfo = resolveSearchSource(item.path || '');
+      return {
+        apiPath: item.apiPath,
+        breadcrumb: item.breadcrumb || title,
+        category: item.category || resolveCategory(item.path || ''),
+        description: item.description,
+        icon: item.icon,
+        method: item.method,
+        operationId: item.operationId || sourceInfo.operationId,
+        path: item.path,
+        searchText: item.searchText,
+        source: item.source || sourceInfo.source,
+        title,
+      } as SearchHistoryItem;
+    })
+    .filter((item) => Boolean(item.path));
+}
+
+const searchablePathSet = computed(() => {
+  return new Set(searchItems.value.map((item) => item.path));
+});
+
+const sourceItems = computed(() => {
+  if (props.keyword?.trim()) {
+    return searchResults.value;
+  }
+  const validPaths = searchablePathSet.value;
+  return normalizeHistoryItems(searchHistory.value).filter((item) =>
+    validPaths.has(item.path),
+  );
+});
+
+const displayItems = computed(() => {
+  if (selectedFilter.value === 'all') {
+    return sourceItems.value;
+  }
+  return sourceItems.value.filter(
+    (item) => item.category === selectedFilter.value,
+  );
+});
+
+const filterCount = computed(() => {
+  const source = sourceItems.value;
+  return {
+    all: source.length,
+    api: source.filter((item) => item.category === 'api').length,
+    entity: source.filter((item) => item.category === 'entity').length,
+    markdown: source.filter((item) => item.category === 'markdown').length,
+    system: source.filter((item) => item.category === 'system').length,
+  };
+});
+
+const isSearching = computed(() => Boolean(props.keyword?.trim()));
+
+const groupedDisplayItems = computed<GroupedSearchItem[]>(() => {
+  const items = displayItems.value;
+  if (items.length === 0) {
+    return [];
+  }
+
+  const order: SearchCategory[] = ['api', 'entity', 'markdown', 'system'];
+  let displayIndex = 0;
+
+  const categories =
+    selectedFilter.value === 'all' ? order : [selectedFilter.value];
+
+  return categories
+    .map((category) => {
+      const categoryItems = items
+        .filter((item) => item.category === category)
+        .map((item) => ({ ...item, displayIndex: displayIndex++ }));
+
+      return {
+        category,
+        items: categoryItems,
+      };
+    })
+    .filter((group) => group.items.length > 0);
+});
+
+function escapeHtml(value: string) {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function highlightText(value: string) {
+  const keyword = props.keyword?.trim();
+  const raw = value || '';
+  if (!keyword) {
+    return escapeHtml(raw);
+  }
+
+  const escapedKeyword = keyword.replaceAll(
+    /[.*+?^${}()|[\]\\]/g,
+    String.raw`\$&`,
+  );
+  const reg = new RegExp(escapedKeyword, 'gi');
+
+  let output = '';
+  let lastIndex = 0;
+  let hasMatch = false;
+
+  while (true) {
+    const match = reg.exec(raw);
+    if (!match || match.index === undefined) break;
+
+    hasMatch = true;
+    output += escapeHtml(raw.slice(lastIndex, match.index));
+    output += `<mark class="search-hit">${escapeHtml(match[0])}</mark>`;
+    lastIndex = match.index + match[0].length;
+
+    if (match.index === reg.lastIndex) {
+      reg.lastIndex += 1;
+    }
+  }
+
+  if (!hasMatch) {
+    return escapeHtml(raw);
+  }
+  output += escapeHtml(raw.slice(lastIndex));
+  return output;
+}
+
+const getCategoryLabel = (category: SearchCategory) => {
+  if (category === 'api') return $t('ui.widgets.search.filterApi');
+  if (category === 'entity') return $t('ui.widgets.search.filterEntity');
+  if (category === 'markdown') return $t('ui.widgets.search.filterMarkdown');
+  return $t('ui.widgets.search.filterSystem');
+};
+
+const getDisplayTitle = (item: SearchItem) => {
+  if (item.category === 'entity' && item.description) {
+    return `${item.title} (${item.description})`;
+  }
+  return item.title;
+};
+
+const getApiGroupLabel = (item: SearchItem) => {
+  if (item.category !== 'api') return '';
+  const segments = getPathSegments(item.path);
+  if (segments[0] !== 'document') return '';
+  if (segments[1] === 'all') {
+    return $t('ui.widgets.search.groupAll');
+  }
+  return segments[1] || '';
+};
+
+const getMethodStyle = (method?: string) => {
+  if (!method) return undefined;
+  return methodType[method.toUpperCase()] || undefined;
+};
+
+const renderedItems = computed(() => {
+  return groupedDisplayItems.value.flatMap((group) => group.items);
+});
+
 watch(
   () => props.keyword,
   (val) => {
-    if (val) {
+    if (val?.trim()) {
       handleSearch(val);
     } else {
-      searchResults.value = [...searchHistory.value];
+      searchResults.value = [];
     }
   },
 );
 
+watch(
+  () => props.menus,
+  (menus) => {
+    searchItems.value = deduplicateApiResults(buildSearchIndex(menus ?? []));
+    if (props.keyword?.trim()) {
+      handleSearch(props.keyword);
+    }
+  },
+  { deep: true, immediate: true },
+);
+
+watch(
+  renderedItems,
+  (items) => {
+    if (items.length === 0) {
+      activeIndex.value = -1;
+      return;
+    }
+
+    if (activeIndex.value < 0 || activeIndex.value >= items.length) {
+      activeIndex.value = 0;
+    }
+  },
+  { immediate: true },
+);
+
 onMounted(() => {
-  searchItems.value = mapTree(props.menus, (item) => {
-    return {
-      ...item,
-      name: $t(item?.name),
-    };
-  });
-  if (searchHistory.value.length > 0) {
-    searchResults.value = searchHistory.value;
-  }
   // enter search
-  onKeyStroke('Enter', handleEnter);
+  onKeyStroke('Enter', () => {
+    void handleEnter();
+  });
   // Monitor keyboard arrow keys
   onKeyStroke('ArrowUp', handleUp);
   onKeyStroke('ArrowDown', handleDown);
@@ -222,67 +626,172 @@ onMounted(() => {
 </script>
 
 <template>
-  <VbenScrollbar>
-    <div class="!flex h-full justify-center px-2 sm:max-h-[450px]">
-      <!-- 无搜索结果 -->
-      <div
-        v-if="keyword && searchResults.length === 0"
-        class="text-muted-foreground text-center"
-      >
-        <SearchX class="mx-auto mt-4 size-12" />
-        <p class="mb-10 mt-6 text-xs">
-          {{ $t('ui.widgets.search.noResults') }}
-          <span class="text-foreground text-sm font-medium">
-            "{{ keyword }}"
-          </span>
-        </p>
-      </div>
-      <!-- 历史搜索记录 & 没有搜索结果 -->
-      <div
-        v-if="!keyword && searchResults.length === 0"
-        class="text-muted-foreground text-center"
-      >
-        <p class="my-10 text-xs">
-          {{ $t('ui.widgets.search.noRecent') }}
-        </p>
-      </div>
-
-      <ul v-show="searchResults.length > 0" class="w-full">
-        <li
-          v-if="searchHistory.length > 0 && !keyword"
-          class="text-muted-foreground mb-2 text-xs"
-        >
-          {{ $t('ui.widgets.search.recent') }}
-        </li>
-        <li
-          v-for="(item, index) in uniqueByField(searchResults, 'path')"
-          :key="item.path"
+  <div
+    class="flex h-[70vh] max-h-[520px] min-h-[340px] min-w-0 flex-col overflow-hidden px-2"
+  >
+    <div class="bg-background sticky top-0 z-10 shrink-0 py-1">
+      <div v-if="sourceItems.length > 0" class="mb-2 flex flex-wrap gap-2 px-1">
+        <button
+          v-for="option in filterOptions"
+          :key="option.value"
           :class="
-            activeIndex === index
-              ? 'active bg-primary text-primary-foreground'
-              : ''
+            selectedFilter === option.value
+              ? 'bg-primary text-primary-foreground'
+              : 'bg-accent text-muted-foreground hover:text-foreground'
           "
-          :data-index="index"
-          :data-search-item="index"
-          class="bg-accent flex-center group mb-3 w-full cursor-pointer rounded-lg px-4 py-4"
-          @click="handleEnter"
-          @mouseenter="handleMouseenter"
+          class="rounded-full px-2 py-1 text-xs"
+          @click="selectedFilter = option.value"
         >
-          <VbenIcon
-            :icon="item.icon"
-            class="mr-2 size-5 flex-shrink-0"
-            fallback
-          />
+          {{ option.label }} ({{ filterCount[option.value] }})
+        </button>
+      </div>
 
-          <span class="flex-1">{{ item.name }}</span>
-          <div
-            class="flex-center dark:hover:bg-accent hover:text-primary-foreground rounded-full p-1 hover:scale-110"
-            @click.stop="removeItem(index)"
+      <div v-if="!isSearching && displayItems.length > 0" class="mb-2 px-1">
+        <div class="flex items-center justify-between">
+          <span class="text-muted-foreground text-xs">
+            {{ $t('ui.widgets.search.recent') }}
+          </span>
+          <button
+            class="text-muted-foreground hover:text-foreground text-xs"
+            @click="clearSearchHistory"
           >
-            <X class="size-4" />
-          </div>
-        </li>
-      </ul>
+            {{ $t('ui.widgets.search.clearRecent') }}
+          </button>
+        </div>
+      </div>
     </div>
-  </VbenScrollbar>
+
+    <VbenScrollbar class="min-h-0 flex-1">
+      <div class="w-full pb-2">
+        <!-- 无搜索结果 -->
+        <div
+          v-if="isSearching && displayItems.length === 0"
+          class="text-muted-foreground text-center"
+        >
+          <SearchX class="mx-auto mt-4 size-12" />
+          <p class="mb-10 mt-6 text-xs">
+            {{ $t('ui.widgets.search.noResults') }}
+            <span class="text-foreground text-sm font-medium">
+              "{{ keyword }}"
+            </span>
+          </p>
+        </div>
+        <!-- 历史搜索记录 & 没有搜索结果 -->
+        <div
+          v-if="!isSearching && displayItems.length === 0"
+          class="text-muted-foreground text-center"
+        >
+          <p class="my-10 text-xs">
+            {{ $t('ui.widgets.search.noRecent') }}
+          </p>
+        </div>
+
+        <ul v-show="displayItems.length > 0" class="w-full">
+          <template v-for="group in groupedDisplayItems" :key="group.category">
+            <li class="text-muted-foreground mb-2 px-1 text-xs">
+              {{ getCategoryLabel(group.category) }} ({{ group.items.length }})
+            </li>
+            <li
+              v-for="item in group.items"
+              :key="`${item.path}-${item.displayIndex}`"
+              :class="
+                activeIndex === item.displayIndex
+                  ? 'active bg-primary text-primary-foreground'
+                  : 'bg-accent'
+              "
+              :data-index="item.displayIndex"
+              :data-search-item="item.displayIndex"
+              class="group mb-3 w-full cursor-pointer rounded-lg px-4 py-3"
+              @click="handleEnter(item.displayIndex)"
+              @mouseenter="handleMouseenter(item.displayIndex)"
+            >
+              <div class="flex items-start gap-2">
+                <VbenIcon
+                  v-if="item.icon"
+                  :icon="item.icon"
+                  class="mt-0.5 size-4 flex-shrink-0"
+                  fallback
+                />
+                <span
+                  v-else
+                  class="bg-muted-foreground/50 mt-1 inline-block size-2 rounded-full"
+                ></span>
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center gap-2">
+                    <span
+                      class="truncate text-sm font-medium"
+                      v-html="highlightText(getDisplayTitle(item))"
+                    ></span>
+                    <span
+                      v-if="item.method"
+                      class="inline-flex max-w-[70px] items-center rounded-md px-1.5 py-0.5 font-mono text-xs font-bold"
+                      :style="getMethodStyle(item.method)"
+                    >
+                      {{ item.method.toUpperCase() }}
+                    </span>
+                    <span
+                      class="rounded border border-[--el-border-color] px-1 py-0.5 text-[10px]"
+                    >
+                      {{ getCategoryLabel(item.category) }}
+                    </span>
+                    <span
+                      v-if="item.category === 'api' && item.source !== 'none'"
+                      class="rounded border border-[--el-border-color] px-1 py-0.5 text-[10px]"
+                    >
+                      {{
+                        item.source === 'all'
+                          ? $t('ui.widgets.search.sourceAll')
+                          : $t('ui.widgets.search.sourceGroup')
+                      }}
+                    </span>
+                    <span
+                      v-if="item.category === 'api' && getApiGroupLabel(item)"
+                      class="rounded border border-[--el-border-color] px-1 py-0.5 text-[10px]"
+                    >
+                      {{ $t('ui.widgets.search.groupLabel') }}:
+                      {{ getApiGroupLabel(item) }}
+                    </span>
+                  </div>
+                  <p
+                    :class="
+                      activeIndex === item.displayIndex
+                        ? 'text-primary-foreground/90'
+                        : 'text-muted-foreground'
+                    "
+                    class="mt-1 truncate text-xs"
+                    v-html="highlightText(item.breadcrumb)"
+                  ></p>
+                  <p
+                    v-if="item.apiPath"
+                    :class="
+                      activeIndex === item.displayIndex
+                        ? 'text-primary-foreground/80'
+                        : 'text-muted-foreground'
+                    "
+                    class="mt-1 truncate font-mono text-[11px]"
+                    v-html="highlightText(item.apiPath)"
+                  ></p>
+                </div>
+
+                <div
+                  class="flex-center dark:hover:bg-accent hover:text-primary-foreground rounded-full p-1 hover:scale-110"
+                  @click.stop="removeItem(item.displayIndex)"
+                >
+                  <X class="size-4" />
+                </div>
+              </div>
+            </li>
+          </template>
+        </ul>
+      </div>
+    </VbenScrollbar>
+  </div>
 </template>
+
+<style scoped>
+.search-hit {
+  padding: 0 2px;
+  background: color-mix(in oklab, var(--el-color-warning-light-7), #fff 45%);
+  border-radius: 2px;
+}
+</style>

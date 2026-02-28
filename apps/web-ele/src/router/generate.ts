@@ -28,6 +28,22 @@ interface TagGroups {
   all: Record<string, PathMenuItem[]>;
 }
 
+const createApiSearchText = (api: PathMenuItem) => {
+  return [
+    api.summary,
+    api.description,
+    api.operationId,
+    api.path,
+    ...(api.tags ?? []),
+  ]
+    .filter(Boolean)
+    .join(' ');
+};
+
+const createEntitySearchText = (name: string, description?: string) => {
+  return [name, description].filter(Boolean).join(' ');
+};
+
 export const fetchMenuListAsync: () => Promise<
   RouteRecordStringComponent<string>[]
 > = async () => {
@@ -127,12 +143,15 @@ export const fetchAggregationRoutesImpl: () => Promise<
 
   // 处理实体路由
   Object.keys(components?.schemas ?? {}).forEach((key: string) => {
+    const schemaDescription = components?.schemas?.[key]?.description || '';
     entries.push({
       component: '/views/entity/index.vue',
       name: `all*${key}`,
       meta: {
         title: key,
         keepAlive: true,
+        description: schemaDescription,
+        searchText: createEntitySearchText(key, schemaDescription),
       },
       path: `/entity/all/${key}`,
     });
@@ -196,6 +215,9 @@ export const fetchAggregationRoutesImpl: () => Promise<
                   title: api.summary,
                   method: api.method,
                   keepAlive: true,
+                  description: api.description,
+                  searchText: createApiSearchText(api),
+                  apiPath: api.path,
                 },
                 component: '/views/document/index.vue',
                 parent: '/document',
@@ -239,12 +261,16 @@ export const fetchAggregationRoutesImpl: () => Promise<
             if (!entityGroup.children) {
               entityGroup.children = [];
             }
+            const schemaDescription =
+              groupComponents?.schemas?.[key]?.description || '';
             entityGroup.children.push({
               component: '/views/entity/index.vue',
               name: `${tag}*${key}`,
               path: `/entity/${tag}/${key}`,
               meta: {
                 title: key,
+                description: schemaDescription,
+                searchText: createEntitySearchText(key, schemaDescription),
               },
             });
           });
@@ -332,12 +358,15 @@ const fetchSingleAppRoutes: (
     markDownMenus = initMarkdown(xNextdoc4j.markdown);
   }
   Object.keys(components?.schemas ?? {}).forEach((key: string) => {
+    const schemaDescription = components?.schemas?.[key]?.description || '';
     entries.push({
       component: '/views/entity/index.vue',
       name: `all*${key}`,
       meta: {
         title: key,
         keepAlive: true,
+        description: schemaDescription,
+        searchText: createEntitySearchText(key, schemaDescription),
       },
       path: `/entity/all/${key}`,
     });
@@ -389,6 +418,9 @@ const fetchSingleAppRoutes: (
                   title: api.summary,
                   method: api.method,
                   keepAlive: true,
+                  description: api.description,
+                  searchText: createApiSearchText(api),
+                  apiPath: api.path,
                 },
                 component: '/views/document/index.vue',
                 parent: '/document',
@@ -429,12 +461,15 @@ const fetchSingleAppRoutes: (
             if (!entityGroup.children) {
               entityGroup.children = [];
             }
+            const schemaDescription = components?.schemas?.[key]?.description || '';
             entityGroup.children.push({
               component: '/views/entity/index.vue',
               name: `${tag}*${key}`,
               path: `/entity/${tag}/${key}`,
               meta: {
                 title: key,
+                description: schemaDescription,
+                searchText: createEntitySearchText(key, schemaDescription),
               },
             });
           });
@@ -604,6 +639,9 @@ const initGroupRoute = (paths: Paths) => {
           title: api.summary,
           method: api.method,
           keepAlive: true,
+          description: api.description,
+          searchText: createApiSearchText(api),
+          apiPath: api.path,
         },
         component: '/views/document/index.vue',
       };
