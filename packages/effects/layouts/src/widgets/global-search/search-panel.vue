@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import type { MenuRecordRaw } from '@vben/types';
+import type { MenuRecordRaw, TabDefinition } from '@vben/types';
 
 import { computed, nextTick, onMounted, ref, shallowRef, watch } from 'vue';
 import { useRouter } from 'vue-router';
 
 import { SearchX, X } from '@vben/icons';
 import { $t } from '@vben/locales';
+import { useTabbarStore } from '@vben/stores';
 import { isString } from '@vben/utils';
 
 import { VbenIcon, VbenScrollbar } from '@vben-core/shadcn-ui';
@@ -14,6 +15,7 @@ import { isHttpUrl } from '@vben-core/shared/utils';
 import { onKeyStroke, useLocalStorage, useThrottleFn } from '@vueuse/core';
 
 import { methodType } from '../../../../../../apps/web-ele/src/constants/methods';
+import { useAggregationStore } from '../../../../../../apps/web-ele/src/store/aggregation';
 
 defineOptions({
   name: 'SearchPanel',
@@ -29,9 +31,26 @@ const props = withDefaults(
 const emit = defineEmits<{ close: [] }>();
 
 const router = useRouter();
+const tabbarStore = useTabbarStore();
+const aggregationStore = useAggregationStore();
+const currentService = computed(() => aggregationStore.currentService);
+const isAggregation = computed(() => aggregationStore.isAggregation);
+const serviceCache = computed(() => aggregationStore.serviceCache);
+const services = computed(() => aggregationStore.services);
+
 type SearchCategory = 'api' | 'entity' | 'markdown' | 'system';
 type SearchFilter = 'all' | SearchCategory;
 type SearchSource = 'all' | 'group' | 'none';
+const HTTP_METHODS = new Set([
+  'delete',
+  'get',
+  'head',
+  'options',
+  'patch',
+  'post',
+  'put',
+  'trace',
+]);
 
 interface SearchItem {
   apiPath?: string;
@@ -43,6 +62,8 @@ interface SearchItem {
   operationId?: string;
   path: string;
   searchText?: string;
+  serviceName?: string;
+  serviceUrl?: string;
   source: SearchSource;
   title: string;
 }
@@ -57,6 +78,8 @@ interface SearchHistoryItem {
   operationId?: string;
   path: string;
   searchText?: string;
+  serviceName?: string;
+  serviceUrl?: string;
   source: SearchSource;
   title: string;
 }
@@ -89,6 +112,8 @@ const handleSearch = useThrottleFn(search, 200);
 
 // 搜索函数，用于根据搜索关键词查找匹配的菜单项
 function search(searchKey: string) {
+  rebuildSearchItems();
+
   // 去除搜索关键词的前后空格
   searchKey = searchKey.trim();
 
@@ -100,6 +125,7 @@ function search(searchKey: string) {
 
   // 使用搜索关键词创建正则表达式
   const reg = createSearchReg(searchKey);
+  const currentServiceUrl = currentService.value?.url;
 
   const lowerKey = searchKey.toLowerCase();
   const scored = searchItems.value
@@ -145,6 +171,15 @@ function search(searchKey: string) {
       if ((item.operationId || '').toLowerCase().includes(lowerKey)) {
         score += 35;
       }
+
+      // 聚合模式下优先展示当前服务命中项，减少跨服务同名干扰
+      if (
+        isAggregation.value &&
+        currentServiceUrl &&
+        item.serviceUrl === currentServiceUrl
+      ) {
+        score += 40;
+      }
       // 同名接口优先展示分组路由，降低 all 兜底路由排序
       if (item.category === 'api' && item.source === 'all') {
         score -= 5;
@@ -152,7 +187,20 @@ function search(searchKey: string) {
       return { item, score };
     })
     .filter((entry) => entry.score > 0)
-    .sort((a, b) => b.score - a.score);
+    .sort((a, b) => {
+      if (b.score !== a.score) {
+        return b.score - a.score;
+      }
+
+      const current = currentServiceUrl || '';
+      const aCurrent = a.item.serviceUrl === current ? 1 : 0;
+      const bCurrent = b.item.serviceUrl === current ? 1 : 0;
+      if (aCurrent !== bCurrent) {
+        return bCurrent - aCurrent;
+      }
+
+      return a.item.title.localeCompare(b.item.title, 'zh-Hans-CN');
+    });
 
   searchResults.value = deduplicateApiResults(
     scored.map((entry) => entry.item),
@@ -185,6 +233,24 @@ async function handleEnter(index = activeIndex.value) {
     if (isHttpUrl(to.path)) {
       window.open(to.path, '_blank');
     } else {
+      if (
+        isAggregation.value &&
+        to.serviceUrl &&
+        to.serviceUrl !== currentService.value?.url
+      ) {
+        const targetService = services.value.find(
+          (service) => service.url === to.serviceUrl,
+        );
+        if (targetService) {
+          aggregationStore.saveCurrentTabsState(
+            tabbarStore.getTabs as TabDefinition[],
+            router.currentRoute.value.fullPath,
+          );
+          aggregationStore.setServiceCurrentTab(targetService.url, to.path);
+          aggregationStore.switchService(targetService);
+          return;
+        }
+      }
       router.push({ path: to.path, replace: true });
     }
   }
@@ -228,12 +294,13 @@ function handleMouseenter(index: number) {
 function removeItem(index: number) {
   const currentItem = renderedItems.value[index];
   if (!currentItem) return;
+  const itemKey = getItemKey(currentItem);
 
   searchHistory.value = searchHistory.value.filter(
-    (item) => item.path !== currentItem.path,
+    (item) => getItemKey(item) !== itemKey,
   );
   searchResults.value = searchResults.value.filter(
-    (item) => item.path !== currentItem.path,
+    (item) => getItemKey(item) !== itemKey,
   );
 
   activeIndex.value = Math.max(activeIndex.value - 1, 0);
@@ -251,12 +318,14 @@ function addSearchHistory(item: SearchItem) {
     operationId: item.operationId,
     path: item.path,
     searchText: item.searchText,
+    serviceName: item.serviceName,
+    serviceUrl: item.serviceUrl,
     source: item.source,
     title: item.title,
   };
 
   const nextHistory = searchHistory.value.filter(
-    (history) => history.path !== historyItem.path,
+    (history) => getItemKey(history) !== getItemKey(historyItem),
   );
   nextHistory.unshift(historyItem);
   searchHistory.value = nextHistory.slice(0, 20);
@@ -333,6 +402,10 @@ function normalizeMenuName(name: string) {
   return isString(name) ? $t(name) : String(name ?? '');
 }
 
+function getItemKey(item: { path: string; serviceUrl?: string }) {
+  return `${item.serviceUrl || '__single__'}::${item.path}`;
+}
+
 function buildSearchIndex(
   menus: MenuRecordRaw[],
   parents: string[] = [],
@@ -372,16 +445,97 @@ function buildSearchIndex(
   return items;
 }
 
+function buildAggregationSearchIndex(): SearchItem[] {
+  const items: SearchItem[] = [];
+
+  services.value.forEach((service) => {
+    const cache = serviceCache.value.get(service.url);
+    const openApi = cache?.openApi;
+    if (!openApi) return;
+
+    Object.entries(openApi.paths ?? {}).forEach(([apiPath, methods]) => {
+      Object.entries((methods || {}) as Record<string, any>).forEach(
+        ([method, operation]) => {
+          const methodName = method.toLowerCase();
+          if (!HTTP_METHODS.has(methodName)) return;
+
+          const operationId = operation?.operationId;
+          if (!operationId) return;
+
+          const tags =
+            Array.isArray(operation?.tags) && operation.tags.length > 0
+              ? operation.tags
+              : ['default'];
+          const title = operation?.summary || operationId || apiPath;
+          const description = operation?.description || '';
+          const searchText = [
+            service.name,
+            title,
+            description,
+            operationId,
+            apiPath,
+            ...tags,
+          ]
+            .filter(Boolean)
+            .join(' ');
+
+          tags.forEach((tag: string) => {
+            items.push({
+              apiPath,
+              breadcrumb: `${service.name} / 接口文档 / 所有接口 / ${tag}`,
+              category: 'api',
+              description,
+              method: methodName,
+              operationId,
+              path: `/document/all/${tag}/${operationId}`,
+              searchText,
+              serviceName: service.name,
+              serviceUrl: service.url,
+              source: 'all',
+              title,
+            });
+          });
+        },
+      );
+    });
+
+    Object.entries(openApi.components?.schemas ?? {}).forEach(
+      ([schemaName, schema]) => {
+        const schemaDescription = schema?.description || '';
+        items.push({
+          breadcrumb: `${service.name} / 实体模型 / 所有实体`,
+          category: 'entity',
+          description: schemaDescription,
+          path: `/entity/all/${schemaName}`,
+          searchText: [service.name, schemaName, schemaDescription]
+            .filter(Boolean)
+            .join(' '),
+          serviceName: service.name,
+          serviceUrl: service.url,
+          source: 'all',
+          title: schemaName,
+        });
+      },
+    );
+  });
+
+  return items;
+}
+
 function deduplicateApiResults(results: SearchItem[]) {
   const output: SearchItem[] = [];
   const apiSeen = new Map<string, SearchItem>();
-  const seenPath = new Set<string>();
+  const seenKey = new Set<string>();
 
   results.forEach((item) => {
     if (!item.path) return;
 
     if (item.category === 'api' && item.operationId) {
-      const apiKey = `${(item.method || '').toLowerCase()}:${item.operationId}`;
+      const apiKey = [
+        item.serviceUrl || '__single__',
+        (item.method || '').toLowerCase(),
+        item.operationId,
+      ].join(':');
       const existing = apiSeen.get(apiKey);
 
       if (!existing) {
@@ -391,7 +545,9 @@ function deduplicateApiResults(results: SearchItem[]) {
       }
 
       if (existing.source === 'all' && item.source === 'group') {
-        const index = output.findIndex((entry) => entry.path === existing.path);
+        const index = output.findIndex(
+          (entry) => getItemKey(entry) === getItemKey(existing),
+        );
         if (index !== -1) {
           output[index] = item;
         }
@@ -400,10 +556,11 @@ function deduplicateApiResults(results: SearchItem[]) {
       return;
     }
 
-    if (seenPath.has(item.path)) {
+    const itemKey = getItemKey(item);
+    if (seenKey.has(itemKey)) {
       return;
     }
-    seenPath.add(item.path);
+    seenKey.add(itemKey);
     output.push(item);
   });
 
@@ -426,6 +583,8 @@ function normalizeHistoryItems(items: SearchHistoryItem[]) {
         operationId: item.operationId || sourceInfo.operationId,
         path: item.path,
         searchText: item.searchText,
+        serviceName: item.serviceName,
+        serviceUrl: item.serviceUrl,
         source: item.source || sourceInfo.source,
         title,
       } as SearchHistoryItem;
@@ -433,17 +592,17 @@ function normalizeHistoryItems(items: SearchHistoryItem[]) {
     .filter((item) => Boolean(item.path));
 }
 
-const searchablePathSet = computed(() => {
-  return new Set(searchItems.value.map((item) => item.path));
+const searchableItemKeySet = computed(() => {
+  return new Set(searchItems.value.map((item) => getItemKey(item)));
 });
 
 const sourceItems = computed(() => {
   if (props.keyword?.trim()) {
     return searchResults.value;
   }
-  const validPaths = searchablePathSet.value;
+  const validPaths = searchableItemKeySet.value;
   return normalizeHistoryItems(searchHistory.value).filter((item) =>
-    validPaths.has(item.path),
+    validPaths.has(getItemKey(item)),
   );
 });
 
@@ -571,6 +730,27 @@ const getMethodStyle = (method?: string) => {
   return methodType[method.toUpperCase()] || undefined;
 };
 
+function rebuildSearchItems() {
+  const currentMenuItems = deduplicateApiResults(
+    buildSearchIndex(props.menus ?? []),
+  );
+
+  if (!isAggregation.value) {
+    searchItems.value = currentMenuItems;
+    return;
+  }
+
+  const activeService = currentService.value;
+  const serviceAwareMenus = currentMenuItems.map((item) => ({
+    ...item,
+    serviceName: activeService?.name,
+    serviceUrl: activeService?.url,
+  }));
+
+  const merged = [...buildAggregationSearchIndex(), ...serviceAwareMenus];
+  searchItems.value = deduplicateApiResults(merged);
+}
+
 const renderedItems = computed(() => {
   return groupedDisplayItems.value.flatMap((group) => group.items);
 });
@@ -587,9 +767,15 @@ watch(
 );
 
 watch(
-  () => props.menus,
-  (menus) => {
-    searchItems.value = deduplicateApiResults(buildSearchIndex(menus ?? []));
+  () => [
+    props.menus,
+    isAggregation.value,
+    currentService.value?.url,
+    services.value,
+    serviceCache.value,
+  ],
+  () => {
+    rebuildSearchItems();
     if (props.keyword?.trim()) {
       handleSearch(props.keyword);
     }
@@ -693,7 +879,7 @@ onMounted(() => {
             </li>
             <li
               v-for="item in group.items"
-              :key="`${item.path}-${item.displayIndex}`"
+              :key="`${getItemKey(item)}-${item.displayIndex}`"
               :class="
                 activeIndex === item.displayIndex
                   ? 'active bg-primary text-primary-foreground'
@@ -728,6 +914,12 @@ onMounted(() => {
                       :style="getMethodStyle(item.method)"
                     >
                       {{ item.method.toUpperCase() }}
+                    </span>
+                    <span
+                      v-if="item.serviceName"
+                      class="rounded border border-[--el-border-color] px-1 py-0.5 text-[10px]"
+                    >
+                      {{ item.serviceName }}
                     </span>
                     <span
                       class="rounded border border-[--el-border-color] px-1 py-0.5 text-[10px]"
