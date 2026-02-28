@@ -173,6 +173,8 @@ export interface SchemaObject {
   required?: string[];
   example?: any;
   title?: string;
+  allOf?: SchemaObject[];
+  oneOf?: SchemaObject[];
 }
 
 export type Method = 'delete' | 'get' | 'patch' | 'post' | 'put';
@@ -196,16 +198,14 @@ export interface SecuritySchemeObject {
 export interface ApiInfo {
   method: string;
   path: string;
-  tags: string[];
+  tags?: string[];
   summary?: string;
   description?: string;
-  operationId: string;
-  parameters: Parameter[];
-  requestBody: RequestBody;
-  responses: {
-    [statusCode: string]: Response;
-  };
-  security: SecurityRequirement[];
+  operationId?: string;
+  parameters?: ParameterObject[];
+  requestBody?: RequestBodyObject;
+  responses?: Record<string, ResponseObject>;
+  security?: any[];
 }
 
 export interface Response {
@@ -218,11 +218,11 @@ export interface Response {
   schema?: Schema;
 }
 
-interface Parameter {
+export interface Parameter {
   name: string;
-  in: 'path' | 'query';
-  required: boolean;
-  schema: Schema;
+  in: 'cookie' | 'header' | 'path' | 'query';
+  required?: boolean;
+  schema: SchemaObject;
   example?: string;
   default?: string;
   description?: string;

@@ -33,8 +33,6 @@
     "@vben-core/preferences": "workspace:*",
     "@vben-core/shadcn-ui": "workspace:*",
     "@vben-core/shared": "workspace:*",
-    "@vben/constants": "workspace:*",
-    "@vben/hooks": "workspace:*",
     "@vben/icons": "workspace:*",
     "@vben/locales": "workspace:*",
     "@vben/types": "workspace:*",

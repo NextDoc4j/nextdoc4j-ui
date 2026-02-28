@@ -156,7 +156,7 @@ const defaultRender =
     tokens: { [x: string]: { attrPush: (arg0: string[]) => void } },
     idx: number | string,
     options: Record<string, any>,
-    env: string,
+    _env: string,
     self: { renderToken: (arg0: any, arg1: any, arg2: any) => any },
   ) {
     return self.renderToken(tokens, idx, options);
