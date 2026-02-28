@@ -191,9 +191,7 @@ export const useAggregationStore = defineStore('aggregation', () => {
   /**
    * 获取微服务数据（带缓存）
    */
-  const getServiceData = async (
-    service: ServiceItem,
-  ): Promise<ServiceData> => {
+  const getServiceData = async (service: ServiceItem): Promise<ServiceData> => {
     const cacheKey = service.url;
     const pending = serviceDataPending.value.get(cacheKey);
     if (pending) {
