@@ -14,7 +14,6 @@ import { isHttpUrl } from '@vben-core/shared/utils';
 
 import { onKeyStroke, useLocalStorage, useThrottleFn } from '@vueuse/core';
 
-import { methodType } from '../../../../../../apps/web-ele/src/constants/methods';
 import { useAggregationStore } from '../../../../../../apps/web-ele/src/store/aggregation';
 
 defineOptions({
@@ -725,9 +724,10 @@ const getApiGroupLabel = (item: SearchItem) => {
   return segments[1] || '';
 };
 
-const getMethodStyle = (method?: string) => {
-  if (!method) return undefined;
-  return methodType[method.toUpperCase()] || undefined;
+const getApiRequestLine = (item: SearchItem) => {
+  if (!item.apiPath) return '';
+  if (!item.method) return item.apiPath;
+  return `${item.method.toLowerCase()} ${item.apiPath}`;
 };
 
 function rebuildSearchItems() {
@@ -882,12 +882,12 @@ onMounted(() => {
               :key="`${getItemKey(item)}-${item.displayIndex}`"
               :class="
                 activeIndex === item.displayIndex
-                  ? 'active bg-primary text-primary-foreground'
+                  ? 'active search-item-active'
                   : 'bg-accent'
               "
               :data-index="item.displayIndex"
               :data-search-item="item.displayIndex"
-              class="group mb-3 w-full cursor-pointer rounded-lg px-4 py-3"
+              class="group mb-3 w-full cursor-pointer rounded-lg border border-transparent px-4 py-3"
               @click="handleEnter(item.displayIndex)"
               @mouseenter="handleMouseenter(item.displayIndex)"
             >
@@ -908,13 +908,6 @@ onMounted(() => {
                       class="truncate text-sm font-medium"
                       v-html="highlightText(getDisplayTitle(item))"
                     ></span>
-                    <span
-                      v-if="item.method"
-                      class="inline-flex max-w-[70px] items-center rounded-md px-1.5 py-0.5 font-mono text-xs font-bold"
-                      :style="getMethodStyle(item.method)"
-                    >
-                      {{ item.method.toUpperCase() }}
-                    </span>
                     <span
                       v-if="item.serviceName"
                       class="rounded border border-[--el-border-color] px-1 py-0.5 text-[10px]"
@@ -945,23 +938,23 @@ onMounted(() => {
                     </span>
                   </div>
                   <p
-                    :class="
-                      activeIndex === item.displayIndex
-                        ? 'text-primary-foreground/90'
-                        : 'text-muted-foreground'
-                    "
-                    class="mt-1 truncate text-xs"
-                    v-html="highlightText(item.breadcrumb)"
-                  ></p>
-                  <p
                     v-if="item.apiPath"
                     :class="
                       activeIndex === item.displayIndex
-                        ? 'text-primary-foreground/80'
+                        ? 'text-foreground'
                         : 'text-muted-foreground'
                     "
-                    class="mt-1 truncate font-mono text-[11px]"
-                    v-html="highlightText(item.apiPath)"
+                    class="mt-1 truncate font-mono text-[13px] font-semibold"
+                    v-html="highlightText(getApiRequestLine(item))"
+                  ></p>
+                  <p
+                    :class="
+                      activeIndex === item.displayIndex
+                        ? 'text-foreground/80'
+                        : 'text-muted-foreground'
+                    "
+                    class="mt-1 truncate text-[11px]"
+                    v-html="highlightText(item.breadcrumb)"
                   ></p>
                 </div>
 
@@ -985,5 +978,14 @@ onMounted(() => {
   padding: 0 2px;
   background: color-mix(in oklab, var(--el-color-warning-light-7), #fff 45%);
   border-radius: 2px;
+}
+
+.search-item-active {
+  background: color-mix(
+    in oklab,
+    var(--el-color-primary) 18%,
+    var(--el-bg-color) 82%
+  );
+  border-color: color-mix(in oklab, var(--el-color-primary) 45%, transparent);
 }
 </style>
