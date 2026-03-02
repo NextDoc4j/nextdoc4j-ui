@@ -14,6 +14,7 @@ import { isHttpUrl } from '@vben-core/shared/utils';
 
 import { onKeyStroke, useLocalStorage, useThrottleFn } from '@vueuse/core';
 
+import { methodType } from '../../../../../../apps/web-ele/src/constants/methods';
 import { useAggregationStore } from '../../../../../../apps/web-ele/src/store/aggregation';
 
 defineOptions({
@@ -803,10 +804,9 @@ const getApiGroupLabel = (item: SearchItem) => {
   return segments[1] || '';
 };
 
-const getApiRequestLine = (item: SearchItem) => {
-  if (!item.apiPath) return '';
-  if (!item.method) return item.apiPath;
-  return `${item.method.toLowerCase()} ${item.apiPath}`;
+const getMethodStyle = (method?: string) => {
+  if (!method) return undefined;
+  return methodType[method.toUpperCase()] || undefined;
 };
 
 function rebuildSearchItems() {
@@ -1016,16 +1016,26 @@ onMounted(() => {
                       {{ getApiGroupLabel(item) }}
                     </span>
                   </div>
-                  <p
+                  <div
                     v-if="item.apiPath"
-                    :class="
-                      activeIndex === item.displayIndex
-                        ? 'text-foreground'
-                        : 'text-muted-foreground'
-                    "
-                    class="mt-1 truncate font-mono text-[13px] font-semibold"
-                    v-html="highlightText(getApiRequestLine(item))"
-                  ></p>
+                    class="mt-1 flex items-center gap-2 overflow-hidden"
+                  >
+                    <span
+                      v-if="item.method"
+                      class="inline-flex flex-shrink-0 items-center rounded-md px-1.5 py-0.5 font-mono text-[11px] font-bold uppercase"
+                      :style="getMethodStyle(item.method)"
+                      v-html="highlightText(item.method.toUpperCase())"
+                    ></span>
+                    <span
+                      :class="
+                        activeIndex === item.displayIndex
+                          ? 'text-foreground'
+                          : 'text-foreground/90'
+                      "
+                      class="truncate font-mono text-[14px] font-semibold tracking-[0.01em]"
+                      v-html="highlightText(item.apiPath)"
+                    ></span>
+                  </div>
                   <p
                     :class="
                       activeIndex === item.displayIndex
