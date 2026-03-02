@@ -127,6 +127,8 @@ function search(searchKey: string) {
   const currentServiceUrl = currentService.value?.url;
 
   const lowerKey = searchKey.toLowerCase();
+  const normalizedPathKey = normalizePathLike(lowerKey);
+  const isPathQuery = isPathLikeKeyword(lowerKey);
   const scored = searchItems.value
     .map((item) => {
       const title = item.title.toLowerCase();
@@ -137,38 +139,65 @@ function search(searchKey: string) {
       const searchText = (item.searchText || '').toLowerCase();
       let score = 0;
 
-      if (title === lowerKey) {
-        score += 140;
-      }
-      if (title.startsWith(lowerKey)) {
-        score += 120;
-      }
-      if (title.includes(lowerKey)) {
-        score += 90;
-      }
-      if (reg.test(title)) {
-        score += 60;
-      }
-      if (breadcrumb.includes(lowerKey)) {
-        score += 30;
-      }
-      if (path.includes(lowerKey)) {
-        score += 20;
-      }
-      if (apiPath.includes(lowerKey)) {
-        score += 80;
-      }
-      if (description.includes(lowerKey)) {
-        score += 45;
-      }
-      if (searchText.includes(lowerKey)) {
-        score += 55;
-      }
-      if ((item.method || '').toLowerCase().includes(lowerKey)) {
-        score += 25;
-      }
-      if ((item.operationId || '').toLowerCase().includes(lowerKey)) {
-        score += 35;
+      if (isPathQuery) {
+        const requestLine = normalizePathLike(
+          `${(item.method || '').toLowerCase()} ${apiPath}`,
+        );
+        const normalizedApiPath = normalizePathLike(apiPath);
+        const normalizedRoutePath = normalizePathLike(path);
+        const normalizedSearchText = normalizePathLike(searchText);
+
+        if (requestLine.includes(normalizedPathKey)) {
+          score += 240;
+        }
+        if (normalizedApiPath.includes(normalizedPathKey)) {
+          score += 200;
+        }
+        if (normalizedRoutePath.includes(normalizedPathKey)) {
+          score += 120;
+        }
+        if (normalizedSearchText.includes(normalizedPathKey)) {
+          score += 80;
+        }
+
+        // 路径检索只保留 API 结果，避免实体/系统项噪声
+        if (item.category !== 'api') {
+          score = 0;
+        }
+      } else {
+        if (title === lowerKey) {
+          score += 140;
+        }
+        if (title.startsWith(lowerKey)) {
+          score += 120;
+        }
+        if (title.includes(lowerKey)) {
+          score += 90;
+        }
+        if (reg.test(title)) {
+          score += 60;
+        }
+        if (breadcrumb.includes(lowerKey)) {
+          score += 30;
+        }
+        if (path.includes(lowerKey)) {
+          score += 20;
+        }
+        if (apiPath.includes(lowerKey)) {
+          score += 80;
+        }
+        if (description.includes(lowerKey)) {
+          score += 45;
+        }
+        if (searchText.includes(lowerKey)) {
+          score += 55;
+        }
+        if ((item.method || '').toLowerCase().includes(lowerKey)) {
+          score += 25;
+        }
+        if ((item.operationId || '').toLowerCase().includes(lowerKey)) {
+          score += 35;
+        }
       }
 
       // 聚合模式下优先展示当前服务命中项，减少跨服务同名干扰
@@ -694,10 +723,60 @@ function highlightText(value: string) {
   }
 
   if (!hasMatch) {
+    if (isPathLikeKeyword(keyword)) {
+      return highlightPathSegments(raw, keyword);
+    }
     return escapeHtml(raw);
   }
   output += escapeHtml(raw.slice(lastIndex));
   return output;
+}
+
+function highlightPathSegments(raw: string, keyword: string) {
+  const segments = [...new Set(keyword.split('/').map((s) => s.trim()))].filter(
+    Boolean,
+  );
+  if (segments.length === 0) {
+    return escapeHtml(raw);
+  }
+  const escapedSegments = segments
+    .map((segment) =>
+      segment.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`),
+    )
+    .sort((a, b) => b.length - a.length);
+  const reg = new RegExp(escapedSegments.join('|'), 'gi');
+
+  let output = '';
+  let lastIndex = 0;
+  let hasMatch = false;
+
+  while (true) {
+    const match = reg.exec(raw);
+    if (!match || match.index === undefined) break;
+
+    hasMatch = true;
+    output += escapeHtml(raw.slice(lastIndex, match.index));
+    output += `<mark class="search-hit">${escapeHtml(match[0])}</mark>`;
+    lastIndex = match.index + match[0].length;
+
+    if (match.index === reg.lastIndex) {
+      reg.lastIndex += 1;
+    }
+  }
+
+  if (!hasMatch) {
+    return escapeHtml(raw);
+  }
+  output += escapeHtml(raw.slice(lastIndex));
+  return output;
+}
+
+function isPathLikeKeyword(keyword: string) {
+  return keyword.includes('/');
+}
+
+function normalizePathLike(value: string) {
+  return value.replaceAll(/\s+/g, '').replaceAll(/\/+/g, '/');
 }
 
 const getCategoryLabel = (category: SearchCategory) => {
