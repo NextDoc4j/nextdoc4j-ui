@@ -3,7 +3,7 @@ import type { ParamsType } from './body-params.vue';
 
 import type { ParameterObject } from '#/typings/openApi';
 
-import { onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 
 import { useAppConfig } from '@vben/hooks';
 import { SvgApiPrefixIcon, SvgCloseIcon } from '@vben/icons';
@@ -25,7 +25,7 @@ import { Pane, Splitpanes } from 'splitpanes';
 
 import JsonView from '#/components/json-view.vue';
 import { methodType } from '#/constants/methods';
-import { useApiStore, useTokenStore } from '#/store';
+import { useApiStore, useDocManageStore, useTokenStore } from '#/store';
 import { useAggregationStore } from '#/store/aggregation';
 
 import bodyParams from './body-params.vue';
@@ -34,6 +34,7 @@ import paramsTable from './params-table.vue';
 interface TableParamsObject {
   description: string;
   enabled: boolean;
+  fromGlobal?: boolean;
   name: string;
   value: string;
   type?: string;
@@ -56,6 +57,8 @@ const baseUrl = ref();
 const activeTab = ref(props.requestBody ? 'Body' : 'Params');
 const bodyTabRef = ref();
 const responseTab = ref('Body');
+const aggregationStore = useAggregationStore();
+const docManageStore = useDocManageStore();
 
 // 组件状态
 const loading = ref(false);
@@ -66,6 +69,9 @@ const queryParams = ref<Array<TableParamsObject>>([]);
 const pathParams = ref<Array<TableParamsObject>>([]);
 const headers = ref<Array<TableParamsObject>>([]);
 const cookies = ref<Array<TableParamsObject>>([]);
+
+const normalizeParamName = (name: string) => name.trim();
+const normalizeHeaderName = (name: string) => name.trim().toLowerCase();
 
 // 监听 props 变化，同步接口信息
 watch(
@@ -136,8 +142,18 @@ watch(
         targetArray.push(paramItem);
       }
     });
+
+    syncGlobalParamsToDebugTable();
   },
   { immediate: true },
+);
+
+watch(
+  () => [docManageStore.scopedParams, aggregationStore.currentService?.url],
+  () => {
+    syncGlobalParamsToDebugTable();
+  },
+  { deep: true, immediate: true },
 );
 
 // 响应状态
@@ -151,6 +167,62 @@ const responseHeaders = ref<
   Array<{ enabled: boolean; name: string; value: string }>
 >([]);
 const responseDescriptions = ref({});
+
+const activeGlobalQueryCount = computed(() => {
+  return docManageStore
+    .getMergedQueryParams(aggregationStore.currentService?.url)
+    .filter((item) => item.enabled && item.name).length;
+});
+
+const activeGlobalHeaderCount = computed(() => {
+  return docManageStore
+    .getMergedHeaderParams(aggregationStore.currentService?.url)
+    .filter((item) => item.enabled && item.name).length;
+});
+
+function syncGlobalParamsToDebugTable() {
+  const localQueryRows = queryParams.value.filter((item) => !item.fromGlobal);
+  const localQueryNames = new Set(
+    localQueryRows
+      .map((item) => normalizeParamName(item.name || ''))
+      .filter(Boolean),
+  );
+  const globalQueryRows = docManageStore
+    .getMergedQueryParams(aggregationStore.currentService?.url)
+    .filter((item) => item.enabled && normalizeParamName(item.name || ''))
+    .filter((item) => !localQueryNames.has(normalizeParamName(item.name || '')))
+    .map((item) => ({
+      description: item.description || '全局参数',
+      enabled: true,
+      fromGlobal: true,
+      name: normalizeParamName(item.name || ''),
+      type: 'string',
+      value: item.value,
+    }));
+  queryParams.value = [...localQueryRows, ...globalQueryRows];
+
+  const localHeaderRows = headers.value.filter((item) => !item.fromGlobal);
+  const localHeaderNames = new Set(
+    localHeaderRows
+      .map((item) => normalizeHeaderName(item.name || ''))
+      .filter(Boolean),
+  );
+  const globalHeaderRows = docManageStore
+    .getMergedHeaderParams(aggregationStore.currentService?.url)
+    .filter((item) => item.enabled && normalizeParamName(item.name || ''))
+    .filter(
+      (item) => !localHeaderNames.has(normalizeHeaderName(item.name || '')),
+    )
+    .map((item) => ({
+      description: item.description || '全局参数',
+      enabled: true,
+      fromGlobal: true,
+      name: normalizeParamName(item.name || ''),
+      type: 'string',
+      value: item.value,
+    }));
+  headers.value = [...localHeaderRows, ...globalHeaderRows];
+}
 
 // 添加关闭处理函数
 const handleClose = (e: any) => {
@@ -425,7 +497,6 @@ async function sendRequest() {
     });
 
     // 获取聚合模式下的服务前缀
-    const aggregationStore = useAggregationStore();
     let servicePrefix = '';
     if (aggregationStore.isAggregation && aggregationStore.currentService) {
       // 从服务 URL 中提取前缀，如 "/file/v3/api-docs" -> "/file"
@@ -435,16 +506,57 @@ async function sendRequest() {
 
     const finalUrl = new URL(window.origin + apiURL + servicePrefix + url);
 
-    // 添加查询参数
-    queryParams.value
-      .filter((p) => p.enabled && p.name)
-      .forEach((p) => finalUrl.searchParams.append(p.name, p.value));
+    const globalQueryParams = docManageStore
+      .getMergedQueryParams(aggregationStore.currentService?.url)
+      .filter((item) => item.enabled && item.name);
+    const globalHeaderParams = docManageStore
+      .getMergedHeaderParams(aggregationStore.currentService?.url)
+      .filter((item) => item.enabled && item.name);
+
+    // 添加查询参数（同名本地参数优先）
+    const localQueryNames = new Set<string>();
+    queryParams.value.forEach((p) => {
+      const name = normalizeParamName(p.name || '');
+      if (!name) return;
+
+      if (p.enabled || p.fromGlobal) {
+        localQueryNames.add(name);
+      }
+      if (p.enabled) {
+        finalUrl.searchParams.append(name, p.value);
+      }
+    });
+
+    globalQueryParams.forEach((item) => {
+      const name = normalizeParamName(item.name || '');
+      if (name && !localQueryNames.has(name)) {
+        finalUrl.searchParams.append(name, item.value);
+      }
+    });
 
     // 构建请求头
     const requestHeaders = new Headers();
-    headers.value
-      .filter((h) => h.enabled && h.name)
-      .forEach((h) => requestHeaders.append(h.name, h.value));
+    const localHeaderNames = new Set<string>();
+    headers.value.forEach((h) => {
+      const name = normalizeParamName(h.name || '');
+      if (!name) return;
+      const key = normalizeHeaderName(name);
+
+      if (h.enabled || h.fromGlobal) {
+        localHeaderNames.add(key);
+      }
+      if (h.enabled) {
+        requestHeaders.append(name, h.value);
+      }
+    });
+
+    globalHeaderParams.forEach((item) => {
+      const name = normalizeParamName(item.name || '');
+      const key = normalizeHeaderName(name);
+      if (name && !localHeaderNames.has(key)) {
+        requestHeaders.append(name, item.value);
+      }
+    });
 
     // 添加form-data 添加默认的 Content-Type
     const formData = new FormData();
@@ -715,6 +827,8 @@ onMounted(() => {
       // No default
     }
   });
+
+  syncGlobalParamsToDebugTable();
 });
 </script>
 
@@ -757,6 +871,13 @@ onMounted(() => {
             >
               发送
             </ElButton>
+          </div>
+          <div
+            v-if="activeGlobalQueryCount > 0 || activeGlobalHeaderCount > 0"
+            class="text-xs text-[var(--el-text-color-secondary)]"
+          >
+            已注入全局参数：Query {{ activeGlobalQueryCount }} 项，Header
+            {{ activeGlobalHeaderCount }} 项
           </div>
         </ElSpace>
       </div>

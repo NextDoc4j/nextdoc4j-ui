@@ -89,12 +89,48 @@ const editorRef = ref();
 const uploadRef = ref<UploadInstance>();
 const fileList = ref([]);
 
-// 获取请求体数据
-const requestBody = computed(() => {
-  if (!props.requestBody?.content?.['application/json']?.schema) {
+const hasRenderableSchema = (schema: any) => {
+  if (!schema) return false;
+  return Boolean(
+    schema.properties ||
+      schema.$ref ||
+      schema.items ||
+      (Array.isArray(schema.oneOf) && schema.oneOf.length > 0) ||
+      (Array.isArray(schema.anyOf) && schema.anyOf.length > 0) ||
+      (Array.isArray(schema.allOf) && schema.allOf.length > 0),
+  );
+};
+
+const pickRequestBodySchema = () => {
+  const content = props.requestBody?.content;
+  if (!content) {
     return null;
   }
-  const schema = props.requestBody.content['application/json'].schema;
+
+  const entries = Object.entries(content);
+  const hit = entries.find(([, body]) =>
+    hasRenderableSchema((body as any)?.schema),
+  );
+  if (hit) {
+    const [contentType, body] = hit;
+    return { contentType, schema: (body as any)?.schema };
+  }
+
+  const first = entries[0];
+  if (!first) {
+    return null;
+  }
+  const [contentType, body] = first;
+  return { contentType, schema: (body as any)?.schema ?? null };
+};
+
+// 获取请求体数据
+const resolvedRequestBody = computed(() => {
+  const picked = pickRequestBodySchema();
+  if (!picked?.schema) {
+    return null;
+  }
+  const schema = picked.schema;
 
   if (schema.oneOf) {
     const arr = schema.oneOf.map((item: Schema) => {
@@ -137,14 +173,14 @@ const requestBody = computed(() => {
 
 // 请求体示例
 const requestBodyExample = computed(() => {
-  if (!requestBody.value) return null;
-  if (Array.isArray(requestBody.value)) {
-    const data = requestBody.value.find(
+  if (!resolvedRequestBody.value) return null;
+  if (Array.isArray(resolvedRequestBody.value)) {
+    const data = resolvedRequestBody.value.find(
       (item) => item.title === props.requestBodyType,
     );
     return generateExample(data);
   } else {
-    return generateExample(requestBody.value);
+    return generateExample(resolvedRequestBody.value);
   }
 });
 
@@ -164,30 +200,14 @@ const handleExceed: UploadProps['onExceed'] = (files) => {
 };
 
 onMounted(() => {
-  if (!props.requestBody || !props.requestBody.content) {
+  const picked = pickRequestBodySchema();
+  if (!picked?.schema) {
     bodyType.value = 'none';
     return;
   }
 
-  // 遍历所有 content 类型，找第一个有实际内容的 schema
-  const content = props.requestBody.content;
-  const types = Object.keys(content);
-  let foundType = '';
-  let schema = null;
-  for (const t of types) {
-    const s = content[t]?.schema;
-    // 检查 schema 是否有实际内容（properties 或 $ref）
-    if (s && (s.properties || s.$ref || s.items)) {
-      foundType = t;
-      schema = s;
-      break;
-    }
-  }
-
-  if (!schema) {
-    bodyType.value = 'none';
-    return;
-  }
+  const foundType = picked.contentType;
+  const schema = picked.schema;
 
   // 根据找到的类型设置 bodyType
   if (foundType.includes('json')) {
