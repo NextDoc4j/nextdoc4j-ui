@@ -139,6 +139,20 @@ export const useAggregationStore = defineStore('aggregation', () => {
     return ((response as any)?.data ?? response) as T;
   };
 
+  const isServiceSwaggerConfigEnabled = () => {
+    return (
+      mainConfigCache.value.openApi?.['x-nextdoc4j-aggregation']
+        ?.serviceSwaggerConfigEnabled === true
+    );
+  };
+
+  const createFallbackServiceConfig = (service: ServiceItem): SwaggerConfig => {
+    return {
+      configUrl: `${service.url}/swagger-config`,
+      urls: [],
+    };
+  };
+
   const probeServiceAvailability = async (service: ServiceItem) => {
     try {
       const openApiResponse = await baseRequestClient.get<{
@@ -210,10 +224,14 @@ export const useAggregationStore = defineStore('aggregation', () => {
       }
 
       if (!cache.config) {
-        const configResponse = await baseRequestClient.get<{
-          data: SwaggerConfig;
-        }>(`${service.url}/swagger-config`);
-        cache.config = resolveResponseData<SwaggerConfig>(configResponse);
+        if (isServiceSwaggerConfigEnabled()) {
+          const configResponse = await baseRequestClient.get<{
+            data: SwaggerConfig;
+          }>(`${service.url}/swagger-config`);
+          cache.config = resolveResponseData<SwaggerConfig>(configResponse);
+        } else {
+          cache.config = createFallbackServiceConfig(service);
+        }
       }
 
       if (!cache.openApi || !cache.config) {

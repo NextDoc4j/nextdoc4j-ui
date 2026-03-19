@@ -86,6 +86,7 @@ export const fetchAggregationRoutesImpl: () => Promise<
 > = async () => {
   const aggregationStore = useAggregationStore();
   const apiStore = useApiStore();
+  const { openApi: gatewayOpenApi } = await aggregationStore.getMainConfig();
 
   // 初始化聚合模式（获取服务列表，使用缓存）
   await aggregationStore.initAggregation();
@@ -117,21 +118,17 @@ export const fetchAggregationRoutesImpl: () => Promise<
     return [];
   }
 
-  const {
-    paths,
-    components,
-    'x-nextdoc4j': xNextdoc4j,
-    security,
-  } = serviceData;
+  const { paths, components, security } = serviceData;
 
   // 处理品牌和 markdown
-  if (xNextdoc4j && xNextdoc4j.brand) {
-    initBrand(xNextdoc4j.brand);
+  const gatewayExtension = gatewayOpenApi?.['x-nextdoc4j'];
+  if (gatewayExtension?.brand) {
+    initBrand(gatewayExtension.brand);
   }
 
   let markDownMenus: RouteRecordStringComponent<string>[] = [];
-  if (xNextdoc4j && xNextdoc4j.markdown) {
-    markDownMenus = initMarkdown(xNextdoc4j.markdown);
+  if (gatewayExtension?.markdown) {
+    markDownMenus = initMarkdown(gatewayExtension.markdown);
   }
 
   // 初始化主路由（all 分组）
@@ -284,10 +281,10 @@ export const fetchAggregationRoutesImpl: () => Promise<
   }
 
   // 更新应用标题
-  if (serviceData?.info?.title) {
+  if (gatewayOpenApi?.info?.title) {
     updatePreferences({
       app: {
-        name: serviceData.info.title,
+        name: gatewayOpenApi.info.title,
       },
     });
   }
