@@ -127,21 +127,42 @@ const responseExample = computed(() => {
   return responseData.value ? generateExample(responseData.value) : null;
 });
 
-const requestBody = computed(() => {
-  const content = apiInfo.value.requestBody?.content;
-  if (!content) return null;
+const hasRenderableSchema = (schema: any) => {
+  if (!schema) return false;
+  return Boolean(
+    schema.properties ||
+      schema.$ref ||
+      schema.items ||
+      (Array.isArray(schema.oneOf) && schema.oneOf.length > 0) ||
+      (Array.isArray(schema.anyOf) && schema.anyOf.length > 0) ||
+      (Array.isArray(schema.allOf) && schema.allOf.length > 0),
+  );
+};
 
-  // 遍历所有 content 类型，找第一个有实际内容的 schema
-  const types = Object.keys(content);
-  let schema = null;
-  for (const t of types) {
-    const s = content[t]?.schema;
-    // 检查 schema 是否有实际内容（properties 或 $ref）
-    if (s && (s.properties || s.$ref || s.items)) {
-      schema = s;
-      break;
-    }
+const pickRequestBodySchema = () => {
+  const content = apiInfo.value.requestBody?.content;
+  if (!content) {
+    return null;
   }
+
+  const entries = Object.entries(content);
+  const hit = entries.find(([, body]) => hasRenderableSchema(body?.schema));
+  if (hit) {
+    const [contentType, body] = hit;
+    return { contentType, schema: body?.schema };
+  }
+
+  const first = entries[0];
+  if (!first) {
+    return null;
+  }
+  const [contentType, body] = first;
+  return { contentType, schema: body?.schema ?? null };
+};
+
+const requestBody = computed(() => {
+  const picked = pickRequestBodySchema();
+  const schema = picked?.schema;
   if (!schema) return null;
 
   if (schema.oneOf) {
@@ -177,16 +198,7 @@ const requestBody = computed(() => {
 
 // 获取 body 的实际 content type（用于显示）
 const requestBodyContentType = computed(() => {
-  const content = apiInfo.value.requestBody?.content;
-  if (!content) return 'application/json';
-  const types = Object.keys(content);
-  for (const t of types) {
-    const s = content[t]?.schema;
-    if (s && (s.properties || s.$ref || s.items)) {
-      return t;
-    }
-  }
-  return types[0] || 'application/json';
+  return pickRequestBodySchema()?.contentType || 'application/json';
 });
 
 watch(

@@ -40,6 +40,14 @@ defineEmits<{
   change: [];
 }>();
 
+const GLOBAL_MONACO_THEME_STATE_KEY = '__NEXTDOC4J_MONACO_THEME_STATE__';
+const globalMonacoThemeState = ((globalThis as any)[
+  GLOBAL_MONACO_THEME_STATE_KEY
+] || ((globalThis as any)[GLOBAL_MONACO_THEME_STATE_KEY] = {})) as {
+  currentTheme?: string;
+  themesInitialized?: boolean;
+};
+
 // 递归查找所有 base64 图片及其 key
 const findBase64Images = (obj: any): Array<{ key: string; value: string }> => {
   const images: Array<{ key: string; value: string }> = [];
@@ -85,6 +93,9 @@ const isBase64Image = (value: string): boolean => {
 const id = `json-viewer-${Math.random().toString(36).slice(2, 11)}-${Date.now()}`;
 let editor: any = null;
 let isDestroyed = false;
+let resizeObserver: null | ResizeObserver = null;
+let updateEditorHeight: (() => void) | null = null;
+let themeSwitchFrame: null | number = null;
 
 // 处理 HTML 标签
 const processDescription = (desc: string) => {
@@ -172,6 +183,10 @@ const resolveEditorValue = (data: any, language: string) => {
 
 // 创建自定义主题
 const createCustomTheme = () => {
+  if (globalMonacoThemeState.themesInitialized) {
+    return;
+  }
+
   monaco.editor.defineTheme('jsonCustomTheme', {
     base: 'vs',
     inherit: true,
@@ -205,6 +220,20 @@ const createCustomTheme = () => {
       'editor.lineHighlightBackground': '#000000',
     },
   });
+  globalMonacoThemeState.themesInitialized = true;
+};
+
+const resolveThemeName = (mode: string) => {
+  return mode === 'dark' ? 'jsonCustomDarkTheme' : 'jsonCustomTheme';
+};
+
+const applyTheme = (mode: string) => {
+  const themeName = resolveThemeName(mode);
+  if (globalMonacoThemeState.currentTheme === themeName) {
+    return;
+  }
+  monaco.editor.setTheme(themeName);
+  globalMonacoThemeState.currentTheme = themeName;
 };
 
 onBeforeMount(() => {
@@ -226,10 +255,7 @@ onMounted(() => {
   editor = monaco.editor.create(editorContainer, {
     value: resolveEditorValue(props.data, props.language),
     language: props.language,
-    theme:
-      preferences.theme.mode === 'dark'
-        ? 'jsonCustomDarkTheme'
-        : 'jsonCustomTheme',
+    theme: resolveThemeName(preferences.theme.mode),
     readOnly: props.readOnly,
     minimap: { enabled: false },
     tabSize: 2,
@@ -243,7 +269,7 @@ onMounted(() => {
     renderLineHighlight: 'none',
     showFoldingControls: 'always',
     scrollBeyondLastLine: false,
-    automaticLayout: true,
+    automaticLayout: false,
     wordWrap: 'on',
     wrappingStrategy: 'advanced',
     padding: { top: 8, bottom: 8 },
@@ -261,23 +287,35 @@ onMounted(() => {
     contextmenu: false,
   });
   // 添加高度自适应，设置合理的默认高度
-  const updateEditorHeight = () => {
+  updateEditorHeight = () => {
     if (!editorContainer) return;
     const contentHeight = editor.getContentHeight();
     const defaultHeight = 500; // 默认高度，避免内容少时留白过多
 
     // 使用默认高度和内容高度的最大值，确保不会小于默认值
-    const targetHeight = Math.max(defaultHeight, Math.min(contentHeight));
-    editorContainer.style.height = `${targetHeight}px`;
+    const targetHeight = Math.max(defaultHeight, contentHeight);
+    const nextHeight = `${targetHeight}px`;
+    if (editorContainer.style.height !== nextHeight) {
+      editorContainer.style.height = nextHeight;
+    }
     editor.layout();
   };
 
-  editor.onDidContentSizeChange(updateEditorHeight);
+  editor.onDidContentSizeChange(() => updateEditorHeight?.());
+
+  if (typeof ResizeObserver !== 'undefined') {
+    resizeObserver = new ResizeObserver(() => {
+      editor.layout();
+    });
+    resizeObserver.observe(editorContainer);
+  }
+
+  applyTheme(preferences.theme.mode);
 
   // 初始化高度
   requestAnimationFrame(() => {
-    updateEditorHeight();
-    requestAnimationFrame(updateEditorHeight);
+    updateEditorHeight?.();
+    requestAnimationFrame(() => updateEditorHeight?.());
   });
 });
 const getEditorValue = () => {
@@ -318,11 +356,12 @@ const handleCopy = async () => {
 watch(
   () => props.data,
   (newData) => {
-    if (editor) {
-      editor.setValue(resolveEditorValue(newData, props.language));
+    if (!editor) return;
+    const nextValue = resolveEditorValue(newData, props.language);
+    if (editor.getValue() !== nextValue) {
+      editor.setValue(nextValue);
     }
   },
-  { deep: true },
 );
 
 watch(
@@ -334,22 +373,45 @@ watch(
     if (model) {
       monaco.editor.setModelLanguage(model, newLanguage || 'plaintext');
     }
-    editor.setValue(resolveEditorValue(props.data, newLanguage || 'plaintext'));
+    const nextValue = resolveEditorValue(
+      props.data,
+      newLanguage || 'plaintext',
+    );
+    if (editor.getValue() !== nextValue) {
+      editor.setValue(nextValue);
+    }
   },
 );
 
 watch(
   () => preferences.theme.mode,
-  (newData) => {
-    monaco.editor.setTheme(
-      newData === 'dark' ? 'jsonCustomDarkTheme' : 'jsonCustomTheme',
-    );
+  (mode) => {
+    if (!editor) return;
+    if (themeSwitchFrame) {
+      cancelAnimationFrame(themeSwitchFrame);
+    }
+    themeSwitchFrame = requestAnimationFrame(() => {
+      applyTheme(mode);
+      themeSwitchFrame = null;
+    });
   },
 );
 
 // 清理
 onBeforeUnmount(() => {
   isDestroyed = true;
+
+  if (themeSwitchFrame) {
+    cancelAnimationFrame(themeSwitchFrame);
+    themeSwitchFrame = null;
+  }
+
+  if (resizeObserver) {
+    resizeObserver.disconnect();
+    resizeObserver = null;
+  }
+
+  updateEditorHeight = null;
 
   if (editor) {
     try {
@@ -447,7 +509,6 @@ defineExpose({
   background: var(--el-bg-color);
   border: 1px solid var(--el-border-color);
   border-radius: var(--el-border-radius-base);
-  transition: all 0.3s ease;
 }
 
 .base64-image-container:hover {
