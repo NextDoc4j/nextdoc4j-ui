@@ -58,6 +58,7 @@ export interface OpenAPISpec {
 export interface AggregationExtension {
   aggregation: boolean;
   docPath: string;
+  serviceSwaggerConfigEnabled?: boolean;
 }
 
 export interface Brand {
