@@ -144,7 +144,7 @@ const handleExceed = (
   _uploadFiles: Parameters<NonNullable<UploadProps['onExceed']>>[1],
   row: ParamItem,
 ) => {
-  const file = files[0] as UploadRawFile | undefined;
+  const file = files[0] as undefined | UploadRawFile;
   if (!file) {
     return;
   }
