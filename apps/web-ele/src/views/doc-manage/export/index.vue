@@ -1896,6 +1896,12 @@ onBeforeUnmount(() => {
                       >
                         <div
                           class="service-header flex items-center justify-between px-1 py-1"
+                          :class="{
+                            'group-node--checked':
+                              getCheckedCountInGroup(
+                                serviceNode.allOperations,
+                              ) > 0,
+                          }"
                         >
                           <ElCheckbox
                             :model-value="
@@ -1983,6 +1989,12 @@ onBeforeUnmount(() => {
                                 >
                                   <div
                                     class="group-header flex items-center justify-between px-1 py-1"
+                                    :class="{
+                                      'group-node--checked':
+                                        getCheckedCountInGroup(
+                                          group.operations,
+                                        ) > 0,
+                                    }"
                                   >
                                     <ElCheckbox
                                       :model-value="
@@ -2134,6 +2146,10 @@ onBeforeUnmount(() => {
                       >
                         <div
                           class="group-header flex items-center justify-between px-1 py-1"
+                          :class="{
+                            'group-node--checked':
+                              getCheckedCountInGroup(group.operations) > 0,
+                          }"
                         >
                           <ElCheckbox
                             :model-value="isGroupChecked(group.operations)"
@@ -2354,15 +2370,48 @@ onBeforeUnmount(() => {
 
 .group-header {
   padding: 4px 8px;
-  background: var(--el-fill-color);
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color-lighter);
   border-radius: 8px;
 }
 
 .service-header {
   padding: 4px 8px;
-  background: var(--el-color-primary-light-9);
-  border: 1px solid var(--el-color-primary-light-7);
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color-lighter);
   border-radius: 8px;
+}
+
+.group-header.group-node--checked,
+.service-header.group-node--checked {
+  background: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary-light-7);
+}
+
+.doc-preview-html {
+  line-height: 1.85;
+}
+
+.doc-preview-html:deep(p) {
+  margin: 0 0 14px;
+}
+
+.doc-preview-html:deep(li) {
+  margin: 6px 0;
+}
+
+.doc-preview-html:deep(ul),
+.doc-preview-html:deep(ol) {
+  margin: 10px 0 14px;
+  padding-left: 22px;
+}
+
+.doc-preview-html:deep(h1),
+.doc-preview-html:deep(h2),
+.doc-preview-html:deep(h3),
+.doc-preview-html:deep(h4) {
+  margin: 20px 0 12px;
+  line-height: 1.45;
 }
 
 .group-submenu-wrap {
