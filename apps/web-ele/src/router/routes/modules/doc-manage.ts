@@ -1,11 +1,11 @@
 import type { RouteRecordRaw } from 'vue-router';
 
-import { SvgMenuDocumentIcon } from '@vben/icons';
+import { SvgMenuDocumentManageIcon } from '@vben/icons';
 
 const routes: RouteRecordRaw[] = [
   {
     meta: {
-      icon: SvgMenuDocumentIcon,
+      icon: SvgMenuDocumentManageIcon,
       order: 1,
       title: '文档管理',
     },

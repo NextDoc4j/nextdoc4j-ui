@@ -203,41 +203,6 @@ const applyCurrentServiceTemplate = () => {
       </ElForm>
 
       <ElTabs>
-        <ElTabPane label="全局 Query 参数">
-          <ElButton class="mb-3" @click="addQueryParam">
-            新增 Query 参数
-          </ElButton>
-          <ElTable :data="queryParams" border>
-            <ElTableColumn label="启用" width="80" align="center">
-              <template #default="{ row }">
-                <ElSwitch v-model="row.enabled" />
-              </template>
-            </ElTableColumn>
-            <ElTableColumn label="参数名" min-width="180">
-              <template #default="{ row }">
-                <ElInput v-model.trim="row.name" placeholder="例如 tenantId" />
-              </template>
-            </ElTableColumn>
-            <ElTableColumn label="参数值" min-width="200">
-              <template #default="{ row }">
-                <ElInput v-model="row.value" placeholder="参数值" />
-              </template>
-            </ElTableColumn>
-            <ElTableColumn label="说明" min-width="220">
-              <template #default="{ row }">
-                <ElInput v-model="row.description" placeholder="可选说明" />
-              </template>
-            </ElTableColumn>
-            <ElTableColumn label="操作" width="100" fixed="right">
-              <template #default="{ row }">
-                <ElButton text type="danger" @click="removeQueryParam(row.id)">
-                  删除
-                </ElButton>
-              </template>
-            </ElTableColumn>
-          </ElTable>
-        </ElTabPane>
-
         <ElTabPane label="全局请求头参数">
           <ElButton class="mb-3" @click="addHeaderParam">
             新增 Header 参数
@@ -280,6 +245,41 @@ const applyCurrentServiceTemplate = () => {
             <ElTableColumn label="操作" width="100" fixed="right">
               <template #default="{ row }">
                 <ElButton text type="danger" @click="removeHeaderParam(row.id)">
+                  删除
+                </ElButton>
+              </template>
+            </ElTableColumn>
+          </ElTable>
+        </ElTabPane>
+
+        <ElTabPane label="全局 Query 参数">
+          <ElButton class="mb-3" @click="addQueryParam">
+            新增 Query 参数
+          </ElButton>
+          <ElTable :data="queryParams" border>
+            <ElTableColumn label="启用" width="80" align="center">
+              <template #default="{ row }">
+                <ElSwitch v-model="row.enabled" />
+              </template>
+            </ElTableColumn>
+            <ElTableColumn label="参数名" min-width="180">
+              <template #default="{ row }">
+                <ElInput v-model.trim="row.name" placeholder="例如 tenantId" />
+              </template>
+            </ElTableColumn>
+            <ElTableColumn label="参数值" min-width="200">
+              <template #default="{ row }">
+                <ElInput v-model="row.value" placeholder="参数值" />
+              </template>
+            </ElTableColumn>
+            <ElTableColumn label="说明" min-width="220">
+              <template #default="{ row }">
+                <ElInput v-model="row.description" placeholder="可选说明" />
+              </template>
+            </ElTableColumn>
+            <ElTableColumn label="操作" width="100" fixed="right">
+              <template #default="{ row }">
+                <ElButton text type="danger" @click="removeQueryParam(row.id)">
                   删除
                 </ElButton>
               </template>
