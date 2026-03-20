@@ -3,7 +3,6 @@ import type {
   CheckboxValueType,
   UploadFile,
   UploadFiles,
-  UploadInstance,
   UploadProps,
   UploadRawFile,
 } from 'element-plus';
@@ -29,6 +28,7 @@ interface ParamItem {
   enabled: boolean;
   name: string;
   value: any;
+  fileList?: UploadFile[];
   description?: string;
   type?: string;
   format?: string;
@@ -61,8 +61,6 @@ const contentTypeOptions = [
 ];
 
 const tableRef = ref();
-const fileList = ref([]);
-const uploadRef = ref<UploadInstance>();
 
 // 判断是否为枚举参数
 function isEnumParam(row: ParamItem) {
@@ -104,6 +102,7 @@ function add() {
     name: '',
     value: '',
     enabled: true,
+    fileList: [],
     contentType: undefined,
   });
 }
@@ -128,18 +127,38 @@ function handleUpload(
   uploadFiles: UploadFiles,
   row: ParamItem,
 ) {
+  row.fileList = [...uploadFiles];
   const rawFiles = uploadFiles
     .filter((f) => f.raw)
     .map((f) => f.raw) as UploadRawFile[];
-  row.value = rawFiles.length > 0 ? rawFiles : '';
+  if (rawFiles.length <= 0) {
+    row.value = '';
+    return;
+  }
+  row.value = row.type === 'array' ? rawFiles : rawFiles[0];
 }
 
 // 超出文件数量限制处理
-const handleExceed: UploadProps['onExceed'] = (files) => {
-  uploadRef.value!.clearFiles();
-  const file = files[0] as UploadRawFile;
+const handleExceed = (
+  files: Parameters<NonNullable<UploadProps['onExceed']>>[0],
+  _uploadFiles: Parameters<NonNullable<UploadProps['onExceed']>>[1],
+  row: ParamItem,
+) => {
+  const file = files[0] as UploadRawFile | undefined;
+  if (!file) {
+    return;
+  }
   file.uid = genFileId();
-  uploadRef.value!.handleStart(file);
+  row.fileList = [
+    {
+      name: file.name,
+      raw: file,
+      size: file.size,
+      status: 'ready',
+      uid: file.uid,
+    } as UploadFile,
+  ];
+  row.value = row.type === 'array' ? [file] : file;
 };
 </script>
 
@@ -169,15 +188,16 @@ const handleExceed: UploadProps['onExceed'] = (files) => {
         <template #default="{ row, $index }">
           <div v-if="row.format === 'binary'" class="pl-2 pt-2">
             <ElUpload
-              ref="uploadRef"
-              v-model:file-list="fileList"
+              v-model:file-list="row.fileList"
               action="#"
               :auto-upload="false"
               :on-change="(file, files) => handleUpload(file, files, row)"
               :on-remove="(file, files) => handleUpload(file, files, row)"
               :multiple="row.type === 'array'"
               :limit="row.type === 'array' ? 99 : 1"
-              :on-exceed="handleExceed"
+              :on-exceed="
+                (files, uploadFiles) => handleExceed(files, uploadFiles, row)
+              "
             >
               <ElButton plain size="small"> 上传 </ElButton>
             </ElUpload>

@@ -50,6 +50,8 @@ export interface ParamsType {
   enabled: boolean;
   name: string;
   value: string;
+  fileList?: any[];
+  required?: boolean;
   format?: string;
   type?: string;
   description?: string;
@@ -220,9 +222,15 @@ onMounted(() => {
 
   // 处理 schema
   let properties: Record<string, any> = schema?.properties ?? {};
+  let requiredFields: string[] = Array.isArray(schema?.required)
+    ? schema.required
+    : [];
   if (schema?.$ref) {
     const resolved = resolveSchema(schema);
     properties = resolved.properties ?? {};
+    requiredFields = Array.isArray(resolved?.required)
+      ? resolved.required
+      : requiredFields;
   }
 
   // 检查是否有 binary 格式的字段，有则切换到 form-data
@@ -235,11 +243,14 @@ onMounted(() => {
 
   // 遍历属性添加到 formDataParams
   Object.keys(properties).forEach((key) => {
+    const required = requiredFields.includes(key);
     // eslint-disable-next-line vue/no-mutating-props
     props.formDataParams.push({
       name: key,
-      enabled: true,
+      enabled: required,
+      required,
       value: '',
+      fileList: [],
       format:
         properties[key].type === 'array'
           ? properties[key]?.items?.format
