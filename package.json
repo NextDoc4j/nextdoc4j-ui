@@ -96,6 +96,7 @@
     },
     "overrides": {
       "@ast-grep/napi": "catalog:",
+      "@types/node": "catalog:",
       "@ctrl/tinycolor": "catalog:",
       "clsx": "catalog:",
       "esbuild": "0.25.3",
