@@ -11,6 +11,7 @@ const SvgDoubleArrowDownIcon = createIconifyIcon(
 const SvgDoubleArrowUpIcon = createIconifyIcon(
   'svg:double-alt-arrow-up-svgrepo-com',
 );
+const SvgMenuDocumentManageIcon = createIconifyIcon('svg:menu-document-manage');
 const SvgFormatLeftIcon = createIconifyIcon('svg:format-left');
 const SvgApiPrefixIcon = createIconifyIcon('svg:api-prefix');
 const SvgMenuApiIcon = createIconifyIcon('svg:menu-api');
@@ -29,6 +30,7 @@ export {
   SvgFormatLeftIcon,
   SvgMenuApiIcon,
   SvgMenuDocumentIcon,
+  SvgMenuDocumentManageIcon,
   SvgMenuEntityIcon,
   SvgMenuHomeIcon,
   SvgMenuSafetyIcon,

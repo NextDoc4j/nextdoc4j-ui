@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { ServiceItem } from '#/store/aggregation';
 import type { OpenAPISpec, SwaggerConfig } from '#/typings/openApi';
 
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
@@ -32,14 +33,12 @@ import {
 import MarkdownIt from 'markdown-it';
 import { storeToRefs } from 'pinia';
 
-import JsonView from '#/components/json-view.vue';
 import { useApiStore } from '#/store';
 import { useAggregationStore } from '#/store/aggregation';
 
 defineOptions({ name: 'DocManageExport' });
 
 type ExportFormat = 'doc' | 'html' | 'markdown' | 'openapi.json' | 'pdf';
-type PreviewFormat = 'html' | 'markdown' | 'openapi';
 type ScopeMode = 'all' | 'custom';
 
 interface GroupDocItem {
@@ -52,11 +51,14 @@ interface GroupDocItem {
 interface OperationItem {
   description?: string;
   groupCode: string;
+  groupName?: string;
   key: string;
   method: string;
   operationId?: string;
   path: string;
   raw: any;
+  serviceName?: string;
+  serviceUrl?: string;
   summary?: string;
   tags?: string[];
 }
@@ -65,6 +67,28 @@ interface GroupedOperationItem {
   code: string;
   name: string;
   operations: OperationItem[];
+}
+
+interface AggregationGroupTreeNode {
+  code: string;
+  key: string;
+  name: string;
+  operations: OperationItem[];
+}
+
+interface AggregationServiceTreeNode {
+  allOperations: OperationItem[];
+  groups: AggregationGroupTreeNode[];
+  hasGroupLevel: boolean;
+  operations: OperationItem[];
+  serviceName: string;
+  serviceUrl: string;
+}
+
+interface ServiceExportDocItem {
+  groups: GroupDocItem[];
+  openApi: OpenAPISpec;
+  service: ServiceItem;
 }
 
 const HTTP_METHODS = new Set(['delete', 'get', 'patch', 'post', 'put']);
@@ -77,14 +101,12 @@ const md = new MarkdownIt({
 
 const apiStore = useApiStore();
 const aggregationStore = useAggregationStore();
-const { currentService, isAggregation, services } =
-  storeToRefs(aggregationStore);
+const { isAggregation, services } = storeToRefs(aggregationStore);
 
 const loading = ref(false);
 const previewLoading = ref(false);
 const themeSwitching = ref(false);
 
-const selectedServiceUrl = ref('');
 const scopeMode = ref<ScopeMode>('all');
 const selectedOperations = ref<string[]>([]);
 const operationKeyword = ref('');
@@ -99,25 +121,17 @@ const includeMarkdownDocs = computed(() =>
   exportDocOptions.value.includes('otherDocs'),
 );
 
-const previewFormat = ref<PreviewFormat>('markdown');
 const exportFormat = ref<ExportFormat>('doc');
 const previewHtml = ref('');
-const previewOpenApi = ref<any>(null);
-const hasPreviewGenerated = ref(false);
 
 const currentOpenApi = ref<null | OpenAPISpec>(null);
 const currentSwaggerConfig = ref<null | SwaggerConfig>(null);
 const groupDocs = ref<GroupDocItem[]>([]);
 const operations = ref<OperationItem[]>([]);
+const aggregationGatewayOpenApi = ref<null | OpenAPISpec>(null);
+const aggregationServiceDocs = ref<ServiceExportDocItem[]>([]);
+let previewAutoTimer: null | ReturnType<typeof window.setTimeout> = null;
 let themeSwitchTimer: null | ReturnType<typeof window.setTimeout> = null;
-
-const serviceOptions = computed(() => {
-  return services.value.map((service) => ({
-    disabled: !!service.disabled,
-    label: service.name,
-    value: service.url,
-  }));
-});
 
 const filteredOperations = computed(() => {
   const keyword = operationKeyword.value.trim().toLowerCase();
@@ -126,7 +140,10 @@ const filteredOperations = computed(() => {
       operationMethod.value === 'all' || item.method === operationMethod.value;
     const passKeyword =
       !keyword ||
-      getGroupTitle(item.groupCode).toLowerCase().includes(keyword) ||
+      (item.serviceName || '').toLowerCase().includes(keyword) ||
+      getGroupTitle(item.groupCode, item.serviceUrl)
+        .toLowerCase()
+        .includes(keyword) ||
       item.path.toLowerCase().includes(keyword) ||
       (item.summary || '').toLowerCase().includes(keyword) ||
       (item.description || '').toLowerCase().includes(keyword) ||
@@ -137,6 +154,9 @@ const filteredOperations = computed(() => {
 });
 
 const groupedFilteredOperations = computed<GroupedOperationItem[]>(() => {
+  if (isAggregation.value) {
+    return [];
+  }
   const map = new Map<string, GroupedOperationItem>();
   filteredOperations.value.forEach((item) => {
     if (!map.has(item.groupCode)) {
@@ -154,6 +174,76 @@ const groupedFilteredOperations = computed<GroupedOperationItem[]>(() => {
   );
 });
 
+const aggregationServiceTree = computed<AggregationServiceTreeNode[]>(() => {
+  if (!isAggregation.value) {
+    return [];
+  }
+
+  const serviceMap = new Map<
+    string,
+    {
+      groupMap: Map<string, AggregationGroupTreeNode>;
+      serviceName: string;
+      serviceUrl: string;
+    }
+  >();
+
+  filteredOperations.value.forEach((item) => {
+    const serviceUrl = item.serviceUrl || '__aggregation__';
+    const serviceName = item.serviceName || '微服务';
+    if (!serviceMap.has(serviceUrl)) {
+      serviceMap.set(serviceUrl, {
+        serviceUrl,
+        serviceName,
+        groupMap: new Map(),
+      });
+    }
+
+    const target = serviceMap.get(serviceUrl)!;
+    const groupCode = item.groupCode || 'all';
+    if (!target.groupMap.has(groupCode)) {
+      target.groupMap.set(groupCode, {
+        code: groupCode,
+        key: getGroupNodeKey(serviceUrl, groupCode),
+        name: getGroupTitle(groupCode, serviceUrl),
+        operations: [],
+      });
+    }
+    target.groupMap.get(groupCode)!.operations.push(item);
+  });
+
+  return [...serviceMap.values()]
+    .map((serviceNode) => {
+      const groups = [...serviceNode.groupMap.values()].sort((a, b) =>
+        a.name.localeCompare(b.name, 'zh-CN'),
+      );
+      const nonAllGroups = groups.filter((group) => group.code !== 'all');
+      const hasGroupLevel = nonAllGroups.length > 0;
+      const directOperations = hasGroupLevel
+        ? []
+        : (serviceNode.groupMap.get('all')?.operations || []).sort((a, b) =>
+            `${a.path}::${a.method}`.localeCompare(`${b.path}::${b.method}`),
+          );
+      const allOperations = hasGroupLevel
+        ? nonAllGroups
+            .flatMap((group) => group.operations)
+            .sort((a, b) =>
+              `${a.path}::${a.method}`.localeCompare(`${b.path}::${b.method}`),
+            )
+        : directOperations;
+
+      return {
+        allOperations,
+        serviceUrl: serviceNode.serviceUrl,
+        serviceName: serviceNode.serviceName,
+        hasGroupLevel,
+        groups: hasGroupLevel ? nonAllGroups : [],
+        operations: directOperations,
+      };
+    })
+    .sort((a, b) => a.serviceName.localeCompare(b.serviceName, 'zh-CN'));
+});
+
 const selectedOperationItems = computed(() => {
   const selectedKeys = new Set(selectedOperations.value);
   return operations.value.filter((item) => selectedKeys.has(item.key));
@@ -166,26 +256,20 @@ const summaryText = computed(() => {
   if (!base) return '暂无可导出文档数据';
 
   const totalOps = operations.value.length;
-  const totalGroups = new Set(operations.value.map((item) => item.groupCode))
-    .size;
+  const totalGroups = isAggregation.value
+    ? aggregationServiceTree.value.length
+    : new Set(operations.value.map((item) => item.groupCode)).size;
   if (scopeMode.value === 'all') {
-    return `当前将导出全部接口，共 ${totalOps} 个，分组 ${totalGroups} 个`;
+    return isAggregation.value
+      ? `当前将导出全部接口，共 ${totalOps} 个，微服务 ${totalGroups} 个`
+      : `当前将导出全部接口，共 ${totalOps} 个，分组 ${totalGroups} 个`;
   }
-  return `当前已选择接口 ${selectedOperationItems.value.length} 个（可按分组勾选部分接口）`;
+  return isAggregation.value
+    ? `当前已选择接口 ${selectedOperationItems.value.length} 个（可按微服务/分组勾选部分接口）`
+    : `当前已选择接口 ${selectedOperationItems.value.length} 个（可按分组勾选部分接口）`;
 });
 
-const isPreviewEmpty = computed(() => {
-  if (previewFormat.value === 'openapi') {
-    return !previewOpenApi.value;
-  }
-  return !previewHtml.value;
-});
-
-const previewFormatTextMap: Record<PreviewFormat, string> = {
-  markdown: 'Markdown 预览',
-  html: 'HTML 预览',
-  openapi: 'OpenAPI JSON',
-};
+const isPreviewEmpty = computed(() => !previewHtml.value);
 const exportFormatTextMap: Record<ExportFormat, string> = {
   doc: 'Word(.doc)',
   pdf: 'PDF',
@@ -200,12 +284,21 @@ function parseGroupCode(url: string) {
 }
 
 function getOperationKey(
+  serviceUrl: string,
   groupCode: string,
   method: string,
   path: string,
   operationId?: string,
 ) {
-  return `${groupCode}::${method}::${path}::${operationId || ''}`;
+  return `${serviceUrl}::${groupCode}::${method}::${path}::${operationId || ''}`;
+}
+
+function getServiceNodeKey(serviceUrl: string) {
+  return `service::${serviceUrl}`;
+}
+
+function getGroupNodeKey(serviceUrl: string, groupCode: string) {
+  return `${getServiceNodeKey(serviceUrl)}::group::${groupCode}`;
 }
 
 function isPlainObject(value: unknown): value is Record<string, any> {
@@ -295,8 +388,21 @@ function cloneOpenApi(data: any) {
 
 function collectOperationsFromPaths(
   paths: Record<string, any>,
-  groupCode: string,
+  options:
+    | string
+    | {
+        groupCode: string;
+        groupName?: string;
+        serviceName?: string;
+        serviceUrl?: string;
+      },
 ): OperationItem[] {
+  const normalizedOptions =
+    typeof options === 'string' ? { groupCode: options } : options;
+  const serviceUrl = normalizedOptions.serviceUrl || '__single__';
+  const serviceName = normalizedOptions.serviceName || '当前文档';
+  const groupCode = normalizedOptions.groupCode;
+  const groupName = normalizedOptions.groupName || groupCode;
   const result: OperationItem[] = [];
 
   Object.entries(paths || {}).forEach(([path, methodConfig]) => {
@@ -307,10 +413,19 @@ function collectOperationsFromPaths(
         return;
       }
       result.push({
-        key: getOperationKey(groupCode, methodName, path, raw?.operationId),
+        key: getOperationKey(
+          serviceUrl,
+          groupCode,
+          methodName,
+          path,
+          raw?.operationId,
+        ),
         groupCode,
+        groupName,
         method: methodName,
         path,
+        serviceName,
+        serviceUrl,
         summary: raw?.summary,
         description: raw?.description,
         operationId: raw?.operationId,
@@ -646,18 +761,12 @@ function loadGroupDocsForSingleFromCache(config: SwaggerConfig) {
   }));
 }
 
-async function loadGroupDocsForAggregation(
-  serviceUrl: string,
+async function loadGroupDocsForService(
+  service: ServiceItem,
   config: SwaggerConfig,
 ) {
   const urls = config.urls || [];
   const docs: GroupDocItem[] = [];
-  const service = services.value.find((item) => item.url === serviceUrl);
-
-  if (!service) {
-    groupDocs.value = [];
-    return;
-  }
 
   const servicePrefix = service.url.replace('/v3/api-docs', '');
   for (const item of urls) {
@@ -674,11 +783,50 @@ async function loadGroupDocsForAggregation(
     });
   }
 
-  groupDocs.value = docs;
+  return docs;
 }
 
 function rebuildOperations(useCachedGrouping = false) {
   const map = new Map<string, OperationItem>();
+
+  if (isAggregation.value) {
+    aggregationServiceDocs.value.forEach((serviceDoc) => {
+      const hasGroups = serviceDoc.groups.length > 0;
+      if (hasGroups) {
+        serviceDoc.groups.forEach((group) => {
+          collectOperationsFromPaths(group.openApi?.paths || {}, {
+            groupCode: group.code,
+            groupName: group.name,
+            serviceUrl: serviceDoc.service.url,
+            serviceName: serviceDoc.service.name,
+          }).forEach((item) => {
+            map.set(item.key, item);
+          });
+        });
+        return;
+      }
+
+      collectOperationsFromPaths(serviceDoc.openApi?.paths || {}, {
+        groupCode: 'all',
+        groupName: '所有接口',
+        serviceUrl: serviceDoc.service.url,
+        serviceName: serviceDoc.service.name,
+      }).forEach((item) => {
+        map.set(item.key, item);
+      });
+    });
+
+    operations.value = [...map.values()].sort((a, b) => {
+      return `${a.serviceName || ''}::${a.groupName || ''}::${a.path}::${a.method}`.localeCompare(
+        `${b.serviceName || ''}::${b.groupName || ''}::${b.path}::${b.method}`,
+        'zh-CN',
+      );
+    });
+
+    selectedOperations.value = [];
+    expandedGroups.value = {};
+    return;
+  }
 
   if (useCachedGrouping) {
     Object.entries(apiStore.apiData || {}).forEach(([groupCode, tagGroup]) => {
@@ -691,6 +839,7 @@ function rebuildOperations(useCachedGrouping = false) {
             currentOpenApi.value?.paths?.[api.path]?.[methodName] || api;
           map.set(
             getOperationKey(
+              '__single__',
               groupCode,
               methodName,
               api.path,
@@ -698,14 +847,18 @@ function rebuildOperations(useCachedGrouping = false) {
             ),
             {
               key: getOperationKey(
+                '__single__',
                 groupCode,
                 methodName,
                 api.path,
                 source?.operationId,
               ),
               groupCode,
+              groupName: getGroupTitle(groupCode),
               method: methodName,
               path: api.path,
+              serviceName: currentOpenApi.value?.info?.title || '当前文档',
+              serviceUrl: '__single__',
               summary: source?.summary,
               description: source?.description,
               operationId: source?.operationId,
@@ -719,20 +872,25 @@ function rebuildOperations(useCachedGrouping = false) {
   }
 
   if (!useCachedGrouping || map.size <= 0) {
-    collectOperationsFromPaths(
-      currentOpenApi.value?.paths || {},
-      'all',
-    ).forEach((item) => {
+    collectOperationsFromPaths(currentOpenApi.value?.paths || {}, {
+      groupCode: 'all',
+      groupName: '所有接口',
+      serviceUrl: '__single__',
+      serviceName: currentOpenApi.value?.info?.title || '当前文档',
+    }).forEach((item) => {
       map.set(item.key, item);
     });
   }
 
   groupDocs.value.forEach((group) => {
-    collectOperationsFromPaths(group.openApi?.paths || {}, group.code).forEach(
-      (item) => {
-        map.set(item.key, item);
-      },
-    );
+    collectOperationsFromPaths(group.openApi?.paths || {}, {
+      groupCode: group.code,
+      groupName: group.name,
+      serviceUrl: '__single__',
+      serviceName: currentOpenApi.value?.info?.title || '当前文档',
+    }).forEach((item) => {
+      map.set(item.key, item);
+    });
   });
 
   operations.value = [...map.values()].sort((a, b) => {
@@ -750,28 +908,67 @@ async function loadDocContext() {
   loading.value = true;
   resetPreviewState();
   try {
+    aggregationServiceDocs.value = [];
+    aggregationGatewayOpenApi.value = null;
+
     if (isAggregation.value) {
-      const serviceUrl = selectedServiceUrl.value || currentService.value?.url;
-      if (!serviceUrl) {
+      const availableServices = services.value.filter((item) => !item.disabled);
+      if (availableServices.length <= 0) {
         currentOpenApi.value = null;
         currentSwaggerConfig.value = null;
         groupDocs.value = [];
         operations.value = [];
+        ElMessage.warning('未找到可用微服务，请检查网关聚合配置');
         return;
       }
 
-      selectedServiceUrl.value = serviceUrl;
-      const service = services.value.find((item) => item.url === serviceUrl);
-      if (!service) {
-        ElMessage.warning('未找到可用服务');
+      const mainConfig = await aggregationStore.getMainConfig();
+      aggregationGatewayOpenApi.value = mainConfig.openApi;
+      currentSwaggerConfig.value = mainConfig.config;
+
+      const serviceResults = await Promise.allSettled(
+        availableServices.map(async (service) => {
+          const serviceData = await aggregationStore.getServiceData(service);
+          const groups = await loadGroupDocsForService(
+            service,
+            serviceData.config,
+          );
+          return {
+            service,
+            openApi: serviceData.openApi,
+            groups,
+          } satisfies ServiceExportDocItem;
+        }),
+      );
+
+      const successResults = serviceResults.filter(
+        (item): item is PromiseFulfilledResult<ServiceExportDocItem> =>
+          item.status === 'fulfilled',
+      );
+      const failedCount = serviceResults.length - successResults.length;
+
+      aggregationServiceDocs.value = successResults
+        .filter(
+          (item) => !item.value.service.disabled && !!item.value.openApi?.paths,
+        )
+        .map((item) => item.value);
+
+      if (aggregationServiceDocs.value.length <= 0) {
+        currentOpenApi.value = null;
+        groupDocs.value = [];
+        operations.value = [];
+        ElMessage.warning('未能加载任何微服务文档数据');
         return;
       }
 
-      const serviceData = await aggregationStore.getServiceData(service);
-      currentOpenApi.value = serviceData.openApi;
-      currentSwaggerConfig.value = serviceData.config;
-      await loadGroupDocsForAggregation(serviceUrl, serviceData.config);
+      currentOpenApi.value = aggregationGatewayOpenApi.value;
+      groupDocs.value = [];
       rebuildOperations();
+      if (failedCount > 0) {
+        ElMessage.warning(
+          `有 ${failedCount} 个微服务文档加载失败，已按可用微服务继续导出`,
+        );
+      }
       return;
     }
 
@@ -811,12 +1008,15 @@ function buildSelectedOperations() {
 }
 
 function buildSubsetOpenApi(selectedOpsInput?: OperationItem[]) {
-  if (!currentOpenApi.value) {
+  const selectedOps = selectedOpsInput ?? buildSelectedOperations();
+  if (selectedOps.length <= 0) {
     return null;
   }
 
-  const selectedOps = selectedOpsInput ?? buildSelectedOperations();
-  if (selectedOps.length <= 0) {
+  const baseDoc = isAggregation.value
+    ? aggregationGatewayOpenApi.value
+    : currentOpenApi.value;
+  if (!baseDoc) {
     return null;
   }
 
@@ -828,14 +1028,32 @@ function buildSubsetOpenApi(selectedOpsInput?: OperationItem[]) {
     selectedPaths[item.path]![item.method] = cloneOpenApi(item.raw);
   });
 
-  const docsForComponents = [
-    currentOpenApi.value,
-    ...groupDocs.value
-      .map((item) => item.openApi)
-      .filter((doc): doc is OpenAPISpec => !!doc),
-  ];
+  const docsForComponents: OpenAPISpec[] = [baseDoc];
+  if (isAggregation.value) {
+    const selectedServices = new Set(
+      selectedOps.map((item) => item.serviceUrl).filter(Boolean),
+    );
+    aggregationServiceDocs.value.forEach((item) => {
+      if (!selectedServices.has(item.service.url)) {
+        return;
+      }
+      docsForComponents.push(item.openApi);
+      item.groups.forEach((group) => {
+        if (group.openApi) {
+          docsForComponents.push(group.openApi);
+        }
+      });
+    });
+  } else {
+    groupDocs.value.forEach((item) => {
+      if (item.openApi) {
+        docsForComponents.push(item.openApi);
+      }
+    });
+  }
 
-  const baseInfo = currentOpenApi.value.info;
+  const uniqueDocsForComponents = [...new Set(docsForComponents)];
+  const baseInfo = baseDoc.info;
   const info = includeInfo.value
     ? cloneOpenApi(baseInfo)
     : {
@@ -843,7 +1061,7 @@ function buildSubsetOpenApi(selectedOpsInput?: OperationItem[]) {
         version: baseInfo?.version || '1.0.0',
       };
 
-  const xNextDoc = cloneOpenApi(currentOpenApi.value['x-nextdoc4j'] || {});
+  const xNextDoc = cloneOpenApi(baseDoc['x-nextdoc4j'] || {});
   if (!includeBrand.value) {
     delete xNextDoc.brand;
   }
@@ -852,22 +1070,22 @@ function buildSubsetOpenApi(selectedOpsInput?: OperationItem[]) {
   }
 
   const subset: any = {
-    openapi: currentOpenApi.value.openapi,
+    openapi: baseDoc.openapi,
     info,
-    servers: cloneOpenApi(currentOpenApi.value.servers || []),
+    servers: cloneOpenApi(baseDoc.servers || []),
     paths: selectedPaths,
-    components: mergeComponents(docsForComponents),
+    components: mergeComponents(uniqueDocsForComponents),
   };
 
-  if (currentOpenApi.value.security) {
-    subset.security = cloneOpenApi(currentOpenApi.value.security);
+  if (baseDoc.security) {
+    subset.security = cloneOpenApi(baseDoc.security);
   }
   if (Object.keys(xNextDoc).length > 0) {
     subset['x-nextdoc4j'] = xNextDoc;
   }
-  if (currentOpenApi.value['x-nextdoc4j-aggregation']) {
+  if (baseDoc['x-nextdoc4j-aggregation']) {
     subset['x-nextdoc4j-aggregation'] = cloneOpenApi(
-      currentOpenApi.value['x-nextdoc4j-aggregation'],
+      baseDoc['x-nextdoc4j-aggregation'],
     );
   }
 
@@ -915,10 +1133,35 @@ function appendSchemaFieldGroups(lines: string[], groups: SchemaFieldGroup[]) {
   });
 }
 
-function getGroupTitle(groupCode: string) {
+function getGroupTitle(groupCode: string, serviceUrl?: string) {
   if (!groupCode || groupCode === 'all') {
     return '所有接口';
   }
+
+  if (isAggregation.value) {
+    if (serviceUrl) {
+      const serviceDoc = aggregationServiceDocs.value.find(
+        (item) => item.service.url === serviceUrl,
+      );
+      const groupName = serviceDoc?.groups.find(
+        (item) => item.code === groupCode,
+      )?.name;
+      if (groupName) {
+        return groupName;
+      }
+    }
+
+    for (const serviceDoc of aggregationServiceDocs.value) {
+      const groupName = serviceDoc.groups.find(
+        (item) => item.code === groupCode,
+      )?.name;
+      if (groupName) {
+        return groupName;
+      }
+    }
+    return groupCode;
+  }
+
   return (
     groupDocs.value.find((item) => item.code === groupCode)?.name || groupCode
   );
@@ -982,27 +1225,30 @@ function buildMarkdownDocument(doc: OpenAPISpec, selectedOps: OperationItem[]) {
   const ops = (
     selectedOps.length > 0
       ? selectedOps
-      : collectOperationsFromPaths(doc.paths || {}, 'all')
-  )
-    .filter((item) => !!doc.paths?.[item.path]?.[item.method])
-    .sort((a, b) => {
-      return `${a.groupCode}::${a.path}::${a.method}`.localeCompare(
-        `${b.groupCode}::${b.path}::${b.method}`,
+      : collectOperationsFromPaths(doc.paths || {}, {
+          groupCode: 'all',
+          groupName: '所有接口',
+          serviceName: info?.title || '当前文档',
+          serviceUrl: '__single__',
+        })
+  ).sort((a, b) => {
+    if (isAggregation.value) {
+      return `${a.serviceName || ''}::${a.groupCode}::${a.path}::${a.method}`.localeCompare(
+        `${b.serviceName || ''}::${b.groupCode}::${b.path}::${b.method}`,
         'zh-CN',
       );
-    });
-
-  let currentGroup = '';
-  ops.forEach((op, index) => {
-    const groupCode = op.groupCode || 'all';
-    if (groupCode !== currentGroup) {
-      currentGroup = groupCode;
-      lines.push(`## 分组：${getGroupTitle(groupCode)}`, '');
     }
+    return `${a.groupCode}::${a.path}::${a.method}`.localeCompare(
+      `${b.groupCode}::${b.path}::${b.method}`,
+      'zh-CN',
+    );
+  });
 
-    const raw = doc.paths?.[op.path]?.[op.method];
-    if (!raw) return;
-
+  const appendOperationContent = (
+    raw: any,
+    op: OperationItem,
+    index: number,
+  ) => {
     if (index > 0) {
       lines.push('---', '');
     }
@@ -1072,7 +1318,48 @@ function buildMarkdownDocument(doc: OpenAPISpec, selectedOps: OperationItem[]) {
         },
       );
     }
-  });
+  };
+
+  if (isAggregation.value) {
+    let currentService = '';
+    let currentGroup = '';
+
+    ops.forEach((op, index) => {
+      const raw = op.raw || doc.paths?.[op.path]?.[op.method];
+      if (!raw) return;
+
+      const serviceKey = op.serviceUrl || '';
+      const serviceName = op.serviceName || '微服务';
+      const groupTitle = getGroupTitle(op.groupCode, op.serviceUrl);
+
+      if (serviceKey !== currentService) {
+        currentService = serviceKey;
+        currentGroup = '';
+        lines.push(`## 微服务：${serviceName}`, '');
+      }
+
+      if (groupTitle !== currentGroup) {
+        currentGroup = groupTitle;
+        lines.push(`### 分组：${groupTitle}`, '');
+      }
+
+      appendOperationContent(raw, op, index);
+    });
+  } else {
+    let currentGroup = '';
+    ops.forEach((op, index) => {
+      const raw = op.raw || doc.paths?.[op.path]?.[op.method];
+      if (!raw) return;
+
+      const groupCode = op.groupCode || 'all';
+      if (groupCode !== currentGroup) {
+        currentGroup = groupCode;
+        lines.push(`## 分组：${getGroupTitle(groupCode)}`, '');
+      }
+
+      appendOperationContent(raw, op, index);
+    });
+  }
 
   if (includeInfo.value) {
     lines.push('## OpenAPI Info', '');
@@ -1147,8 +1434,6 @@ function downloadFile(content: BlobPart, fileName: string, mimeType: string) {
 
 function resetPreviewState() {
   previewHtml.value = '';
-  previewOpenApi.value = null;
-  hasPreviewGenerated.value = false;
 }
 
 async function generatePreview(silentOrEvent?: boolean | Event) {
@@ -1165,17 +1450,8 @@ async function generatePreview(silentOrEvent?: boolean | Event) {
 
   previewLoading.value = true;
   try {
-    if (previewFormat.value === 'openapi') {
-      previewOpenApi.value = subset;
-      previewHtml.value = '';
-      hasPreviewGenerated.value = true;
-      return;
-    }
-
     const markdownContent = buildMarkdownDocument(subset, selectedOps);
     previewHtml.value = md.render(markdownContent);
-    previewOpenApi.value = null;
-    hasPreviewGenerated.value = true;
   } finally {
     previewLoading.value = false;
   }
@@ -1235,14 +1511,22 @@ function exportDocument() {
   }
 }
 
-async function handlePreviewCommand(command: PreviewFormat) {
-  previewFormat.value = command;
-  await generatePreview(true);
-}
-
 function handleExportCommand(command: ExportFormat) {
   exportFormat.value = command;
   exportDocument();
+}
+
+function scheduleAutoPreview() {
+  if (previewAutoTimer) {
+    window.clearTimeout(previewAutoTimer);
+  }
+  previewAutoTimer = window.setTimeout(() => {
+    previewAutoTimer = null;
+    if (loading.value) {
+      return;
+    }
+    void generatePreview(true);
+  }, 120);
 }
 
 function toggleThemeSwitchingState() {
@@ -1258,25 +1542,39 @@ function toggleThemeSwitchingState() {
 
 watch(
   () => isAggregation.value,
-  async (value) => {
-    selectedServiceUrl.value = value ? currentService.value?.url || '' : '';
+  async () => {
     await loadDocContext();
   },
   { immediate: true },
 );
 
 watch(
-  () => currentService.value?.url,
-  (serviceUrl) => {
-    if (isAggregation.value && !selectedServiceUrl.value) {
-      selectedServiceUrl.value = serviceUrl || '';
+  () => services.value.map((item) => `${item.url}:${item.disabled}`).join('|'),
+  async () => {
+    if (isAggregation.value) {
+      await loadDocContext();
     }
   },
 );
 
-watch(selectedServiceUrl, async () => {
-  if (isAggregation.value) {
-    await loadDocContext();
+watch(
+  [
+    scopeMode,
+    selectedOperations,
+    operations,
+    exportDocOptions,
+    currentOpenApi,
+    aggregationGatewayOpenApi,
+  ],
+  () => {
+    scheduleAutoPreview();
+  },
+  { deep: true },
+);
+
+watch(loading, (value) => {
+  if (!value) {
+    scheduleAutoPreview();
   }
 });
 
@@ -1288,6 +1586,10 @@ watch(
 );
 
 onBeforeUnmount(() => {
+  if (previewAutoTimer) {
+    window.clearTimeout(previewAutoTimer);
+    previewAutoTimer = null;
+  }
   if (themeSwitchTimer) {
     window.clearTimeout(themeSwitchTimer);
     themeSwitchTimer = null;
@@ -1310,18 +1612,6 @@ onBeforeUnmount(() => {
           <ElSkeleton v-if="loading" :rows="6" animated />
           <template v-else>
             <ElForm label-width="90px">
-              <ElFormItem v-if="isAggregation" label="目标服务">
-                <ElSelect v-model="selectedServiceUrl" style="width: 100%">
-                  <ElOption
-                    v-for="service in serviceOptions"
-                    :key="service.value"
-                    :label="service.label"
-                    :value="service.value"
-                    :disabled="service.disabled"
-                  />
-                </ElSelect>
-              </ElFormItem>
-
               <ElFormItem label="导出范围">
                 <ElRadioGroup v-model="scopeMode">
                   <ElRadio value="all">全部文档</ElRadio>
@@ -1338,7 +1628,7 @@ onBeforeUnmount(() => {
               <div class="mb-2 flex gap-2">
                 <ElInput
                   v-model.trim="operationKeyword"
-                  placeholder="搜索 分组 / URL / 描述 / operationId"
+                  placeholder="搜索 微服务 / 分组 / URL / 描述 / operationId"
                   clearable
                 />
                 <ElSelect v-model="operationMethod" style="width: 120px">
@@ -1352,114 +1642,361 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="mb-2 text-xs text-[var(--el-text-color-secondary)]">
-                一层是分组，二层是接口。可直接勾选分组，或展开后勾选部分接口。
+                {{
+                  isAggregation
+                    ? '一层是微服务，二层是分组（若存在），末层是接口。左侧复选框可全选，右侧箭头可展开。'
+                    : '一层是分组，二层是接口。可直接勾选分组，或展开后勾选部分接口。'
+                }}
               </div>
 
               <div
                 class="scope-tree-panel max-h-[360px] rounded border border-[var(--el-border-color)] bg-[var(--el-bg-color)] px-2"
               >
-                <template v-if="groupedFilteredOperations.length > 0">
-                  <div class="divide-y divide-[var(--el-border-color-lighter)]">
+                <template v-if="isAggregation">
+                  <template v-if="aggregationServiceTree.length > 0">
                     <div
-                      v-for="group in groupedFilteredOperations"
-                      :key="group.code"
-                      class="py-2"
+                      class="divide-y divide-[var(--el-border-color-lighter)]"
                     >
                       <div
-                        class="group-header flex items-center justify-between px-1 py-1"
+                        v-for="serviceNode in aggregationServiceTree"
+                        :key="serviceNode.serviceUrl"
+                        class="py-2"
                       >
-                        <ElCheckbox
-                          :model-value="isGroupChecked(group.operations)"
-                          :indeterminate="
-                            isGroupIndeterminate(group.operations)
-                          "
-                          @change="
-                            (value) =>
-                              toggleGroupSelection(
-                                group.operations,
-                                Boolean(value),
-                              )
-                          "
-                        >
-                          <span class="font-medium">{{ group.name }}</span>
-                          <span
-                            class="ml-1 text-xs text-[var(--el-text-color-secondary)]"
-                          >
-                            ({{ getCheckedCountInGroup(group.operations) }}/{{
-                              group.operations.length
-                            }})
-                          </span>
-                        </ElCheckbox>
                         <div
-                          class="group-toggle-area"
-                          role="button"
-                          tabindex="0"
-                          :aria-label="
-                            isGroupExpanded(group.code)
-                              ? '收起分组'
-                              : '展开分组'
-                          "
-                          @click.stop="toggleGroupExpanded(group.code)"
-                          @keydown.enter.prevent.stop="
-                            toggleGroupExpanded(group.code)
-                          "
-                          @keydown.space.prevent.stop="
-                            toggleGroupExpanded(group.code)
-                          "
+                          class="service-header flex items-center justify-between px-1 py-1"
                         >
-                          <component
-                            :is="
-                              isGroupExpanded(group.code)
-                                ? SvgDoubleArrowUpIcon
-                                : SvgDoubleArrowDownIcon
+                          <ElCheckbox
+                            :model-value="
+                              isGroupChecked(serviceNode.allOperations)
                             "
-                            class="group-toggle-icon"
-                          />
-                        </div>
-                      </div>
-
-                      <Transition name="group-submenu-motion">
-                        <div
-                          v-show="isGroupExpanded(group.code)"
-                          class="group-submenu-wrap ml-3 mt-2 border-l border-dashed border-[var(--el-border-color)] pl-3"
-                        >
-                          <div class="group-submenu-list py-1">
-                            <ElCheckbox
-                              v-for="item in group.operations"
-                              :key="item.key"
-                              class="group-submenu-item"
-                              :model-value="isOperationChecked(item.key)"
-                              @change="
-                                (value) =>
-                                  toggleOperationSelection(
-                                    item.key,
-                                    Boolean(value),
-                                  )
-                              "
+                            :indeterminate="
+                              isGroupIndeterminate(serviceNode.allOperations)
+                            "
+                            @change="
+                              (value) =>
+                                toggleGroupSelection(
+                                  serviceNode.allOperations,
+                                  Boolean(value),
+                                )
+                            "
+                          >
+                            <span class="font-medium">
+                              {{ serviceNode.serviceName }}
+                            </span>
+                            <span
+                              class="ml-1 text-xs text-[var(--el-text-color-secondary)]"
                             >
-                              [{{ item.method.toUpperCase() }}] {{ item.path }}
-                              <span
-                                class="text-[var(--el-text-color-secondary)]"
-                              >
-                                {{
-                                  item.summary || item.description
-                                    ? ` - ${item.summary || item.description}`
-                                    : ''
-                                }}
-                              </span>
-                            </ElCheckbox>
+                              ({{
+                                getCheckedCountInGroup(
+                                  serviceNode.allOperations,
+                                )
+                              }}/{{ serviceNode.allOperations.length }})
+                            </span>
+                          </ElCheckbox>
+                          <div
+                            class="group-toggle-area"
+                            role="button"
+                            tabindex="0"
+                            :aria-label="
+                              isGroupExpanded(
+                                getServiceNodeKey(serviceNode.serviceUrl),
+                              )
+                                ? '收起微服务'
+                                : '展开微服务'
+                            "
+                            @click.stop="
+                              toggleGroupExpanded(
+                                getServiceNodeKey(serviceNode.serviceUrl),
+                              )
+                            "
+                            @keydown.enter.prevent.stop="
+                              toggleGroupExpanded(
+                                getServiceNodeKey(serviceNode.serviceUrl),
+                              )
+                            "
+                            @keydown.space.prevent.stop="
+                              toggleGroupExpanded(
+                                getServiceNodeKey(serviceNode.serviceUrl),
+                              )
+                            "
+                          >
+                            <component
+                              :is="
+                                isGroupExpanded(
+                                  getServiceNodeKey(serviceNode.serviceUrl),
+                                )
+                                  ? SvgDoubleArrowUpIcon
+                                  : SvgDoubleArrowDownIcon
+                              "
+                              class="group-toggle-icon"
+                            />
                           </div>
                         </div>
-                      </Transition>
+
+                        <Transition name="group-submenu-motion">
+                          <div
+                            v-show="
+                              isGroupExpanded(
+                                getServiceNodeKey(serviceNode.serviceUrl),
+                              )
+                            "
+                            class="group-submenu-wrap ml-3 mt-2 border-l border-dashed border-[var(--el-border-color)] pl-3"
+                          >
+                            <template v-if="serviceNode.hasGroupLevel">
+                              <div class="group-submenu-list py-1">
+                                <div
+                                  v-for="group in serviceNode.groups"
+                                  :key="group.key"
+                                  class="mb-2 last:mb-0"
+                                >
+                                  <div
+                                    class="group-header flex items-center justify-between px-1 py-1"
+                                  >
+                                    <ElCheckbox
+                                      :model-value="
+                                        isGroupChecked(group.operations)
+                                      "
+                                      :indeterminate="
+                                        isGroupIndeterminate(group.operations)
+                                      "
+                                      @change="
+                                        (value) =>
+                                          toggleGroupSelection(
+                                            group.operations,
+                                            Boolean(value),
+                                          )
+                                      "
+                                    >
+                                      <span class="font-medium">
+                                        {{ group.name }}
+                                      </span>
+                                      <span
+                                        class="ml-1 text-xs text-[var(--el-text-color-secondary)]"
+                                      >
+                                        ({{
+                                          getCheckedCountInGroup(
+                                            group.operations,
+                                          )
+                                        }}/{{ group.operations.length }})
+                                      </span>
+                                    </ElCheckbox>
+                                    <div
+                                      class="group-toggle-area"
+                                      role="button"
+                                      tabindex="0"
+                                      :aria-label="
+                                        isGroupExpanded(group.key)
+                                          ? '收起分组'
+                                          : '展开分组'
+                                      "
+                                      @click.stop="
+                                        toggleGroupExpanded(group.key)
+                                      "
+                                      @keydown.enter.prevent.stop="
+                                        toggleGroupExpanded(group.key)
+                                      "
+                                      @keydown.space.prevent.stop="
+                                        toggleGroupExpanded(group.key)
+                                      "
+                                    >
+                                      <component
+                                        :is="
+                                          isGroupExpanded(group.key)
+                                            ? SvgDoubleArrowUpIcon
+                                            : SvgDoubleArrowDownIcon
+                                        "
+                                        class="group-toggle-icon"
+                                      />
+                                    </div>
+                                  </div>
+
+                                  <Transition name="group-submenu-motion">
+                                    <div
+                                      v-show="isGroupExpanded(group.key)"
+                                      class="group-submenu-wrap ml-3 mt-2 border-l border-dashed border-[var(--el-border-color)] pl-3"
+                                    >
+                                      <div class="group-submenu-list py-1">
+                                        <ElCheckbox
+                                          v-for="item in group.operations"
+                                          :key="item.key"
+                                          class="group-submenu-item"
+                                          :model-value="
+                                            isOperationChecked(item.key)
+                                          "
+                                          @change="
+                                            (value) =>
+                                              toggleOperationSelection(
+                                                item.key,
+                                                Boolean(value),
+                                              )
+                                          "
+                                        >
+                                          [{{ item.method.toUpperCase() }}]
+                                          {{ item.path }}
+                                          <span
+                                            class="text-[var(--el-text-color-secondary)]"
+                                          >
+                                            {{
+                                              item.summary || item.description
+                                                ? ` - ${item.summary || item.description}`
+                                                : ''
+                                            }}
+                                          </span>
+                                        </ElCheckbox>
+                                      </div>
+                                    </div>
+                                  </Transition>
+                                </div>
+                              </div>
+                            </template>
+                            <template v-else>
+                              <div class="group-submenu-list py-1">
+                                <ElCheckbox
+                                  v-for="item in serviceNode.operations"
+                                  :key="item.key"
+                                  class="group-submenu-item"
+                                  :model-value="isOperationChecked(item.key)"
+                                  @change="
+                                    (value) =>
+                                      toggleOperationSelection(
+                                        item.key,
+                                        Boolean(value),
+                                      )
+                                  "
+                                >
+                                  [{{ item.method.toUpperCase() }}]
+                                  {{ item.path }}
+                                  <span
+                                    class="text-[var(--el-text-color-secondary)]"
+                                  >
+                                    {{
+                                      item.summary || item.description
+                                        ? ` - ${item.summary || item.description}`
+                                        : ''
+                                    }}
+                                  </span>
+                                </ElCheckbox>
+                              </div>
+                            </template>
+                          </div>
+                        </Transition>
+                      </div>
                     </div>
+                  </template>
+                  <div
+                    v-else
+                    class="py-8 text-center text-sm text-[var(--el-text-color-secondary)]"
+                  >
+                    暂无匹配接口
                   </div>
                 </template>
-                <div
-                  v-else
-                  class="py-8 text-center text-sm text-[var(--el-text-color-secondary)]"
-                >
-                  暂无匹配接口
-                </div>
+                <template v-else>
+                  <template v-if="groupedFilteredOperations.length > 0">
+                    <div
+                      class="divide-y divide-[var(--el-border-color-lighter)]"
+                    >
+                      <div
+                        v-for="group in groupedFilteredOperations"
+                        :key="group.code"
+                        class="py-2"
+                      >
+                        <div
+                          class="group-header flex items-center justify-between px-1 py-1"
+                        >
+                          <ElCheckbox
+                            :model-value="isGroupChecked(group.operations)"
+                            :indeterminate="
+                              isGroupIndeterminate(group.operations)
+                            "
+                            @change="
+                              (value) =>
+                                toggleGroupSelection(
+                                  group.operations,
+                                  Boolean(value),
+                                )
+                            "
+                          >
+                            <span class="font-medium">{{ group.name }}</span>
+                            <span
+                              class="ml-1 text-xs text-[var(--el-text-color-secondary)]"
+                            >
+                              ({{ getCheckedCountInGroup(group.operations) }}/{{
+                                group.operations.length
+                              }})
+                            </span>
+                          </ElCheckbox>
+                          <div
+                            class="group-toggle-area"
+                            role="button"
+                            tabindex="0"
+                            :aria-label="
+                              isGroupExpanded(group.code)
+                                ? '收起分组'
+                                : '展开分组'
+                            "
+                            @click.stop="toggleGroupExpanded(group.code)"
+                            @keydown.enter.prevent.stop="
+                              toggleGroupExpanded(group.code)
+                            "
+                            @keydown.space.prevent.stop="
+                              toggleGroupExpanded(group.code)
+                            "
+                          >
+                            <component
+                              :is="
+                                isGroupExpanded(group.code)
+                                  ? SvgDoubleArrowUpIcon
+                                  : SvgDoubleArrowDownIcon
+                              "
+                              class="group-toggle-icon"
+                            />
+                          </div>
+                        </div>
+
+                        <Transition name="group-submenu-motion">
+                          <div
+                            v-show="isGroupExpanded(group.code)"
+                            class="group-submenu-wrap ml-3 mt-2 border-l border-dashed border-[var(--el-border-color)] pl-3"
+                          >
+                            <div class="group-submenu-list py-1">
+                              <ElCheckbox
+                                v-for="item in group.operations"
+                                :key="item.key"
+                                class="group-submenu-item"
+                                :model-value="isOperationChecked(item.key)"
+                                @change="
+                                  (value) =>
+                                    toggleOperationSelection(
+                                      item.key,
+                                      Boolean(value),
+                                    )
+                                "
+                              >
+                                [{{ item.method.toUpperCase() }}]
+                                {{ item.path }}
+                                <span
+                                  class="text-[var(--el-text-color-secondary)]"
+                                >
+                                  {{
+                                    item.summary || item.description
+                                      ? ` - ${item.summary || item.description}`
+                                      : ''
+                                  }}
+                                </span>
+                              </ElCheckbox>
+                            </div>
+                          </div>
+                        </Transition>
+                      </div>
+                    </div>
+                  </template>
+                  <div
+                    v-else
+                    class="py-8 text-center text-sm text-[var(--el-text-color-secondary)]"
+                  >
+                    暂无匹配接口
+                  </div>
+                </template>
               </div>
             </template>
             <template v-else>
@@ -1493,25 +2030,8 @@ onBeforeUnmount(() => {
         <ElCard shadow="never" class="doc-preview-card h-full">
           <template #header>
             <div class="flex flex-wrap items-center justify-between gap-3">
-              <span class="font-medium">文档预览</span>
+              <span class="font-medium">Markdown 实时预览</span>
               <ElSpace wrap>
-                <ElDropdown trigger="click" @command="handlePreviewCommand">
-                  <ElButton type="primary" :loading="previewLoading">
-                    预览：{{ previewFormatTextMap[previewFormat] }}
-                  </ElButton>
-                  <template #dropdown>
-                    <ElDropdownMenu>
-                      <ElDropdownItem command="markdown">
-                        Markdown 预览
-                      </ElDropdownItem>
-                      <ElDropdownItem command="html">HTML 预览</ElDropdownItem>
-                      <ElDropdownItem command="openapi">
-                        OpenAPI JSON
-                      </ElDropdownItem>
-                    </ElDropdownMenu>
-                  </template>
-                </ElDropdown>
-
                 <ElDropdown trigger="click" @command="handleExportCommand">
                   <ElButton type="success">
                     导出：{{ exportFormatTextMap[exportFormat] }}
@@ -1538,20 +2058,8 @@ onBeforeUnmount(() => {
           <template v-else>
             <ElEmpty
               v-if="isPreviewEmpty"
-              description="点击右上角“预览”下拉选择格式后查看内容"
+              description="请选择导出范围或接口，预览将自动更新"
             />
-            <div
-              v-else-if="previewFormat === 'openapi'"
-              class="doc-preview-json max-h-[440px] overflow-auto"
-            >
-              <JsonView
-                :data="previewOpenApi"
-                language="json"
-                :image-render="true"
-                :loading="previewLoading"
-                class="response-body max-h-[calc(100vh-280px)] overflow-auto"
-              />
-            </div>
             <div
               v-else
               class="doc-preview-html max-h-[calc(100vh-280px)] overflow-auto [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:p-2 [&_th]:border [&_th]:p-2"
@@ -1567,8 +2075,7 @@ onBeforeUnmount(() => {
 <style scoped lang="scss">
 .doc-export-page {
   :deep(.doc-preview-card .el-card__body),
-  :deep(.doc-preview-html),
-  :deep(.doc-preview-json) {
+  :deep(.doc-preview-html) {
     contain: layout paint;
   }
 }
@@ -1614,6 +2121,13 @@ onBeforeUnmount(() => {
 .group-header {
   padding: 4px 8px;
   background: var(--el-fill-color);
+  border-radius: 8px;
+}
+
+.service-header {
+  padding: 4px 8px;
+  background: var(--el-color-primary-light-9);
+  border: 1px solid var(--el-color-primary-light-7);
   border-radius: 8px;
 }
 
