@@ -40,6 +40,7 @@
     "@vben/utils": "workspace:*",
     "@vueuse/core": "catalog:",
     "dayjs": "catalog:",
+    "docx": "^9.6.1",
     "dompurify": "^3.2.6",
     "element-plus": "catalog:",
     "highlight.js": "^11.11.1",
