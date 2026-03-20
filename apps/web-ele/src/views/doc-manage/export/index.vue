@@ -2033,7 +2033,7 @@ onBeforeUnmount(() => {
               <span class="font-medium">Markdown 实时预览</span>
               <ElSpace wrap>
                 <ElDropdown trigger="click" @command="handleExportCommand">
-                  <ElButton type="success">
+                  <ElButton type="primary">
                     导出：{{ exportFormatTextMap[exportFormat] }}
                   </ElButton>
                   <template #dropdown>
