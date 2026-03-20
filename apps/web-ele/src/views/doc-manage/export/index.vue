@@ -2402,8 +2402,8 @@ onBeforeUnmount(() => {
 
 .doc-preview-html:deep(ul),
 .doc-preview-html:deep(ol) {
-  margin: 10px 0 14px;
   padding-left: 22px;
+  margin: 10px 0 14px;
 }
 
 .doc-preview-html:deep(h1),
