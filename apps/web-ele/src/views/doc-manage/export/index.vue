@@ -3,6 +3,7 @@ import type { OpenAPISpec, SwaggerConfig } from '#/typings/openApi';
 
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 
+import { SvgDoubleArrowDownIcon, SvgDoubleArrowUpIcon } from '@vben/icons';
 import { preferences } from '@vben/preferences';
 
 import {
@@ -39,7 +40,7 @@ defineOptions({ name: 'DocManageExport' });
 
 type ExportFormat = 'doc' | 'html' | 'markdown' | 'openapi.json' | 'pdf';
 type PreviewFormat = 'html' | 'markdown' | 'openapi';
-type ScopeMode = 'all' | 'groups' | 'operations';
+type ScopeMode = 'all' | 'custom';
 
 interface GroupDocItem {
   code: string;
@@ -58,6 +59,12 @@ interface OperationItem {
   raw: any;
   summary?: string;
   tags?: string[];
+}
+
+interface GroupedOperationItem {
+  code: string;
+  name: string;
+  operations: OperationItem[];
 }
 
 const HTTP_METHODS = new Set(['delete', 'get', 'patch', 'post', 'put']);
@@ -79,10 +86,10 @@ const themeSwitching = ref(false);
 
 const selectedServiceUrl = ref('');
 const scopeMode = ref<ScopeMode>('all');
-const selectedGroups = ref<string[]>([]);
 const selectedOperations = ref<string[]>([]);
 const operationKeyword = ref('');
 const operationMethod = ref('all');
+const expandedGroups = ref<Record<string, boolean>>({});
 
 type ExportDocOption = 'brand' | 'info' | 'otherDocs';
 const exportDocOptions = ref<ExportDocOption[]>([]);
@@ -119,6 +126,7 @@ const filteredOperations = computed(() => {
       operationMethod.value === 'all' || item.method === operationMethod.value;
     const passKeyword =
       !keyword ||
+      getGroupTitle(item.groupCode).toLowerCase().includes(keyword) ||
       item.path.toLowerCase().includes(keyword) ||
       (item.summary || '').toLowerCase().includes(keyword) ||
       (item.description || '').toLowerCase().includes(keyword) ||
@@ -128,29 +136,42 @@ const filteredOperations = computed(() => {
   });
 });
 
+const groupedFilteredOperations = computed<GroupedOperationItem[]>(() => {
+  const map = new Map<string, GroupedOperationItem>();
+  filteredOperations.value.forEach((item) => {
+    if (!map.has(item.groupCode)) {
+      map.set(item.groupCode, {
+        code: item.groupCode,
+        name: getGroupTitle(item.groupCode),
+        operations: [],
+      });
+    }
+    map.get(item.groupCode)!.operations.push(item);
+  });
+
+  return [...map.values()].sort((a, b) =>
+    a.name.localeCompare(b.name, 'zh-CN'),
+  );
+});
+
 const selectedOperationItems = computed(() => {
   const selectedKeys = new Set(selectedOperations.value);
   return operations.value.filter((item) => selectedKeys.has(item.key));
 });
 
-const selectedGroupItems = computed(() => {
-  const selectedSet = new Set(selectedGroups.value);
-  return groupDocs.value.filter((item) => selectedSet.has(item.code));
-});
+const selectedOperationSet = computed(() => new Set(selectedOperations.value));
 
 const summaryText = computed(() => {
   const base = currentOpenApi.value;
   if (!base) return '暂无可导出文档数据';
 
   const totalOps = operations.value.length;
-  const totalGroups = currentSwaggerConfig.value?.urls?.length || 0;
+  const totalGroups = new Set(operations.value.map((item) => item.groupCode))
+    .size;
   if (scopeMode.value === 'all') {
     return `当前将导出全部接口，共 ${totalOps} 个，分组 ${totalGroups} 个`;
   }
-  if (scopeMode.value === 'groups') {
-    return `当前已选择分组 ${selectedGroupItems.value.length} 个`;
-  }
-  return `当前已选择接口 ${selectedOperationItems.value.length} 个`;
+  return `当前已选择接口 ${selectedOperationItems.value.length} 个（可按分组勾选部分接口）`;
 });
 
 const isPreviewEmpty = computed(() => {
@@ -187,8 +208,89 @@ function getOperationKey(
   return `${groupCode}::${method}::${path}::${operationId || ''}`;
 }
 
+function isPlainObject(value: unknown): value is Record<string, any> {
+  if (Object.prototype.toString.call(value) !== '[object Object]') {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === null || prototype === Object.prototype;
+}
+
+function sanitizeCloneValue(value: any, seen = new WeakMap<object, any>()) {
+  if (value === null) return null;
+
+  const valueType = typeof value;
+  if (
+    valueType === 'boolean' ||
+    valueType === 'number' ||
+    valueType === 'string'
+  ) {
+    return value;
+  }
+  if (valueType === 'bigint') {
+    return Number(value);
+  }
+  if (
+    valueType === 'function' ||
+    valueType === 'symbol' ||
+    valueType === 'undefined'
+  ) {
+    return undefined;
+  }
+
+  if (Array.isArray(value)) {
+    if (seen.has(value)) {
+      return seen.get(value);
+    }
+    const arrayResult: any[] = [];
+    seen.set(value, arrayResult);
+    value.forEach((item) => {
+      const normalized = sanitizeCloneValue(item, seen);
+      arrayResult.push(normalized === undefined ? null : normalized);
+    });
+    return arrayResult;
+  }
+
+  if (value instanceof Date) {
+    return new Date(value);
+  }
+  if (value instanceof RegExp) {
+    return new RegExp(value.source, value.flags);
+  }
+
+  if (!value || valueType !== 'object') {
+    return undefined;
+  }
+
+  if (seen.has(value)) {
+    return seen.get(value);
+  }
+
+  if (!isPlainObject(value)) {
+    try {
+      return structuredClone(value);
+    } catch {
+      return undefined;
+    }
+  }
+
+  const objectResult: Record<string, any> = {};
+  seen.set(value, objectResult);
+  Object.entries(value).forEach(([key, nestedValue]) => {
+    const normalized = sanitizeCloneValue(nestedValue, seen);
+    if (normalized !== undefined) {
+      objectResult[key] = normalized;
+    }
+  });
+  return objectResult;
+}
+
 function cloneOpenApi(data: any) {
-  return structuredClone(data);
+  try {
+    return structuredClone(data);
+  } catch {
+    return sanitizeCloneValue(data);
+  }
 }
 
 function collectOperationsFromPaths(
@@ -640,8 +742,8 @@ function rebuildOperations(useCachedGrouping = false) {
     );
   });
 
-  selectedGroups.value = [];
   selectedOperations.value = [];
+  expandedGroups.value = {};
 }
 
 async function loadDocContext() {
@@ -703,10 +805,6 @@ async function loadDocContext() {
 function buildSelectedOperations() {
   if (scopeMode.value === 'all') {
     return operations.value;
-  }
-  if (scopeMode.value === 'groups') {
-    const selected = new Set(selectedGroups.value);
-    return operations.value.filter((item) => selected.has(item.groupCode));
   }
   const selected = new Set(selectedOperations.value);
   return operations.value.filter((item) => selected.has(item.key));
@@ -824,6 +922,54 @@ function getGroupTitle(groupCode: string) {
   return (
     groupDocs.value.find((item) => item.code === groupCode)?.name || groupCode
   );
+}
+
+function isGroupExpanded(groupCode: string) {
+  return Boolean(expandedGroups.value[groupCode]);
+}
+
+function toggleGroupExpanded(groupCode: string) {
+  expandedGroups.value[groupCode] = !isGroupExpanded(groupCode);
+}
+
+function getCheckedCountInGroup(items: OperationItem[]) {
+  const selected = selectedOperationSet.value;
+  return items.filter((item) => selected.has(item.key)).length;
+}
+
+function isGroupChecked(items: OperationItem[]) {
+  return items.length > 0 && getCheckedCountInGroup(items) === items.length;
+}
+
+function isGroupIndeterminate(items: OperationItem[]) {
+  const checkedCount = getCheckedCountInGroup(items);
+  return checkedCount > 0 && checkedCount < items.length;
+}
+
+function toggleGroupSelection(items: OperationItem[], checked: boolean) {
+  const selected = new Set(selectedOperations.value);
+  items.forEach((item) => {
+    if (checked) {
+      selected.add(item.key);
+    } else {
+      selected.delete(item.key);
+    }
+  });
+  selectedOperations.value = [...selected];
+}
+
+function isOperationChecked(operationKey: string) {
+  return selectedOperationSet.value.has(operationKey);
+}
+
+function toggleOperationSelection(operationKey: string, checked: boolean) {
+  const selected = new Set(selectedOperations.value);
+  if (checked) {
+    selected.add(operationKey);
+  } else {
+    selected.delete(operationKey);
+  }
+  selectedOperations.value = [...selected];
 }
 
 function buildMarkdownDocument(doc: OpenAPISpec, selectedOps: OperationItem[]) {
@@ -1179,8 +1325,7 @@ onBeforeUnmount(() => {
               <ElFormItem label="导出范围">
                 <ElRadioGroup v-model="scopeMode">
                   <ElRadio value="all">全部文档</ElRadio>
-                  <ElRadio value="groups">分组文档</ElRadio>
-                  <ElRadio value="operations">指定接口</ElRadio>
+                  <ElRadio value="custom">自定义范围</ElRadio>
                 </ElRadioGroup>
               </ElFormItem>
             </ElForm>
@@ -1189,28 +1334,11 @@ onBeforeUnmount(() => {
               <template #default>{{ summaryText }}</template>
             </ElAlert>
 
-            <div
-              v-if="scopeMode === 'groups'"
-              class="max-h-[360px] overflow-auto"
-            >
-              <ElCheckboxGroup v-model="selectedGroups">
-                <div class="flex flex-col gap-2">
-                  <ElCheckbox
-                    v-for="item in groupDocs"
-                    :key="item.code"
-                    :value="item.code"
-                  >
-                    {{ item.name }}（{{ item.code }}）
-                  </ElCheckbox>
-                </div>
-              </ElCheckboxGroup>
-            </div>
-
-            <template v-if="scopeMode === 'operations'">
+            <template v-if="scopeMode === 'custom'">
               <div class="mb-2 flex gap-2">
                 <ElInput
                   v-model.trim="operationKeyword"
-                  placeholder="搜索 path / summary / operationId"
+                  placeholder="搜索 分组 / URL / 描述 / operationId"
                   clearable
                 />
                 <ElSelect v-model="operationMethod" style="width: 120px">
@@ -1222,21 +1350,123 @@ onBeforeUnmount(() => {
                   <ElOption label="DELETE" value="delete" />
                 </ElSelect>
               </div>
-              <div class="max-h-[360px] overflow-auto rounded border p-3">
-                <ElCheckboxGroup v-model="selectedOperations">
-                  <div class="flex flex-col gap-2">
-                    <ElCheckbox
-                      v-for="item in filteredOperations"
-                      :key="item.key"
-                      :value="item.key"
+
+              <div class="mb-2 text-xs text-[var(--el-text-color-secondary)]">
+                一层是分组，二层是接口。可直接勾选分组，或展开后勾选部分接口。
+              </div>
+
+              <div
+                class="scope-tree-panel max-h-[360px] rounded border border-[var(--el-border-color)] bg-[var(--el-bg-color)] px-2"
+              >
+                <template v-if="groupedFilteredOperations.length > 0">
+                  <div class="divide-y divide-[var(--el-border-color-lighter)]">
+                    <div
+                      v-for="group in groupedFilteredOperations"
+                      :key="group.code"
+                      class="py-2"
                     >
-                      [{{ item.method.toUpperCase() }}] {{ item.path }}
-                      <span class="text-[var(--el-text-color-secondary)]">
-                        {{ item.summary ? ` - ${item.summary}` : '' }}
-                      </span>
-                    </ElCheckbox>
+                      <div
+                        class="group-header flex items-center justify-between px-1 py-1"
+                      >
+                        <ElCheckbox
+                          :model-value="isGroupChecked(group.operations)"
+                          :indeterminate="
+                            isGroupIndeterminate(group.operations)
+                          "
+                          @change="
+                            (value) =>
+                              toggleGroupSelection(
+                                group.operations,
+                                Boolean(value),
+                              )
+                          "
+                        >
+                          <span class="font-medium">{{ group.name }}</span>
+                          <span
+                            class="ml-1 text-xs text-[var(--el-text-color-secondary)]"
+                          >
+                            ({{ getCheckedCountInGroup(group.operations) }}/{{
+                              group.operations.length
+                            }})
+                          </span>
+                        </ElCheckbox>
+                        <div
+                          class="group-toggle-area"
+                          role="button"
+                          tabindex="0"
+                          :aria-label="
+                            isGroupExpanded(group.code)
+                              ? '收起分组'
+                              : '展开分组'
+                          "
+                          @click.stop="toggleGroupExpanded(group.code)"
+                          @keydown.enter.prevent.stop="
+                            toggleGroupExpanded(group.code)
+                          "
+                          @keydown.space.prevent.stop="
+                            toggleGroupExpanded(group.code)
+                          "
+                        >
+                          <component
+                            :is="
+                              isGroupExpanded(group.code)
+                                ? SvgDoubleArrowUpIcon
+                                : SvgDoubleArrowDownIcon
+                            "
+                            class="group-toggle-icon"
+                          />
+                        </div>
+                      </div>
+
+                      <Transition name="group-submenu-motion">
+                        <div
+                          v-show="isGroupExpanded(group.code)"
+                          class="group-submenu-wrap ml-3 mt-2 border-l border-dashed border-[var(--el-border-color)] pl-3"
+                        >
+                          <div class="group-submenu-list py-1">
+                            <ElCheckbox
+                              v-for="item in group.operations"
+                              :key="item.key"
+                              class="group-submenu-item"
+                              :model-value="isOperationChecked(item.key)"
+                              @change="
+                                (value) =>
+                                  toggleOperationSelection(
+                                    item.key,
+                                    Boolean(value),
+                                  )
+                              "
+                            >
+                              [{{ item.method.toUpperCase() }}] {{ item.path }}
+                              <span
+                                class="text-[var(--el-text-color-secondary)]"
+                              >
+                                {{
+                                  item.summary || item.description
+                                    ? ` - ${item.summary || item.description}`
+                                    : ''
+                                }}
+                              </span>
+                            </ElCheckbox>
+                          </div>
+                        </div>
+                      </Transition>
+                    </div>
                   </div>
-                </ElCheckboxGroup>
+                </template>
+                <div
+                  v-else
+                  class="py-8 text-center text-sm text-[var(--el-text-color-secondary)]"
+                >
+                  暂无匹配接口
+                </div>
+              </div>
+            </template>
+            <template v-else>
+              <div
+                class="rounded border p-3 text-sm text-[var(--el-text-color-secondary)]"
+              >
+                已选择全部接口文档，无需单独勾选。
               </div>
             </template>
           </template>
@@ -1341,6 +1571,84 @@ onBeforeUnmount(() => {
   :deep(.doc-preview-json) {
     contain: layout paint;
   }
+}
+
+.scope-tree-panel {
+  overflow: hidden auto;
+  scrollbar-gutter: stable;
+}
+
+@supports not (scrollbar-gutter: stable) {
+  .scope-tree-panel {
+    overflow-y: scroll;
+  }
+}
+
+.group-toggle-area {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 28px;
+  padding: 0;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  user-select: none;
+  border-radius: 8px;
+}
+
+.group-toggle-area:hover,
+.group-toggle-area:focus-visible {
+  color: var(--el-color-primary);
+  outline: none;
+  background: var(--el-fill-color-light);
+}
+
+.group-toggle-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.group-header {
+  padding: 4px 8px;
+  background: var(--el-fill-color);
+  border-radius: 8px;
+}
+
+.group-submenu-wrap {
+  overflow: hidden;
+}
+
+.group-submenu-list :deep(.group-submenu-item.el-checkbox) {
+  display: flex;
+  margin: 0;
+}
+
+.group-submenu-list
+  :deep(.group-submenu-item.el-checkbox + .group-submenu-item.el-checkbox) {
+  margin-top: 8px;
+}
+
+.group-submenu-motion-enter-active,
+.group-submenu-motion-leave-active {
+  overflow: hidden;
+  transition:
+    max-height 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.18s ease;
+}
+
+.group-submenu-motion-enter-from,
+.group-submenu-motion-leave-to {
+  max-height: 0;
+  opacity: 0;
+}
+
+.group-submenu-motion-enter-to,
+.group-submenu-motion-leave-from {
+  max-height: 1000px;
+  opacity: 1;
 }
 
 .doc-export-page.theme-switching {
