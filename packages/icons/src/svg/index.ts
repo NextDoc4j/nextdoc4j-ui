@@ -5,6 +5,12 @@ import './load.js';
 const SvgCaretRightIcon = createIconifyIcon('svg:caret-right');
 const SvgCloseIcon = createIconifyIcon('svg:close-duotone');
 const SvgCopyIcon = createIconifyIcon('svg:copy');
+const SvgDoubleArrowDownIcon = createIconifyIcon(
+  'svg:double-alt-arrow-down-svgrepo-com',
+);
+const SvgDoubleArrowUpIcon = createIconifyIcon(
+  'svg:double-alt-arrow-up-svgrepo-com',
+);
 const SvgFormatLeftIcon = createIconifyIcon('svg:format-left');
 const SvgApiPrefixIcon = createIconifyIcon('svg:api-prefix');
 const SvgMenuApiIcon = createIconifyIcon('svg:menu-api');
@@ -18,6 +24,8 @@ export {
   SvgCaretRightIcon,
   SvgCloseIcon,
   SvgCopyIcon,
+  SvgDoubleArrowDownIcon,
+  SvgDoubleArrowUpIcon,
   SvgFormatLeftIcon,
   SvgMenuApiIcon,
   SvgMenuDocumentIcon,
