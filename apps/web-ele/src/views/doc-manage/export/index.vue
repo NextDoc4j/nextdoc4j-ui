@@ -464,6 +464,96 @@ function mergeComponents(docs: OpenAPISpec[]) {
   };
 }
 
+function collectSchemaRefsFromValue(value: any, refs: Set<string>) {
+  if (!value) {
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectSchemaRefsFromValue(item, refs));
+    return;
+  }
+  if (typeof value !== 'object') {
+    return;
+  }
+
+  const currentRef = (value as any).$ref;
+  if (
+    typeof currentRef === 'string' &&
+    currentRef.startsWith('#/components/schemas/')
+  ) {
+    const refName = parseSchemaRef(currentRef);
+    if (refName) {
+      refs.add(refName);
+    }
+  }
+
+  Object.values(value).forEach((child) => {
+    collectSchemaRefsFromValue(child, refs);
+  });
+}
+
+function collectDependentSchemaRefs(
+  schemaName: string,
+  allSchemas: Record<string, any>,
+  result: Set<string>,
+  visiting = new Set<string>(),
+) {
+  if (!schemaName || result.has(schemaName) || visiting.has(schemaName)) {
+    return;
+  }
+  result.add(schemaName);
+
+  const source = allSchemas[schemaName];
+  if (!source) {
+    return;
+  }
+
+  const nextVisiting = new Set(visiting);
+  nextVisiting.add(schemaName);
+
+  const childRefs = new Set<string>();
+  collectSchemaRefsFromValue(source, childRefs);
+  childRefs.forEach((childSchemaName) => {
+    collectDependentSchemaRefs(
+      childSchemaName,
+      allSchemas,
+      result,
+      nextVisiting,
+    );
+  });
+}
+
+function filterComponentsBySelectedPaths(
+  selectedPaths: Record<string, Record<string, any>>,
+  components: any,
+) {
+  const allSchemas = components?.schemas || {};
+  const referencedSchemaNames = new Set<string>();
+  collectSchemaRefsFromValue(selectedPaths, referencedSchemaNames);
+
+  const relatedSchemaNames = new Set<string>();
+  referencedSchemaNames.forEach((schemaName) => {
+    collectDependentSchemaRefs(schemaName, allSchemas, relatedSchemaNames);
+  });
+
+  const filteredSchemas: Record<string, any> = {};
+  relatedSchemaNames.forEach((schemaName) => {
+    const schema = allSchemas[schemaName];
+    if (schema) {
+      filteredSchemas[schemaName] = schema;
+    }
+  });
+
+  return {
+    ...(Object.keys(filteredSchemas).length > 0
+      ? { schemas: filteredSchemas }
+      : {}),
+    ...(Object.keys(components?.securitySchemes || {}).length > 0
+      ? { securitySchemes: components.securitySchemes }
+      : {}),
+  };
+}
+
 function getEnumDescription(schema?: any) {
   if (!schema) return '';
   const extended = schema['x-nextdoc4j-enum'];
@@ -490,19 +580,55 @@ function formatSecurityText(raw: any) {
     return '忽略权限校验';
   }
 
-  const roleText = (security.roles || [])
-    .map((item: any) => item.values?.join(item.mode === 'OR' ? ' | ' : ' & '))
-    .filter(Boolean)
-    .join(' | ');
-  const permissionText = (security.permissions || [])
-    .map((item: any) => item.values?.join(item.mode === 'OR' ? ' | ' : ' & '))
-    .filter(Boolean)
-    .join(' | ');
+  const roleParts: string[] = [];
+  const permissionParts: string[] = [];
+  const getJoiner = (mode: any) => (mode === 'AND' ? ' & ' : ' | ');
+  const appendValues = (target: string[], values: any, mode: any = 'OR') => {
+    if (!Array.isArray(values)) {
+      return;
+    }
+    const normalized = values
+      .map((item) => `${item ?? ''}`.trim())
+      .filter(Boolean);
+    if (normalized.length <= 0) {
+      return;
+    }
+    target.push(normalized.join(getJoiner(mode)));
+  };
 
-  const lines = [];
-  if (roleText) lines.push(`角色：${roleText}`);
-  if (permissionText) lines.push(`权限：${permissionText}`);
-  return lines.length > 0 ? lines.join('；') : '无';
+  (security.roles || []).forEach((item: any) => {
+    appendValues(roleParts, item?.values, item?.mode);
+  });
+
+  (security.permissions || []).forEach((item: any) => {
+    const type = `${item?.type || ''}`.toLowerCase();
+    if (type === 'role') {
+      appendValues(roleParts, item?.values, item?.mode);
+    } else {
+      appendValues(permissionParts, item?.values, item?.mode);
+    }
+
+    const orType = `${item?.orType || ''}`.toLowerCase();
+    if (orType === 'role') {
+      appendValues(roleParts, item?.orValues, 'OR');
+    } else if (orType === 'permission') {
+      appendValues(permissionParts, item?.orValues, 'OR');
+    }
+  });
+
+  const roleText = [...new Set(roleParts)].join(' | ');
+  const permissionText = [...new Set(permissionParts)].join(' | ');
+
+  if (permissionText && roleText) {
+    return `权限：${permissionText}；角色：${roleText}`;
+  }
+  if (permissionText) {
+    return permissionText;
+  }
+  if (roleText) {
+    return `角色：${roleText}`;
+  }
+  return '无';
 }
 
 function toLogoDataUrl(logo?: string) {
@@ -1080,12 +1206,18 @@ function buildSubsetOpenApi(selectedOpsInput?: OperationItem[]) {
     delete xNextDoc.markdown;
   }
 
+  const mergedComponents = mergeComponents(uniqueDocsForComponents);
+  const filteredComponents = filterComponentsBySelectedPaths(
+    selectedPaths,
+    mergedComponents,
+  );
+
   const subset: any = {
     openapi: baseDoc.openapi,
     info,
     servers: cloneOpenApi(baseDoc.servers || []),
     paths: selectedPaths,
-    components: mergeComponents(uniqueDocsForComponents),
+    components: filteredComponents,
   };
 
   if (baseDoc.security) {
@@ -1276,7 +1408,7 @@ function buildMarkdownDocument(doc: OpenAPISpec, selectedOps: OperationItem[]) {
     if (raw.tags?.length) {
       lines.push(`- 标签: ${raw.tags.join(', ')}`);
     }
-    lines.push(`- 权限: ${formatSecurityText(raw)}`, '');
+    lines.push(`- 鉴权: ${formatSecurityText(raw)}`, '');
 
     const params = raw.parameters || [];
     if (params.length > 0) {
