@@ -8,6 +8,17 @@ import { SvgDoubleArrowDownIcon, SvgDoubleArrowUpIcon } from '@vben/icons';
 import { preferences } from '@vben/preferences';
 
 import {
+  Document as DocxDocument,
+  HeadingLevel as DocxHeadingLevel,
+  Packer as DocxPacker,
+  Paragraph as DocxParagraph,
+  Table as DocxTable,
+  TableCell as DocxTableCell,
+  TableRow as DocxTableRow,
+  TextRun as DocxTextRun,
+  WidthType as DocxWidthType,
+} from 'docx';
+import {
   ElAlert,
   ElButton,
   ElCard,
@@ -38,7 +49,7 @@ import { useAggregationStore } from '#/store/aggregation';
 
 defineOptions({ name: 'DocManageExport' });
 
-type ExportFormat = 'doc' | 'html' | 'markdown' | 'openapi.json' | 'pdf';
+type ExportFormat = 'docx' | 'html' | 'markdown' | 'openapi.json' | 'pdf';
 type ScopeMode = 'all' | 'custom';
 
 interface GroupDocItem {
@@ -121,7 +132,7 @@ const includeMarkdownDocs = computed(() =>
   exportDocOptions.value.includes('otherDocs'),
 );
 
-const exportFormat = ref<ExportFormat>('doc');
+const exportFormat = ref<ExportFormat>('docx');
 const previewHtml = ref('');
 
 const currentOpenApi = ref<null | OpenAPISpec>(null);
@@ -130,8 +141,8 @@ const groupDocs = ref<GroupDocItem[]>([]);
 const operations = ref<OperationItem[]>([]);
 const aggregationGatewayOpenApi = ref<null | OpenAPISpec>(null);
 const aggregationServiceDocs = ref<ServiceExportDocItem[]>([]);
-let previewAutoTimer: null | ReturnType<typeof window.setTimeout> = null;
-let themeSwitchTimer: null | ReturnType<typeof window.setTimeout> = null;
+let previewAutoTimer: null | number = null;
+let themeSwitchTimer: null | number = null;
 
 const filteredOperations = computed(() => {
   const keyword = operationKeyword.value.trim().toLowerCase();
@@ -271,7 +282,7 @@ const summaryText = computed(() => {
 
 const isPreviewEmpty = computed(() => !previewHtml.value);
 const exportFormatTextMap: Record<ExportFormat, string> = {
-  doc: 'Word(.doc)',
+  docx: 'Word(.docx)',
   pdf: 'PDF',
   markdown: 'Markdown',
   html: 'HTML',
@@ -1419,6 +1430,211 @@ function buildExportHtml(markdownContent: string, title: string) {
 </html>`;
 }
 
+function decodeHtmlEntities(text: string) {
+  return text
+    .replaceAll('&nbsp;', ' ')
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&quot;', '"')
+    .replaceAll('&#39;', "'");
+}
+
+function stripHtmlTags(text: string) {
+  return decodeHtmlEntities(text)
+    .replaceAll(/<br\s*\/?>/gi, ' ')
+    .replaceAll(/<\/p>/gi, ' ')
+    .replaceAll(/<[^>]+>/g, '');
+}
+
+function parseMarkdownTableCells(line: string) {
+  return line
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((cell) => stripHtmlTags(cell).trim());
+}
+
+function isMarkdownTableHeaderLine(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith('|') || !trimmed.endsWith('|')) {
+    return false;
+  }
+  const cells = parseMarkdownTableCells(trimmed);
+  return cells.length > 1;
+}
+
+function isMarkdownTableSeparatorLine(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith('|') || !trimmed.endsWith('|')) {
+    return false;
+  }
+  const cells = parseMarkdownTableCells(trimmed);
+  return (
+    cells.length > 1 && cells.every((cell) => /^:?-{3,}:?$/.test(cell.trim()))
+  );
+}
+
+function isMarkdownTableRowLine(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith('|') || !trimmed.endsWith('|')) {
+    return false;
+  }
+  if (isMarkdownTableSeparatorLine(trimmed)) {
+    return false;
+  }
+  const cells = parseMarkdownTableCells(trimmed);
+  return cells.length > 1;
+}
+
+function buildDocxTableFromRows(headerCells: string[], bodyRows: string[][]) {
+  const columnCount = Math.max(
+    headerCells.length,
+    ...bodyRows.map((row) => row.length),
+  );
+
+  const buildRowCells = (cells: string[], header = false) =>
+    Array.from({ length: columnCount }, (_, index) => {
+      const text = cells[index] || '-';
+      return new DocxTableCell({
+        children: [
+          new DocxParagraph({
+            children: [
+              new DocxTextRun({
+                bold: header,
+                text,
+              }),
+            ],
+          }),
+        ],
+      });
+    });
+
+  return new DocxTable({
+    rows: [
+      new DocxTableRow({
+        children: buildRowCells(headerCells, true),
+        tableHeader: true,
+      }),
+      ...bodyRows.map(
+        (row) =>
+          new DocxTableRow({
+            children: buildRowCells(row),
+          }),
+      ),
+    ],
+    width: {
+      size: 100,
+      type: DocxWidthType.PERCENTAGE,
+    },
+  });
+}
+
+function buildDocxChildrenFromMarkdown(markdownContent: string) {
+  const lines = markdownContent.split('\n').map((rawLine) => rawLine.trimEnd());
+  const children: Array<DocxParagraph | DocxTable> = [];
+
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index] || '';
+
+    if (
+      isMarkdownTableHeaderLine(line) &&
+      index + 1 < lines.length &&
+      isMarkdownTableSeparatorLine(lines[index + 1] || '')
+    ) {
+      const headerCells = parseMarkdownTableCells(line);
+      const bodyRows: string[][] = [];
+      let rowIndex = index + 2;
+      while (rowIndex < lines.length) {
+        const rowLine = lines[rowIndex];
+        if (!rowLine || !isMarkdownTableRowLine(rowLine)) {
+          break;
+        }
+        bodyRows.push(parseMarkdownTableCells(rowLine));
+        rowIndex++;
+      }
+      children.push(buildDocxTableFromRows(headerCells, bodyRows));
+      index = rowIndex - 1;
+      continue;
+    }
+
+    const normalized = stripHtmlTags(line).trim();
+    if (!normalized) {
+      children.push(new DocxParagraph({ text: '' }));
+      continue;
+    }
+
+    if (normalized === '---') {
+      children.push(new DocxParagraph({ text: '────────────────────────' }));
+      continue;
+    }
+
+    if (normalized.startsWith('# ')) {
+      children.push(
+        new DocxParagraph({
+          text: normalized.slice(2).trim(),
+          heading: DocxHeadingLevel.HEADING_1,
+        }),
+      );
+      continue;
+    }
+
+    if (normalized.startsWith('## ')) {
+      children.push(
+        new DocxParagraph({
+          text: normalized.slice(3).trim(),
+          heading: DocxHeadingLevel.HEADING_2,
+        }),
+      );
+      continue;
+    }
+
+    if (normalized.startsWith('### ')) {
+      children.push(
+        new DocxParagraph({
+          text: normalized.slice(4).trim(),
+          heading: DocxHeadingLevel.HEADING_3,
+        }),
+      );
+      continue;
+    }
+
+    if (normalized.startsWith('#### ')) {
+      children.push(
+        new DocxParagraph({
+          text: normalized.slice(5).trim(),
+          heading: DocxHeadingLevel.HEADING_4,
+        }),
+      );
+      continue;
+    }
+
+    if (normalized.startsWith('##### ')) {
+      children.push(
+        new DocxParagraph({
+          text: normalized.slice(6).trim(),
+          heading: DocxHeadingLevel.HEADING_5,
+        }),
+      );
+      continue;
+    }
+
+    if (normalized.startsWith('- ')) {
+      children.push(
+        new DocxParagraph({
+          text: normalized.slice(2).trim(),
+          bullet: { level: 0 },
+        }),
+      );
+      continue;
+    }
+
+    children.push(new DocxParagraph({ text: normalized }));
+  }
+
+  return children;
+}
+
 function downloadFile(content: BlobPart, fileName: string, mimeType: string) {
   const blob = new Blob([content], { type: mimeType });
   const url = URL.createObjectURL(blob);
@@ -1457,7 +1673,7 @@ async function generatePreview(silentOrEvent?: boolean | Event) {
   }
 }
 
-function exportDocument() {
+async function exportDocument() {
   const selectedOps = buildSelectedOperations();
   const subset = buildSubsetOpenApi(selectedOps);
   if (!subset) {
@@ -1469,51 +1685,67 @@ function exportDocument() {
   const markdownContent = buildMarkdownDocument(subset, selectedOps);
   const htmlContent = buildExportHtml(markdownContent, title);
 
-  switch (exportFormat.value) {
-    case 'doc': {
-      downloadFile(htmlContent, `${title}.doc`, 'application/msword');
-      break;
-    }
-    case 'html': {
-      downloadFile(htmlContent, `${title}.html`, 'text/html;charset=utf-8');
-      break;
-    }
-    case 'markdown': {
-      downloadFile(
-        markdownContent,
-        `${title}.md`,
-        'text/markdown;charset=utf-8',
-      );
-      break;
-    }
-    case 'openapi.json': {
-      downloadFile(
-        JSON.stringify(subset, null, 2),
-        `${title}.openapi.json`,
-        'application/json;charset=utf-8',
-      );
-      break;
-    }
-    case 'pdf': {
-      const printWindow = window.open('', '_blank');
-      if (!printWindow) {
-        ElMessage.warning('浏览器拦截了弹窗，请允许后重试');
-        return;
+  try {
+    switch (exportFormat.value) {
+      case 'docx': {
+        const docxDocument = new DocxDocument({
+          title,
+          sections: [
+            {
+              children: buildDocxChildrenFromMarkdown(markdownContent),
+            },
+          ],
+        });
+        const mimeType =
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        const docxBlob = await DocxPacker.toBlob(docxDocument);
+        downloadFile(docxBlob, `${title}.docx`, mimeType);
+        break;
       }
-      printWindow.document.open();
-      printWindow.document.write(htmlContent);
-      printWindow.document.close();
-      printWindow.focus();
-      printWindow.print();
-      ElMessage.success('已打开打印窗口，请选择“另存为 PDF”');
-      break;
+      case 'html': {
+        downloadFile(htmlContent, `${title}.html`, 'text/html;charset=utf-8');
+        break;
+      }
+      case 'markdown': {
+        downloadFile(
+          markdownContent,
+          `${title}.md`,
+          'text/markdown;charset=utf-8',
+        );
+        break;
+      }
+      case 'openapi.json': {
+        downloadFile(
+          JSON.stringify(subset, null, 2),
+          `${title}.openapi.json`,
+          'application/json;charset=utf-8',
+        );
+        break;
+      }
+      case 'pdf': {
+        const printWindow = window.open('', '_blank');
+        if (!printWindow) {
+          ElMessage.warning('浏览器拦截了弹窗，请允许后重试');
+          return;
+        }
+        printWindow.document.open();
+        printWindow.document.write(htmlContent);
+        printWindow.document.close();
+        printWindow.focus();
+        printWindow.print();
+        ElMessage.success('已打开打印窗口，请选择“另存为 PDF”');
+        break;
+      }
     }
+  } catch (error: any) {
+    console.error(error);
+    ElMessage.error(error?.message || '导出失败，请稍后重试');
   }
 }
 
-function handleExportCommand(command: ExportFormat) {
+async function handleExportCommand(command: ExportFormat) {
   exportFormat.value = command;
-  exportDocument();
+  await exportDocument();
 }
 
 function scheduleAutoPreview() {
@@ -2038,7 +2270,9 @@ onBeforeUnmount(() => {
                   </ElButton>
                   <template #dropdown>
                     <ElDropdownMenu>
-                      <ElDropdownItem command="doc">Word(.doc)</ElDropdownItem>
+                      <ElDropdownItem command="docx">
+                        Word(.docx)
+                      </ElDropdownItem>
                       <ElDropdownItem command="pdf">PDF</ElDropdownItem>
                       <ElDropdownItem command="markdown">
                         Markdown
