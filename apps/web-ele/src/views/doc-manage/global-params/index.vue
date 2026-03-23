@@ -22,14 +22,16 @@ import {
 } from 'element-plus';
 import { storeToRefs } from 'pinia';
 
-import { useDocManageStore } from '#/store';
+import { useApiTestCacheStore, useDocManageStore } from '#/store';
 import { useAggregationStore } from '#/store/aggregation';
 
 defineOptions({ name: 'DocManageGlobalParams' });
 
 const docManageStore = useDocManageStore();
+const apiTestCacheStore = useApiTestCacheStore();
 const aggregationStore = useAggregationStore();
 
+const { debugCacheEnabled } = storeToRefs(apiTestCacheStore);
 const { currentService, isAggregation, services } =
   storeToRefs(aggregationStore);
 
@@ -163,10 +165,45 @@ const applyCurrentServiceTemplate = () => {
 
   activeScope.value = currentServiceScopeKey.value;
 };
+
+const clearAllDebugRequestCache = () => {
+  apiTestCacheStore.clearAllRequestCache();
+  ElMessage.success('已清理全部调试缓存');
+};
 </script>
 
 <template>
   <div class="h-full overflow-auto p-5">
+    <ElCard shadow="never" class="mb-4">
+      <template #header>
+        <div class="flex items-center justify-between">
+          <span class="font-medium">全局调试缓存</span>
+          <ElSpace>
+            <ElButton text type="danger" @click="clearAllDebugRequestCache">
+              清理全部缓存
+            </ElButton>
+          </ElSpace>
+        </div>
+      </template>
+
+      <ElAlert class="mb-4" type="info" show-icon :closable="false">
+        <template #default>
+          开启后会缓存在线调试的请求数据（刷新页面后仍保留）。关闭后回到当前默认行为，不读取也不写入调试缓存。
+        </template>
+      </ElAlert>
+
+      <ElForm label-width="110px">
+        <ElFormItem label="调试缓存开关">
+          <ElSwitch
+            v-model="debugCacheEnabled"
+            active-text="开启"
+            inactive-text="关闭"
+            inline-prompt
+          />
+        </ElFormItem>
+      </ElForm>
+    </ElCard>
+
     <ElCard shadow="never">
       <template #header>
         <div class="flex items-center justify-between">
