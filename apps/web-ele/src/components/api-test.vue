@@ -3,7 +3,7 @@ import type { ParamsType } from './body-params.vue';
 
 import type { ParameterObject, SecuritySchemeObject } from '#/typings/openApi';
 
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 import { useAppConfig } from '@vben/hooks';
 import { SvgApiPrefixIcon, SvgCloseIcon } from '@vben/icons';
@@ -25,19 +25,49 @@ import { Pane, Splitpanes } from 'splitpanes';
 
 import JsonView from '#/components/json-view.vue';
 import { methodType } from '#/constants/methods';
-import { useApiStore, useDocManageStore, useTokenStore } from '#/store';
+import {
+  useApiStore,
+  useApiTestCacheStore,
+  useDocManageStore,
+  useTokenStore,
+} from '#/store';
 import { useAggregationStore } from '#/store/aggregation';
 
 import bodyParams from './body-params.vue';
 import paramsTable from './params-table.vue';
 
 interface TableParamsObject {
-  description: string;
+  contentType?: string;
+  description?: string;
   enabled: boolean;
+  format?: string;
   fromGlobal?: boolean;
   name: string;
-  value: string;
+  required?: boolean;
+  value: any;
   type?: string;
+}
+
+type DebugBodyType =
+  | 'binary'
+  | 'form-data'
+  | 'json'
+  | 'none'
+  | 'raw'
+  | 'x-www-form-urlencoded'
+  | 'xml';
+
+interface DebugRequestStateSnapshot {
+  activeTab: string;
+  bodyContent?: string;
+  bodyType?: string;
+  cookies: TableParamsObject[];
+  formDataParams: TableParamsObject[];
+  headers: TableParamsObject[];
+  pathParams: TableParamsObject[];
+  queryParams: TableParamsObject[];
+  requestUrl: string;
+  urlEncodedParams: TableParamsObject[];
 }
 
 const props = defineProps<{
@@ -59,6 +89,8 @@ const bodyTabRef = ref();
 const responseTab = ref('Body');
 const aggregationStore = useAggregationStore();
 const docManageStore = useDocManageStore();
+const apiTestCacheStore = useApiTestCacheStore();
+const apiStore = useApiStore();
 
 // 组件状态
 const loading = ref(false);
@@ -69,9 +101,132 @@ const queryParams = ref<Array<TableParamsObject>>([]);
 const pathParams = ref<Array<TableParamsObject>>([]);
 const headers = ref<Array<TableParamsObject>>([]);
 const cookies = ref<Array<TableParamsObject>>([]);
+const isRestoringCache = ref(false);
+const defaultRequestState = ref<DebugRequestStateSnapshot | null>(null);
+let persistTimer: null | number = null;
 
 const normalizeParamName = (name: string) => name.trim();
 const normalizeHeaderName = (name: string) => name.trim().toLowerCase();
+
+const cacheKey = computed(() => {
+  const serviceScope = aggregationStore.isAggregation
+    ? aggregationStore.currentService?.url || '__aggregation__'
+    : '__single__';
+  return `${serviceScope}::${props.method.toUpperCase()}::${props.path}`;
+});
+
+const cloneTableParams = (
+  items: Array<Partial<TableParamsObject> & { name?: string; value?: any }> = [],
+) => {
+  return items.map((item) => ({
+    contentType: item.contentType,
+    description: item.description || '',
+    enabled: item.enabled ?? true,
+    format: item.format,
+    fromGlobal: item.fromGlobal,
+    name: item.name || '',
+    required: item.required,
+    type: item.type,
+    value:
+      typeof item.value === 'string' ||
+      typeof item.value === 'number' ||
+      typeof item.value === 'boolean'
+        ? `${item.value}`
+        : '',
+  }));
+};
+
+const resetResponseState = () => {
+  responseStatus.value = { code: 0, text: '-', type: 'default' };
+  responseTime.value = 0;
+  responseSize.value = '0 B';
+  responseData.value = null;
+  responseMimeType.value = '';
+  responseLanguage.value = 'json';
+  responseHeaders.value = [];
+};
+
+const resolveBodyContent = () => {
+  const bodyType = bodyTabRef.value?.bodyType as DebugBodyType | undefined;
+  if (!bodyType || !['json', 'raw', 'xml'].includes(bodyType)) {
+    return '';
+  }
+  return bodyTabRef.value?.getExample?.() ?? '';
+};
+
+const buildCurrentSnapshot = (): DebugRequestStateSnapshot => {
+  return {
+    activeTab: activeTab.value,
+    bodyContent: resolveBodyContent(),
+    bodyType: bodyTabRef.value?.bodyType,
+    cookies: cloneTableParams(cookies.value),
+    formDataParams: cloneTableParams(formDataParams.value),
+    headers: cloneTableParams(headers.value),
+    pathParams: cloneTableParams(pathParams.value),
+    queryParams: cloneTableParams(queryParams.value),
+    requestUrl: requestUrl.value || props.path,
+    urlEncodedParams: cloneTableParams(urlEncodedParams.value),
+  };
+};
+
+const applySnapshot = async (
+  snapshot: DebugRequestStateSnapshot,
+  options: { syncGlobal?: boolean } = {},
+) => {
+  isRestoringCache.value = true;
+
+  requestUrl.value = snapshot.requestUrl || props.path;
+  activeTab.value = snapshot.activeTab || (props.requestBody ? 'Body' : 'Params');
+  queryParams.value = cloneTableParams(snapshot.queryParams);
+  pathParams.value = cloneTableParams(snapshot.pathParams);
+  headers.value = cloneTableParams(snapshot.headers);
+  cookies.value = cloneTableParams(snapshot.cookies);
+  formDataParams.value = cloneTableParams(snapshot.formDataParams);
+  urlEncodedParams.value = cloneTableParams(snapshot.urlEncodedParams);
+
+  if (bodyTabRef.value && snapshot.bodyType) {
+    bodyTabRef.value.bodyType = snapshot.bodyType;
+    await nextTick();
+    if (snapshot.bodyContent && ['json', 'raw', 'xml'].includes(snapshot.bodyType)) {
+      await bodyTabRef.value.setEditorValue?.(snapshot.bodyContent);
+    }
+  }
+
+  if (options.syncGlobal) {
+    syncGlobalParamsToDebugTable();
+  }
+
+  isRestoringCache.value = false;
+};
+
+const schedulePersistCache = () => {
+  if (!apiTestCacheStore.debugCacheEnabled || isRestoringCache.value) {
+    return;
+  }
+  if (persistTimer) {
+    window.clearTimeout(persistTimer);
+  }
+  persistTimer = window.setTimeout(() => {
+    persistTimer = null;
+    apiTestCacheStore.saveRequestCache(cacheKey.value, buildCurrentSnapshot());
+  }, 150);
+};
+
+const captureDefaultRequestState = async () => {
+  await nextTick();
+  defaultRequestState.value = buildCurrentSnapshot();
+};
+
+const restoreDefaultRequestState = async () => {
+  if (!defaultRequestState.value) {
+    return;
+  }
+  await applySnapshot(defaultRequestState.value, {
+    syncGlobal: true,
+  });
+  apiTestCacheStore.removeRequestCache(cacheKey.value);
+  resetResponseState();
+};
 
 // 监听 props 变化，同步接口信息
 watch(
@@ -228,6 +383,15 @@ function syncGlobalParamsToDebugTable() {
 const handleClose = (e: any) => {
   e.stopPropagation();
   emit('cancel');
+};
+
+const handleRestoreDefault = async () => {
+  if (!defaultRequestState.value) {
+    ElMessage.warning('默认请求数据尚未初始化');
+    return;
+  }
+  await restoreDefaultRequestState();
+  ElMessage.success('已恢复默认请求数据');
 };
 
 const normalizeContentType = (contentType: null | string) => {
@@ -786,8 +950,8 @@ const normalizeSecurityIn = (value?: string) => {
   return '';
 };
 
-onMounted(() => {
-  const openApi = useApiStore().openApi;
+onMounted(async () => {
+  const openApi = apiStore.openApi;
   let securityList: any[] = [];
   if (Array.isArray(props.security) && props.security.length > 0) {
     securityList = props.security;
@@ -883,18 +1047,71 @@ onMounted(() => {
   });
 
   syncGlobalParamsToDebugTable();
+  await captureDefaultRequestState();
+
+  if (apiTestCacheStore.debugCacheEnabled) {
+    const cachedState = apiTestCacheStore.getRequestCache(cacheKey.value);
+    if (cachedState) {
+      await applySnapshot(cachedState, {
+        syncGlobal: true,
+      });
+    }
+  }
+});
+
+watch(
+  () => apiTestCacheStore.debugCacheEnabled,
+  (enabled) => {
+    if (!enabled && persistTimer) {
+      window.clearTimeout(persistTimer);
+      persistTimer = null;
+      return;
+    }
+    if (enabled) {
+      schedulePersistCache();
+    }
+  },
+);
+
+watch(
+  [
+    requestUrl,
+    activeTab,
+    queryParams,
+    pathParams,
+    headers,
+    cookies,
+    formDataParams,
+    urlEncodedParams,
+    () => bodyTabRef.value?.bodyType,
+    () => props.requestBodyType,
+  ],
+  () => {
+    schedulePersistCache();
+  },
+  { deep: true },
+);
+
+onBeforeUnmount(() => {
+  if (persistTimer) {
+    window.clearTimeout(persistTimer);
+    persistTimer = null;
+  }
 });
 </script>
 
 <template>
   <Splitpanes class="default-theme max-h-[88vh]" horizontal>
     <Pane :size="70" class="flex flex-col">
-      <ElSpace class="mb-4 px-4 pt-5 font-medium">
-        <ElIcon @click="handleClose" class="cursor-pointer">
-          <SvgCloseIcon />
-        </ElIcon>
-        <span class="font-medium">在线运行</span>
-      </ElSpace>
+      <div class="mb-4 flex items-center justify-between px-4 pt-5 font-medium">
+        <ElSpace>
+          <ElIcon @click="handleClose" class="cursor-pointer">
+            <SvgCloseIcon />
+          </ElIcon>
+          <span class="font-medium">在线运行</span>
+        </ElSpace>
+        <ElButton text @click="handleRestoreDefault">恢复默认</ElButton>
+      </div>
       <div class="mb-4 px-4">
         <ElSpace direction="vertical" :size="12" class="w-full" fill>
           <div class="flex">

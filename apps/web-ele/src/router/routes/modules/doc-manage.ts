@@ -15,9 +15,9 @@ const routes: RouteRecordRaw[] = [
     children: [
       {
         meta: {
-          title: '全局参数',
+          title: '全局配置',
         },
-        name: '全局参数',
+        name: '全局配置',
         path: '/doc-manage/global-params',
         component: () => import('#/views/doc-manage/global-params/index.vue'),
       },

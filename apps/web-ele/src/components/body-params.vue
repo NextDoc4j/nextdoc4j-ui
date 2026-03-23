@@ -3,7 +3,7 @@ import type { UploadInstance, UploadProps, UploadRawFile } from 'element-plus';
 
 import type { Schema } from '#/typings/openApi';
 
-import { computed, onMounted, ref } from 'vue';
+import { computed, nextTick, onMounted, ref } from 'vue';
 
 import {
   ElButton,
@@ -194,6 +194,11 @@ const getExample = () => {
   return editorRef.value.getEditorValue();
 };
 
+const setEditorValue = async (value: string) => {
+  await nextTick();
+  editorRef.value?.setEditorValue?.(value ?? '');
+};
+
 const handleExceed: UploadProps['onExceed'] = (files) => {
   uploadRef.value!.clearFiles();
   const file = files[0] as UploadRawFile;
@@ -270,6 +275,7 @@ onMounted(() => {
 defineExpose({
   bodyType,
   getExample,
+  setEditorValue,
   fileList,
 });
 </script>

@@ -330,6 +330,12 @@ onMounted(() => {
 const getEditorValue = () => {
   return editor.getValue();
 };
+
+const setEditorValue = (value: string) => {
+  if (!editor) return;
+  editor.setValue(value ?? '');
+  updateEditorHeight?.();
+};
 const handleFormat = () => {
   if (!editor) return;
 
@@ -431,6 +437,7 @@ onBeforeUnmount(() => {
 });
 defineExpose({
   getEditorValue,
+  setEditorValue,
 });
 </script>
 
