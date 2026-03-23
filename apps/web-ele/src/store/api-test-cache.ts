@@ -1,5 +1,6 @@
-import { defineStore } from 'pinia';
 import { ref } from 'vue';
+
+import { defineStore } from 'pinia';
 
 export interface ApiTestParamCacheItem {
   contentType?: string;
@@ -36,7 +37,10 @@ export const useApiTestCacheStore = defineStore(
       return requestCache.value[cacheKey];
     };
 
-    const saveRequestCache = (cacheKey: string, payload: ApiTestRequestCache) => {
+    const saveRequestCache = (
+      cacheKey: string,
+      payload: ApiTestRequestCache,
+    ) => {
       requestCache.value[cacheKey] = payload;
     };
 

@@ -3,7 +3,14 @@ import type { ParamsType } from './body-params.vue';
 
 import type { ParameterObject, SecuritySchemeObject } from '#/typings/openApi';
 
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from 'vue';
 
 import { useAppConfig } from '@vben/hooks';
 import { SvgApiPrefixIcon, SvgCloseIcon } from '@vben/icons';
@@ -116,7 +123,9 @@ const cacheKey = computed(() => {
 });
 
 const cloneTableParams = (
-  items: Array<Partial<TableParamsObject> & { name?: string; value?: any }> = [],
+  items: Array<
+    Partial<TableParamsObject> & { name?: string; value?: any }
+  > = [],
 ) => {
   return items.map((item) => ({
     contentType: item.contentType,
@@ -176,7 +185,8 @@ const applySnapshot = async (
   isRestoringCache.value = true;
 
   requestUrl.value = snapshot.requestUrl || props.path;
-  activeTab.value = snapshot.activeTab || (props.requestBody ? 'Body' : 'Params');
+  activeTab.value =
+    snapshot.activeTab || (props.requestBody ? 'Body' : 'Params');
   queryParams.value = cloneTableParams(snapshot.queryParams);
   pathParams.value = cloneTableParams(snapshot.pathParams);
   headers.value = cloneTableParams(snapshot.headers);
@@ -187,7 +197,10 @@ const applySnapshot = async (
   if (bodyTabRef.value && snapshot.bodyType) {
     bodyTabRef.value.bodyType = snapshot.bodyType;
     await nextTick();
-    if (snapshot.bodyContent && ['json', 'raw', 'xml'].includes(snapshot.bodyType)) {
+    if (
+      snapshot.bodyContent &&
+      ['json', 'raw', 'xml'].includes(snapshot.bodyType)
+    ) {
       await bodyTabRef.value.setEditorValue?.(snapshot.bodyContent);
     }
   }
