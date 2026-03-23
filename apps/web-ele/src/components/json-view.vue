@@ -10,6 +10,7 @@ import {
 import { SvgCopyIcon, SvgFormatLeftIcon } from '@vben/icons';
 import { preferences } from '@vben/preferences';
 
+import { usePreferredDark } from '@vueuse/core';
 import { ElImage, ElMessage, ElTooltip } from 'element-plus';
 
 import monaco from '#/monaco';
@@ -96,6 +97,7 @@ let isDestroyed = false;
 let resizeObserver: null | ResizeObserver = null;
 let updateEditorHeight: (() => void) | null = null;
 let themeSwitchFrame: null | number = null;
+const preferredDark = usePreferredDark();
 
 // 处理 HTML 标签
 const processDescription = (desc: string) => {
@@ -227,8 +229,15 @@ const resolveThemeName = (mode: string) => {
   return mode === 'dark' ? 'jsonCustomDarkTheme' : 'jsonCustomTheme';
 };
 
+const resolveThemeMode = (mode: string) => {
+  if (mode === 'auto') {
+    return preferredDark.value ? 'dark' : 'light';
+  }
+  return mode;
+};
+
 const applyTheme = (mode: string) => {
-  const themeName = resolveThemeName(mode);
+  const themeName = resolveThemeName(resolveThemeMode(mode));
   if (globalMonacoThemeState.currentTheme === themeName) {
     return;
   }
@@ -255,7 +264,7 @@ onMounted(() => {
   editor = monaco.editor.create(editorContainer, {
     value: resolveEditorValue(props.data, props.language),
     language: props.language,
-    theme: resolveThemeName(preferences.theme.mode),
+    theme: resolveThemeName(resolveThemeMode(preferences.theme.mode)),
     readOnly: props.readOnly,
     minimap: { enabled: false },
     tabSize: 2,
@@ -383,19 +392,16 @@ watch(
   },
 );
 
-watch(
-  () => preferences.theme.mode,
-  (mode) => {
-    if (!editor) return;
-    if (themeSwitchFrame) {
-      cancelAnimationFrame(themeSwitchFrame);
-    }
-    themeSwitchFrame = requestAnimationFrame(() => {
-      applyTheme(mode);
-      themeSwitchFrame = null;
-    });
-  },
-);
+watch([() => preferences.theme.mode, () => preferredDark.value], ([mode]) => {
+  if (!editor) return;
+  if (themeSwitchFrame) {
+    cancelAnimationFrame(themeSwitchFrame);
+  }
+  themeSwitchFrame = requestAnimationFrame(() => {
+    applyTheme(mode);
+    themeSwitchFrame = null;
+  });
+});
 
 // 清理
 onBeforeUnmount(() => {

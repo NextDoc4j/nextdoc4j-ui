@@ -3,6 +3,8 @@ import { computed, ref } from 'vue';
 
 import { preferences } from '@vben/preferences';
 
+import { usePreferredDark } from '@vueuse/core';
+
 import { generateExample } from '#/utils/schema';
 
 import JsonNode from './json-node.vue';
@@ -18,6 +20,14 @@ const props = withDefaults(
 );
 
 const rootNode = ref<InstanceType<typeof JsonNode> | null>(null);
+const preferredDark = usePreferredDark();
+
+const resolvedThemeMode = computed(() => {
+  if (preferences.theme.mode === 'auto') {
+    return preferredDark.value ? 'dark' : 'light';
+  }
+  return preferences.theme.mode;
+});
 
 const parsedData = computed(() => {
   if (!props.schema) {
@@ -55,7 +65,7 @@ defineExpose({
 <template>
   <div
     class="overflow-auto rounded p-4 font-mono text-sm"
-    :class="`theme-${preferences.theme.mode}`"
+    :class="`theme-${resolvedThemeMode}`"
   >
     <div v-if="parseError" class="json-error">
       <span class="text-sm">⚠️</span>
