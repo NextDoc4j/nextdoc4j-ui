@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import type { ParamsType } from './body-params.vue';
 
-import type { ParameterObject } from '#/typings/openApi';
+import type { ParameterObject, SecuritySchemeObject } from '#/typings/openApi';
 
 import { computed, onMounted, ref, watch } from 'vue';
 
@@ -774,11 +774,44 @@ const formDataParams = ref<Array<ParamsType>>([]);
 // URL Encoded 参数相关
 const urlEncodedParams = ref<Array<ParamsType>>([]);
 
+const normalizeSecurityIn = (value?: string) => {
+  const normalized = (value || '').trim().toLowerCase();
+  if (
+    normalized === 'cookie' ||
+    normalized === 'header' ||
+    normalized === 'query'
+  ) {
+    return normalized as 'cookie' | 'header' | 'query';
+  }
+  return '';
+};
+
 onMounted(() => {
-  const securityList = Array.isArray(props.security) ? props.security : [];
   const openApi = useApiStore().openApi;
+  let securityList: any[] = [];
+  if (Array.isArray(props.security) && props.security.length > 0) {
+    securityList = props.security;
+  } else if (Array.isArray(openApi?.security)) {
+    securityList = openApi.security;
+  }
+  const tokenStore = useTokenStore();
   const securitySchemes = openApi?.components?.securitySchemes ?? {};
+  const gatewayGlobalSecuritySchemes =
+    aggregationStore.mainConfigCache.config?.['x-nextdoc4j-gateway']
+      ?.globalSecuritySchemes ?? {};
+  const gatewaySecuritySchemes =
+    aggregationStore.mainConfigCache.openApi?.components?.securitySchemes ?? {};
   baseUrl.value = openApi?.servers?.[0]?.url;
+
+  const resolveSecurityScheme = (
+    key: string,
+  ): SecuritySchemeObject | undefined => {
+    return (
+      securitySchemes?.[key] ||
+      gatewayGlobalSecuritySchemes?.[key] ||
+      gatewaySecuritySchemes?.[key]
+    );
+  };
 
   const securityKeys = new Set<string>();
   securityList.forEach((securityItem) => {
@@ -786,17 +819,38 @@ onMounted(() => {
   });
 
   securityKeys.forEach((key) => {
-    const securityScheme = securitySchemes?.[key];
+    const securityScheme = resolveSecurityScheme(key);
+    const rawSecurityIn = securityScheme?.in;
     const securityIn =
-      securityScheme?.in || (securityScheme?.type === 'http' ? 'header' : '');
-    const tokenKey = `${key}_${securityIn}`;
+      normalizeSecurityIn(rawSecurityIn) ||
+      (String(securityScheme?.type || '')
+        .trim()
+        .toLowerCase() === 'http'
+        ? 'header'
+        : 'header');
+    const tokenCandidates = [
+      `${key}_${securityIn}`,
+      `${key}_${securityIn.toLowerCase()}`,
+      `${key}_${securityIn.toUpperCase()}`,
+      ...(rawSecurityIn
+        ? [
+            `${key}_${rawSecurityIn}`,
+            `${key}_${rawSecurityIn.toLowerCase()}`,
+            `${key}_${rawSecurityIn.toUpperCase()}`,
+          ]
+        : []),
+    ];
+    const tokenValue =
+      tokenCandidates
+        .map((candidate) => tokenStore?.token?.[candidate])
+        .find((value) => value !== undefined && value !== null) ?? '';
 
     switch (securityIn) {
       case 'cookie': {
         cookies.value.push({
-          name: securityScheme?.name ?? '',
+          name: securityScheme?.name ?? key,
           enabled: true,
-          value: useTokenStore()?.token?.[tokenKey] ?? '',
+          value: tokenValue,
           description: securityScheme?.description ?? '',
           type: securityScheme?.type,
         });
@@ -806,8 +860,8 @@ onMounted(() => {
       case 'header': {
         headers.value.push({
           enabled: true,
-          name: securityScheme?.name ?? 'Authorization',
-          value: useTokenStore()?.token?.[tokenKey] ?? '',
+          name: securityScheme?.name ?? key ?? 'Authorization',
+          value: tokenValue,
           description: securityScheme?.description ?? '',
         });
 
@@ -815,9 +869,9 @@ onMounted(() => {
       }
       case 'query': {
         queryParams.value.push({
-          name: securityScheme?.name ?? '',
+          name: securityScheme?.name ?? key,
           enabled: true,
-          value: useTokenStore()?.token?.[tokenKey] ?? '',
+          value: tokenValue,
           description: securityScheme?.description ?? '',
           type: securityScheme?.type,
         });

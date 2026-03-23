@@ -7,13 +7,17 @@ import { useRefresh } from '@vben/hooks';
 import { MdiLock, MdiMinus, MdiPlus } from '@vben/icons';
 
 import { ElButton, ElInput } from 'element-plus';
+import { storeToRefs } from 'pinia';
 
 import { useApiStore, useTokenStore } from '#/store';
+import { useAggregationStore } from '#/store/aggregation';
 
 defineOptions({ name: 'Authorize' });
 
 const apiStore = useApiStore();
 const tokenStore = useTokenStore();
+const aggregationStore = useAggregationStore();
+const { isAggregation } = storeToRefs(aggregationStore);
 const { refresh } = useRefresh();
 
 // 使用 ref 而不是 computed，以便可以修改 fold 状态
@@ -23,9 +27,17 @@ const securitySchemes = ref<
 
 // 监听 apiStore.openApi 变化，更新 securitySchemes
 watch(
-  () => apiStore.openApi,
-  (openApi) => {
-    const authType = openApi?.components?.securitySchemes ?? {};
+  () => [
+    apiStore.openApi,
+    aggregationStore.mainConfigCache.openApi,
+    isAggregation.value,
+  ],
+  () => {
+    const gatewaySchemes =
+      aggregationStore.mainConfigCache.openApi?.components?.securitySchemes ??
+      {};
+    const serviceSchemes = apiStore.openApi?.components?.securitySchemes ?? {};
+    const authType = isAggregation.value ? gatewaySchemes : serviceSchemes;
     securitySchemes.value = Object.fromEntries(
       Object.entries(authType).map(([key, value]) => [
         key,
@@ -43,10 +55,15 @@ watch(
 const value = ref(tokenStore.token);
 
 const resolveIn = (item: SecuritySchemeObject & { fold?: boolean }) => {
-  if (item.in) {
-    return item.in;
+  const normalized = (item.in || '').toLowerCase();
+  if (
+    normalized === 'cookie' ||
+    normalized === 'header' ||
+    normalized === 'query'
+  ) {
+    return normalized;
   }
-  if (item.type === 'http') {
+  if ((item.type || '').toLowerCase() === 'http') {
     return 'header';
   }
   return 'header';
