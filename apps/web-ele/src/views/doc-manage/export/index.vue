@@ -571,18 +571,61 @@ function getEnumDescription(schema?: any) {
   return '';
 }
 
-function formatSecurityText(raw: any) {
+function formatExampleValue(value: any) {
+  if (value === undefined || value === null || value === '') {
+    return '-';
+  }
+  if (
+    typeof value === 'boolean' ||
+    typeof value === 'number' ||
+    typeof value === 'string'
+  ) {
+    return `${value}`;
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return `${value}`;
+  }
+}
+
+function toMarkdownCell(value: any) {
+  const text = `${value ?? ''}`.trim();
+  if (!text) {
+    return '-';
+  }
+  return text.replaceAll('|', String.raw`\|`).replaceAll('\n', '<br/>');
+}
+
+function mergeDescriptionWithEnum(description: string, schema?: any) {
+  const base = `${description || ''}`.trim();
+  const enumText = getEnumDescription(schema);
+  if (base && enumText) {
+    return `${base}<br/>可选值: ${enumText}`;
+  }
+  if (enumText) {
+    return `可选值: ${enumText}`;
+  }
+  return base || '-';
+}
+
+function normalizeSecurityMetadata(raw: any) {
   const security = raw?.['x-nextdoc4j-security'];
   if (!security) {
-    return '无';
+    return null;
   }
   if (security.ignore) {
-    return '忽略权限校验';
+    return {
+      ignore: true,
+      permissions: [] as string[],
+      roles: [] as string[],
+    };
   }
 
   const roleParts: string[] = [];
   const permissionParts: string[] = [];
-  const getJoiner = (mode: any) => (mode === 'AND' ? ' & ' : ' | ');
+  const getJoiner = (mode: any) =>
+    `${mode}`.toUpperCase() === 'AND' ? ' & ' : ' | ';
   const appendValues = (target: string[], values: any, mode: any = 'OR') => {
     if (!Array.isArray(values)) {
       return;
@@ -616,19 +659,70 @@ function formatSecurityText(raw: any) {
     }
   });
 
-  const roleText = [...new Set(roleParts)].join(' | ');
-  const permissionText = [...new Set(permissionParts)].join(' | ');
+  return {
+    ignore: false,
+    permissions: [...new Set(permissionParts)],
+    roles: [...new Set(roleParts)],
+  };
+}
 
-  if (permissionText && roleText) {
-    return `权限：${permissionText}；角色：${roleText}`;
+function resolveOperationSecurity(raw: any) {
+  if (Array.isArray(raw?.security)) {
+    return raw.security;
   }
-  if (permissionText) {
-    return permissionText;
-  }
-  if (roleText) {
-    return `角色：${roleText}`;
-  }
-  return '无';
+  return [];
+}
+
+function hasSecuritySchemes(requirements: any[]) {
+  return requirements.some((requirement) =>
+    Object.keys(requirement || {})
+      .map((key) => `${key || ''}`.trim())
+      .some(Boolean),
+  );
+}
+
+type SecuritySchemeRow = {
+  description: string;
+  in: string;
+  parameterName: string;
+  scheme: string;
+  schemeName: string;
+  type: string;
+};
+
+function buildSecuritySchemeRows(
+  requirements: any[],
+  doc: OpenAPISpec,
+): SecuritySchemeRow[] {
+  const schemeNameSet = new Set<string>();
+
+  requirements.forEach((requirement) => {
+    Object.keys(requirement || {}).forEach((schemeName) => {
+      const normalizedSchemeName = `${schemeName || ''}`.trim();
+      if (normalizedSchemeName) {
+        schemeNameSet.add(normalizedSchemeName);
+      }
+    });
+  });
+
+  return [...schemeNameSet.values()].map((schemeName) => {
+    const scheme = (doc.components?.securitySchemes?.[schemeName] ||
+      {}) as Record<string, any>;
+    const normalizedScheme = `${scheme?.scheme || '-'}`.trim();
+    const schemeText =
+      normalizedScheme === '-' || !normalizedScheme
+        ? '-'
+        : `${normalizedScheme.slice(0, 1).toUpperCase()}${normalizedScheme.slice(1)}`;
+
+    return {
+      schemeName,
+      type: scheme?.type || '-',
+      in: scheme?.in || '-',
+      parameterName: scheme?.name || '-',
+      scheme: schemeText,
+      description: scheme?.description || '-',
+    };
+  });
 }
 
 function toLogoDataUrl(logo?: string) {
@@ -738,7 +832,7 @@ function schemaTypeText(schema: any, doc: OpenAPISpec): string {
 
 type SchemaFieldRow = {
   description: string;
-  enumText: string;
+  example: string;
   name: string;
   required: boolean;
   type: string;
@@ -767,8 +861,11 @@ function collectSchemaFields(
       name: arrayPath,
       type: schemaTypeText(itemSchema, doc),
       required: true,
-      enumText: getEnumDescription(itemSchema) || '-',
-      description: itemSchema?.description || '',
+      description: mergeDescriptionWithEnum(
+        itemSchema?.description || '',
+        itemSchema,
+      ),
+      example: formatExampleValue(itemSchema?.example),
     });
 
     if (itemSchema?.type === 'object' || itemSchema?.properties) {
@@ -786,8 +883,8 @@ function collectSchemaFields(
         name: path,
         type: schemaTypeText(field, doc),
         required: requiredSet.has(key),
-        enumText: getEnumDescription(field) || '-',
-        description: field?.description || '',
+        description: mergeDescriptionWithEnum(field?.description || '', field),
+        example: formatExampleValue(field?.example),
       });
 
       if (field?.type === 'object' || field?.properties) {
@@ -803,8 +900,11 @@ function collectSchemaFields(
     name: parentPath || '(root)',
     type: schemaTypeText(normalized, doc),
     required: true,
-    enumText: getEnumDescription(normalized) || '-',
-    description: normalized.description || '',
+    description: mergeDescriptionWithEnum(
+      normalized.description || '',
+      normalized,
+    ),
+    example: formatExampleValue(normalized?.example),
   });
 
   return rows;
@@ -1242,12 +1342,12 @@ function appendSchemaRows(lines: string[], rows: SchemaFieldRow[]) {
   }
 
   lines.push(
-    '| 字段 | 类型 | 必填 | 枚举 | 说明 |',
+    '| 字段 | 类型 | 必填 | 说明 | 示例值 |',
     '| --- | --- | --- | --- | --- |',
   );
   rows.forEach((row) => {
     lines.push(
-      `| ${toDisplayFieldName(row.name)} | ${row.type || '-'} | ${row.required ? '是' : '否'} | ${row.enumText || '-'} | ${row.description || '-'} |`,
+      `| ${toMarkdownCell(toDisplayFieldName(row.name))} | ${toMarkdownCell(row.type || '-')} | ${row.required ? '是' : '否'} | ${toMarkdownCell(row.description || '-')} | ${toMarkdownCell(row.example || '-')} |`,
     );
   });
   lines.push('');
@@ -1274,6 +1374,124 @@ function appendSchemaFieldGroups(lines: string[], groups: SchemaFieldGroup[]) {
     }
     appendSchemaRows(lines, group.rows || []);
   });
+}
+
+type ParameterRow = {
+  description: string;
+  example: string;
+  name: string;
+  required: boolean;
+  type: string;
+};
+
+function appendParameterRows(lines: string[], rows: ParameterRow[]) {
+  if (rows.length <= 0) {
+    lines.push('- 暂无参数', '');
+    return;
+  }
+
+  lines.push(
+    '| 字段 | 类型 | 必填 | 说明 | 示例值 |',
+    '| --- | --- | --- | --- | --- |',
+  );
+  rows.forEach((row) => {
+    lines.push(
+      `| ${toMarkdownCell(row.name)} | ${toMarkdownCell(row.type || '-')} | ${row.required ? '是' : '否'} | ${toMarkdownCell(row.description || '-')} | ${toMarkdownCell(row.example || '-')} |`,
+    );
+  });
+  lines.push('');
+}
+
+function buildParameterRowsFromParameters(params: any[], doc: OpenAPISpec) {
+  return params.map((param) => {
+    const normalizedSchema = normalizeSchema(param?.schema, doc);
+    const location = `${param?.in || ''}`.trim().toLowerCase();
+    const locationPrefix = location ? `[${location}] ` : '';
+    return {
+      name: `${locationPrefix}${param?.name || '-'}`,
+      type: schemaTypeText(normalizedSchema, doc),
+      required: location === 'path' ? true : Boolean(param?.required ?? false),
+      description: mergeDescriptionWithEnum(
+        param?.description || normalizedSchema?.description || '',
+        normalizedSchema,
+      ),
+      example: formatExampleValue(
+        param?.example ??
+          normalizedSchema?.example ??
+          normalizedSchema?.default,
+      ),
+    };
+  });
+}
+
+function appendOpenApiSecurity(lines: string[], raw: any, doc: OpenAPISpec) {
+  const requirements = resolveOperationSecurity(raw);
+  if (!Array.isArray(requirements) || requirements.length <= 0) {
+    return;
+  }
+
+  if (!hasSecuritySchemes(requirements)) {
+    return;
+  }
+
+  const schemeRows = buildSecuritySchemeRows(requirements, doc);
+  if (schemeRows.length <= 0) {
+    return;
+  }
+
+  lines.push(
+    '##### 鉴权方式',
+    '',
+    '| 方案 | 类型 | in | 参数名 | scheme | 描述 |',
+    '| --- | --- | --- | --- | --- | --- |',
+  );
+  schemeRows.forEach((row) => {
+    lines.push(
+      `| ${toMarkdownCell(row.schemeName)} | ${toMarkdownCell(row.type)} | ${toMarkdownCell(row.in)} | ${toMarkdownCell(row.parameterName)} | ${toMarkdownCell(row.scheme)} | ${toMarkdownCell(row.description)} |`,
+    );
+  });
+  lines.push('');
+}
+
+function appendSecurityMetadata(lines: string[], raw: any) {
+  const metadata = normalizeSecurityMetadata(raw);
+  if (!metadata) {
+    return;
+  }
+
+  if (metadata.ignore) {
+    lines.push(
+      '##### 鉴权码',
+      '',
+      '| 项 | 内容 |',
+      '| --- | --- |',
+      '| 鉴权码 | 忽略权限校验 |',
+      '',
+    );
+    return;
+  }
+
+  const permissionText = metadata.permissions
+    .map((item) => `${item || ''}`.trim())
+    .filter(Boolean)
+    .join(' | ');
+  const roleText = metadata.roles
+    .map((item) => `${item || ''}`.trim())
+    .filter(Boolean)
+    .join(' | ');
+
+  const rows: string[] = [];
+  if (permissionText) {
+    rows.push(`| 权限 | ${toMarkdownCell(permissionText)} |`);
+  }
+  if (roleText) {
+    rows.push(`| 角色 | ${toMarkdownCell(roleText)} |`);
+  }
+  if (rows.length <= 0) {
+    return;
+  }
+
+  lines.push('##### 鉴权码', '', '| 项 | 内容 |', '| --- | --- |', ...rows, '');
 }
 
 function getGroupTitle(groupCode: string, serviceUrl?: string) {
@@ -1363,7 +1581,7 @@ function buildMarkdownDocument(doc: OpenAPISpec, selectedOps: OperationItem[]) {
   const info = doc.info;
   const extension: any = doc['x-nextdoc4j'] || {};
 
-  lines.push(`# ${info?.title || 'API 文档'}`, '', '## 接口清单', '');
+  lines.push(`# ${info?.title || 'API 文档'}`, '');
 
   const ops = (
     selectedOps.length > 0
@@ -1375,17 +1593,18 @@ function buildMarkdownDocument(doc: OpenAPISpec, selectedOps: OperationItem[]) {
           serviceUrl: '__single__',
         })
   ).sort((a, b) => {
-    if (isAggregation.value) {
-      return `${a.serviceName || ''}::${a.groupCode}::${a.path}::${a.method}`.localeCompare(
-        `${b.serviceName || ''}::${b.groupCode}::${b.path}::${b.method}`,
-        'zh-CN',
-      );
-    }
-    return `${a.groupCode}::${a.path}::${a.method}`.localeCompare(
-      `${b.groupCode}::${b.path}::${b.method}`,
+    const aTag = `${a.tags?.[0] || '默认标签'}`;
+    const bTag = `${b.tags?.[0] || '默认标签'}`;
+    return `${a.serviceName || ''}::${a.groupCode}::${aTag}::${a.path}::${a.method}`.localeCompare(
+      `${b.serviceName || ''}::${b.groupCode}::${bTag}::${b.path}::${b.method}`,
       'zh-CN',
     );
   });
+
+  const getTagTitle = (op: OperationItem) => {
+    const tag = (op.tags || []).find((item) => `${item || ''}`.trim());
+    return tag ? `${tag}` : '默认标签';
+  };
 
   const appendOperationContent = (
     raw: any,
@@ -1396,43 +1615,31 @@ function buildMarkdownDocument(doc: OpenAPISpec, selectedOps: OperationItem[]) {
       lines.push('---', '');
     }
 
+    const summary = raw.summary || op.summary || '-';
+    const description = raw.description || op.description || '暂无描述';
+    const operationTitle =
+      summary === '-' ? `${op.method.toUpperCase()} ${op.path}` : `${summary}`;
+
     lines.push(
+      `#### ${operationTitle}`,
+      '',
       `<div style="padding:10px 12px;border:1px solid #dcdfe6;border-left:4px solid #409eff;border-radius:6px;"><strong>${op.method.toUpperCase()} ${op.path}</strong></div>`,
       '',
-      `- 摘要: ${raw.summary || '-'}`,
+      `- ${description}`,
+      '',
     );
-    if (raw.description) {
-      lines.push(`- 描述: ${raw.description}`);
-    }
-    lines.push(`- 操作ID: ${raw.operationId || '-'}`);
-    if (raw.tags?.length) {
-      lines.push(`- 标签: ${raw.tags.join(', ')}`);
-    }
-    lines.push(`- 鉴权: ${formatSecurityText(raw)}`, '');
+    appendOpenApiSecurity(lines, raw, doc);
+    appendSecurityMetadata(lines, raw);
 
     const params = raw.parameters || [];
     if (params.length > 0) {
-      lines.push(
-        '#### 请求参数',
-        '',
-        '| 参数位置 | 参数名 | 类型 | 必填 | 枚举 | 说明 |',
-        '| --- | --- | --- | --- | --- | --- |',
-      );
-      params.forEach((param: any) => {
-        const normalizedSchema = normalizeSchema(param.schema, doc);
-        lines.push(
-          `| ${param.in || '-'} | ${param.name || '-'} | ${schemaTypeText(normalizedSchema, doc)} | ${param.required ? '是' : '否'} | ${getEnumDescription(normalizedSchema) || '-'} | ${param.description || normalizedSchema?.description || '-'} |`,
-        );
-      });
-      lines.push('');
+      lines.push('##### 请求参数', '');
+      appendParameterRows(lines, buildParameterRowsFromParameters(params, doc));
     }
 
     if (raw.requestBody?.content) {
       Object.entries(raw.requestBody.content).forEach(([contentType, body]) => {
-        lines.push(
-          `<div style="display:flex;justify-content:space-between;align-items:center;"><strong>请求体参数</strong><span>Content-Type: ${contentType}</span></div>`,
-          '',
-        );
+        lines.push(`##### 请求体参数（${contentType}）`, '');
         const groups = buildSchemaFieldGroups((body as any)?.schema, doc);
         appendSchemaFieldGroups(lines, groups);
       });
@@ -1443,15 +1650,20 @@ function buildMarkdownDocument(doc: OpenAPISpec, selectedOps: OperationItem[]) {
         ([code, response]: [string, any]) => {
           if (!response?.content) {
             lines.push(
-              `- 响应 ${code}（${response?.description || '-'}）：无响应体`,
+              `##### 响应参数（${code}）`,
+              '',
+              `- ${response?.description || '-'}：无响应体`,
               '',
             );
             return;
           }
           Object.entries(response.content).forEach(
             ([contentType, content]: [string, any]) => {
+              const responseDescription = response?.description
+                ? ` - ${response.description}`
+                : '';
               lines.push(
-                `<div style="display:flex;justify-content:space-between;align-items:center;"><strong>响应参数（${code} - ${response?.description || '-'}）</strong><span>Content-Type: ${contentType}</span></div>`,
+                `##### 响应参数（${code}${responseDescription} / ${contentType}）`,
                 '',
               );
               const groups = buildSchemaFieldGroups(content?.schema, doc);
@@ -1463,46 +1675,37 @@ function buildMarkdownDocument(doc: OpenAPISpec, selectedOps: OperationItem[]) {
     }
   };
 
-  if (isAggregation.value) {
-    let currentService = '';
-    let currentGroup = '';
+  let currentGroupKey = '';
+  let currentTagKey = '';
 
-    ops.forEach((op, index) => {
-      const raw = op.raw || doc.paths?.[op.path]?.[op.method];
-      if (!raw) return;
+  ops.forEach((op, index) => {
+    const raw = op.raw || doc.paths?.[op.path]?.[op.method];
+    if (!raw) return;
 
-      const serviceKey = op.serviceUrl || '';
-      const serviceName = op.serviceName || '微服务';
-      const groupTitle = getGroupTitle(op.groupCode, op.serviceUrl);
+    const groupCode = op.groupCode || 'all';
+    const groupTitle = getGroupTitle(groupCode, op.serviceUrl);
+    const tagTitle = getTagTitle(op);
+    const groupKey = isAggregation.value
+      ? `${op.serviceUrl || ''}::${groupCode}`
+      : `${groupCode}`;
+    const groupHeading = isAggregation.value
+      ? `${groupTitle}（${op.serviceName || '微服务'}）`
+      : groupTitle;
+    const tagKey = `${groupKey}::${tagTitle}`;
 
-      if (serviceKey !== currentService) {
-        currentService = serviceKey;
-        currentGroup = '';
-        lines.push(`## 微服务：${serviceName}`, '');
-      }
+    if (groupKey !== currentGroupKey) {
+      currentGroupKey = groupKey;
+      currentTagKey = '';
+      lines.push(`## ${groupHeading}`, '');
+    }
 
-      if (groupTitle !== currentGroup) {
-        currentGroup = groupTitle;
-        lines.push(`### 分组：${groupTitle}`, '');
-      }
+    if (tagKey !== currentTagKey) {
+      currentTagKey = tagKey;
+      lines.push(`### ${tagTitle}`, '');
+    }
 
-      appendOperationContent(raw, op, index);
-    });
-  } else {
-    let currentGroup = '';
-    ops.forEach((op, index) => {
-      const raw = op.raw || doc.paths?.[op.path]?.[op.method];
-      if (!raw) return;
-
-      const groupCode = op.groupCode || 'all';
-      if (groupCode !== currentGroup) {
-        currentGroup = groupCode;
-        lines.push(`## 分组：${getGroupTitle(groupCode)}`, '');
-      }
-
-      appendOperationContent(raw, op, index);
-    });
-  }
+    appendOperationContent(raw, op, index);
+  });
 
   if (includeInfo.value) {
     lines.push('## OpenAPI Info', '');
@@ -1573,7 +1776,7 @@ function decodeHtmlEntities(text: string) {
 
 function stripHtmlTags(text: string) {
   return decodeHtmlEntities(text)
-    .replaceAll(/<br\s*\/?>/gi, ' ')
+    .replaceAll(/<br\s*\/?>/gi, '\n')
     .replaceAll(/<\/p>/gi, ' ')
     .replaceAll(/<[^>]+>/g, '');
 }
