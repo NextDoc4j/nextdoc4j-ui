@@ -88,14 +88,31 @@ export const fetchAggregationRoutesImpl: () => Promise<
   const apiStore = useApiStore();
   const { openApi: gatewayOpenApi } = await aggregationStore.getMainConfig();
 
+  const gatewayExtension = gatewayOpenApi?.['x-nextdoc4j'];
+  if (gatewayExtension?.brand) {
+    initBrand(gatewayExtension.brand);
+  }
+
+  let markDownMenus: RouteRecordStringComponent<string>[] = [];
+  if (gatewayExtension?.markdown) {
+    markDownMenus = initMarkdown(gatewayExtension.markdown);
+  }
+
+  if (gatewayOpenApi?.info?.title) {
+    updatePreferences({
+      app: {
+        name: gatewayOpenApi.info.title,
+      },
+    });
+  }
+
   // 初始化聚合模式（获取服务列表，使用缓存）
   await aggregationStore.initAggregation();
 
   const currentService = aggregationStore.currentService;
 
   if (!currentService) {
-    // 如果没有服务，返回空路由
-    return [];
+    return [...markDownMenus];
   }
 
   // 获取可用服务数据（首个服务不可用时自动回退到后续服务）
@@ -109,27 +126,16 @@ export const fetchAggregationRoutesImpl: () => Promise<
     config = data.config;
   } catch (error) {
     console.error('No available services for aggregation mode:', error);
-    return [];
+    return [...markDownMenus];
   }
 
   // 检查服务数据是否有效
   if (!serviceData || !serviceData.paths) {
     console.error('Invalid service data:', serviceData);
-    return [];
+    return [...markDownMenus];
   }
 
   const { paths, components, security } = serviceData;
-
-  // 处理品牌和 markdown
-  const gatewayExtension = gatewayOpenApi?.['x-nextdoc4j'];
-  if (gatewayExtension?.brand) {
-    initBrand(gatewayExtension.brand);
-  }
-
-  let markDownMenus: RouteRecordStringComponent<string>[] = [];
-  if (gatewayExtension?.markdown) {
-    markDownMenus = initMarkdown(gatewayExtension.markdown);
-  }
 
   // 初始化主路由（all 分组）
   const { access, allPath } = initGroupRoute(paths);
@@ -278,15 +284,6 @@ export const fetchAggregationRoutesImpl: () => Promise<
     } catch (error) {
       console.error('Failed to load service groups:', error);
     }
-  }
-
-  // 更新应用标题
-  if (gatewayOpenApi?.info?.title) {
-    updatePreferences({
-      app: {
-        name: gatewayOpenApi.info.title,
-      },
-    });
   }
 
   return new Promise((resolve) => {

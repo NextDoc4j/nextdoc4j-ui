@@ -429,12 +429,22 @@ export const useAggregationStore = defineStore('aggregation', () => {
    * 获取可用服务的文档数据（自动容错回退）
    */
   const getAvailableServiceData = async (preferred?: null | ServiceItem) => {
-    const candidateServices = [
+    const orderedServices = [
       ...(preferred ? [preferred] : []),
       ...services.value.filter(
         (service) => !preferred || service.url !== preferred.url,
       ),
     ];
+
+    // 避免对已经探测为不可用且没有缓存文档的服务再次发起请求，减少重复失败请求
+    const candidateServices = orderedServices.filter((service) => {
+      const cache = serviceCache.value.get(service.url);
+      return !service.disabled || Boolean(cache?.openApi);
+    });
+
+    if (candidateServices.length <= 0) {
+      throw new Error('No available service');
+    }
 
     let latestError: null | unknown = null;
     for (const service of candidateServices) {
