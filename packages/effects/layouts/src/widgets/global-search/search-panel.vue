@@ -203,6 +203,7 @@ function search(searchKey: string) {
 
       // 聚合模式下优先展示当前服务命中项，减少跨服务同名干扰
       if (
+        score > 0 &&
         isAggregation.value &&
         currentServiceUrl &&
         item.serviceUrl === currentServiceUrl
