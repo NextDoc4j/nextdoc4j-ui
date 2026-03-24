@@ -37,8 +37,8 @@ const props = withDefaults(
   },
 );
 
-defineEmits<{
-  change: [];
+const emit = defineEmits<{
+  change: [value: string];
 }>();
 
 const GLOBAL_MONACO_THEME_STATE_KEY = '__NEXTDOC4J_MONACO_THEME_STATE__';
@@ -311,6 +311,9 @@ onMounted(() => {
   };
 
   editor.onDidContentSizeChange(() => updateEditorHeight?.());
+  editor.onDidChangeModelContent(() => {
+    emit('change', editor.getValue());
+  });
 
   if (typeof ResizeObserver !== 'undefined') {
     resizeObserver = new ResizeObserver(() => {
