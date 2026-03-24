@@ -1233,6 +1233,7 @@ async function loadDocContext() {
     ElMessage.error(error?.message || '加载文档数据失败');
   } finally {
     loading.value = false;
+    scheduleAutoPreview();
   }
 }
 
@@ -1574,6 +1575,14 @@ function toggleOperationSelection(operationKey: string, checked: boolean) {
     selected.delete(operationKey);
   }
   selectedOperations.value = [...selected];
+}
+
+function getOperationDisplayTitle(item: OperationItem) {
+  const description = item.summary || item.description;
+  if (!description) {
+    return `[${item.method.toUpperCase()}] ${item.path}`;
+  }
+  return `[${item.method.toUpperCase()}] ${item.path} - ${description}`;
 }
 
 function buildMarkdownDocument(doc: OpenAPISpec, selectedOps: OperationItem[]) {
@@ -2166,274 +2175,398 @@ onBeforeUnmount(() => {
 
 <template>
   <div
-    class="doc-export-page h-full overflow-auto p-5"
+    class="doc-export-page h-full overflow-hidden px-5 pb-2 pt-5"
     :class="[{ 'theme-switching': themeSwitching }]"
   >
-    <ElRow :gutter="16">
-      <ElCol :span="10">
-        <ElCard shadow="never" class="mb-4">
-          <template #header>
-            <span class="font-medium">导出范围选择</span>
-          </template>
+    <ElRow :gutter="16" class="doc-export-layout">
+      <ElCol :span="10" class="doc-export-col">
+        <div class="doc-left-column">
+          <ElCard shadow="never" class="doc-range-card">
+            <template #header>
+              <span class="font-medium">导出范围选择</span>
+            </template>
 
-          <ElSkeleton v-if="loading" :rows="6" animated />
-          <template v-else>
-            <ElForm label-width="90px">
-              <ElFormItem label="导出范围">
-                <ElRadioGroup v-model="scopeMode">
-                  <ElRadio value="all">全部文档</ElRadio>
-                  <ElRadio value="custom">自定义范围</ElRadio>
-                </ElRadioGroup>
-              </ElFormItem>
-            </ElForm>
+            <ElSkeleton v-if="loading" :rows="6" animated />
+            <template v-else>
+              <ElForm label-width="90px">
+                <ElFormItem label="导出范围">
+                  <ElRadioGroup v-model="scopeMode">
+                    <ElRadio value="all">全部文档</ElRadio>
+                    <ElRadio value="custom">自定义范围</ElRadio>
+                  </ElRadioGroup>
+                </ElFormItem>
+              </ElForm>
 
-            <ElAlert class="mb-3" type="info" :closable="false">
-              <template #default>{{ summaryText }}</template>
-            </ElAlert>
+              <ElAlert class="mb-6" type="info" :closable="false">
+                <template #default>{{ summaryText }}</template>
+              </ElAlert>
 
-            <template v-if="scopeMode === 'custom'">
-              <div class="mb-2 flex gap-2">
-                <ElInput
-                  v-model.trim="operationKeyword"
-                  placeholder="搜索 微服务 / 分组 / URL / 描述 / operationId"
-                  clearable
-                />
-                <ElSelect v-model="operationMethod" style="width: 120px">
-                  <ElOption label="全部方法" value="all" />
-                  <ElOption label="GET" value="get" />
-                  <ElOption label="POST" value="post" />
-                  <ElOption label="PUT" value="put" />
-                  <ElOption label="PATCH" value="patch" />
-                  <ElOption label="DELETE" value="delete" />
-                </ElSelect>
-              </div>
+              <template v-if="scopeMode === 'custom'">
+                <div class="mb-2 mt-3 flex gap-2">
+                  <ElInput
+                    v-model.trim="operationKeyword"
+                    placeholder="搜索 微服务 / 分组 / URL / 描述 / operationId"
+                    clearable
+                  />
+                  <ElSelect v-model="operationMethod" style="width: 120px">
+                    <ElOption label="全部方法" value="all" />
+                    <ElOption label="GET" value="get" />
+                    <ElOption label="POST" value="post" />
+                    <ElOption label="PUT" value="put" />
+                    <ElOption label="PATCH" value="patch" />
+                    <ElOption label="DELETE" value="delete" />
+                  </ElSelect>
+                </div>
 
-              <div class="mb-2 text-xs text-[var(--el-text-color-secondary)]">
-                {{
-                  isAggregation
-                    ? '一层是微服务，二层是分组（若存在），末层是接口。左侧复选框可全选，右侧箭头可展开。'
-                    : '一层是分组，二层是接口。可直接勾选分组，或展开后勾选部分接口。'
-                }}
-              </div>
+                <div class="mb-2 text-xs text-[var(--el-text-color-secondary)]">
+                  {{
+                    isAggregation
+                      ? '一层是微服务，二层是分组（若存在），末层是接口。左侧复选框可全选，右侧箭头可展开。'
+                      : '一层是分组，二层是接口。可直接勾选分组，或展开后勾选部分接口。'
+                  }}
+                </div>
 
-              <div
-                class="scope-tree-panel max-h-[360px] rounded border border-[var(--el-border-color)] bg-[var(--el-bg-color)] px-2"
-              >
-                <template v-if="isAggregation">
-                  <template v-if="aggregationServiceTree.length > 0">
-                    <div
-                      class="divide-y divide-[var(--el-border-color-lighter)]"
-                    >
+                <div
+                  class="scope-tree-panel rounded border border-[var(--el-border-color)] bg-[var(--el-bg-color)] px-2"
+                >
+                  <template v-if="isAggregation">
+                    <template v-if="aggregationServiceTree.length > 0">
                       <div
-                        v-for="serviceNode in aggregationServiceTree"
-                        :key="serviceNode.serviceUrl"
-                        class="py-2"
+                        class="divide-y divide-[var(--el-border-color-lighter)]"
                       >
                         <div
-                          class="service-header flex items-center justify-between px-1 py-1"
-                          :class="{
-                            'group-node--checked':
-                              getCheckedCountInGroup(
-                                serviceNode.allOperations,
-                              ) > 0,
-                          }"
+                          v-for="serviceNode in aggregationServiceTree"
+                          :key="serviceNode.serviceUrl"
+                          class="py-2"
                         >
-                          <ElCheckbox
-                            :model-value="
-                              isGroupChecked(serviceNode.allOperations)
-                            "
-                            :indeterminate="
-                              isGroupIndeterminate(serviceNode.allOperations)
-                            "
-                            @change="
-                              (value) =>
-                                toggleGroupSelection(
-                                  serviceNode.allOperations,
-                                  Boolean(value),
-                                )
-                            "
-                          >
-                            <span class="font-medium">
-                              {{ serviceNode.serviceName }}
-                            </span>
-                            <span
-                              class="ml-1 text-xs text-[var(--el-text-color-secondary)]"
-                            >
-                              ({{
+                          <div
+                            class="service-header flex items-center justify-between px-1 py-1"
+                            :class="{
+                              'group-node--checked':
                                 getCheckedCountInGroup(
                                   serviceNode.allOperations,
-                                )
-                              }}/{{ serviceNode.allOperations.length }})
-                            </span>
-                          </ElCheckbox>
-                          <div
-                            class="group-toggle-area"
-                            role="button"
-                            tabindex="0"
-                            :aria-label="
-                              isGroupExpanded(
-                                getServiceNodeKey(serviceNode.serviceUrl),
-                              )
-                                ? '收起微服务'
-                                : '展开微服务'
-                            "
-                            @click.stop="
-                              toggleGroupExpanded(
-                                getServiceNodeKey(serviceNode.serviceUrl),
-                              )
-                            "
-                            @keydown.enter.prevent.stop="
-                              toggleGroupExpanded(
-                                getServiceNodeKey(serviceNode.serviceUrl),
-                              )
-                            "
-                            @keydown.space.prevent.stop="
-                              toggleGroupExpanded(
-                                getServiceNodeKey(serviceNode.serviceUrl),
-                              )
-                            "
+                                ) > 0,
+                            }"
                           >
-                            <component
-                              :is="
+                            <ElCheckbox
+                              :model-value="
+                                isGroupChecked(serviceNode.allOperations)
+                              "
+                              :indeterminate="
+                                isGroupIndeterminate(serviceNode.allOperations)
+                              "
+                              @change="
+                                (value) =>
+                                  toggleGroupSelection(
+                                    serviceNode.allOperations,
+                                    Boolean(value),
+                                  )
+                              "
+                            >
+                              <span class="font-medium">
+                                {{ serviceNode.serviceName }}
+                              </span>
+                              <span
+                                class="ml-1 text-xs text-[var(--el-text-color-secondary)]"
+                              >
+                                ({{
+                                  getCheckedCountInGroup(
+                                    serviceNode.allOperations,
+                                  )
+                                }}/{{ serviceNode.allOperations.length }})
+                              </span>
+                            </ElCheckbox>
+                            <div
+                              class="group-toggle-area"
+                              role="button"
+                              tabindex="0"
+                              :aria-label="
                                 isGroupExpanded(
                                   getServiceNodeKey(serviceNode.serviceUrl),
                                 )
-                                  ? SvgDoubleArrowUpIcon
-                                  : SvgDoubleArrowDownIcon
+                                  ? '收起微服务'
+                                  : '展开微服务'
                               "
-                              class="group-toggle-icon"
-                            />
+                              @click.stop="
+                                toggleGroupExpanded(
+                                  getServiceNodeKey(serviceNode.serviceUrl),
+                                )
+                              "
+                              @keydown.enter.prevent.stop="
+                                toggleGroupExpanded(
+                                  getServiceNodeKey(serviceNode.serviceUrl),
+                                )
+                              "
+                              @keydown.space.prevent.stop="
+                                toggleGroupExpanded(
+                                  getServiceNodeKey(serviceNode.serviceUrl),
+                                )
+                              "
+                            >
+                              <component
+                                :is="
+                                  isGroupExpanded(
+                                    getServiceNodeKey(serviceNode.serviceUrl),
+                                  )
+                                    ? SvgDoubleArrowUpIcon
+                                    : SvgDoubleArrowDownIcon
+                                "
+                                class="group-toggle-icon"
+                              />
+                            </div>
                           </div>
-                        </div>
 
-                        <Transition name="group-submenu-motion">
-                          <div
-                            v-show="
-                              isGroupExpanded(
-                                getServiceNodeKey(serviceNode.serviceUrl),
-                              )
-                            "
-                            class="group-submenu-wrap ml-3 mt-2 border-l border-dashed border-[var(--el-border-color)] pl-3"
-                          >
-                            <template v-if="serviceNode.hasGroupLevel">
-                              <div class="group-submenu-list py-1">
-                                <div
-                                  v-for="group in serviceNode.groups"
-                                  :key="group.key"
-                                  class="mb-2 last:mb-0"
-                                >
+                          <Transition name="group-submenu-motion">
+                            <div
+                              v-show="
+                                isGroupExpanded(
+                                  getServiceNodeKey(serviceNode.serviceUrl),
+                                )
+                              "
+                              class="group-submenu-wrap ml-3 mt-2 border-l border-dashed border-[var(--el-border-color)] pl-3"
+                            >
+                              <template v-if="serviceNode.hasGroupLevel">
+                                <div class="group-submenu-list py-1">
                                   <div
-                                    class="group-header flex items-center justify-between px-1 py-1"
-                                    :class="{
-                                      'group-node--checked':
-                                        getCheckedCountInGroup(
-                                          group.operations,
-                                        ) > 0,
-                                    }"
+                                    v-for="group in serviceNode.groups"
+                                    :key="group.key"
+                                    class="mb-2 last:mb-0"
                                   >
-                                    <ElCheckbox
-                                      :model-value="
-                                        isGroupChecked(group.operations)
-                                      "
-                                      :indeterminate="
-                                        isGroupIndeterminate(group.operations)
-                                      "
-                                      @change="
-                                        (value) =>
-                                          toggleGroupSelection(
-                                            group.operations,
-                                            Boolean(value),
-                                          )
-                                      "
-                                    >
-                                      <span class="font-medium">
-                                        {{ group.name }}
-                                      </span>
-                                      <span
-                                        class="ml-1 text-xs text-[var(--el-text-color-secondary)]"
-                                      >
-                                        ({{
+                                    <div
+                                      class="group-header flex items-center justify-between px-1 py-1"
+                                      :class="{
+                                        'group-node--checked':
                                           getCheckedCountInGroup(
                                             group.operations,
-                                          )
-                                        }}/{{ group.operations.length }})
-                                      </span>
-                                    </ElCheckbox>
-                                    <div
-                                      class="group-toggle-area"
-                                      role="button"
-                                      tabindex="0"
-                                      :aria-label="
-                                        isGroupExpanded(group.key)
-                                          ? '收起分组'
-                                          : '展开分组'
-                                      "
-                                      @click.stop="
-                                        toggleGroupExpanded(group.key)
-                                      "
-                                      @keydown.enter.prevent.stop="
-                                        toggleGroupExpanded(group.key)
-                                      "
-                                      @keydown.space.prevent.stop="
-                                        toggleGroupExpanded(group.key)
-                                      "
+                                          ) > 0,
+                                      }"
                                     >
-                                      <component
-                                        :is="
-                                          isGroupExpanded(group.key)
-                                            ? SvgDoubleArrowUpIcon
-                                            : SvgDoubleArrowDownIcon
+                                      <ElCheckbox
+                                        :model-value="
+                                          isGroupChecked(group.operations)
                                         "
-                                        class="group-toggle-icon"
-                                      />
-                                    </div>
-                                  </div>
-
-                                  <Transition name="group-submenu-motion">
-                                    <div
-                                      v-show="isGroupExpanded(group.key)"
-                                      class="group-submenu-wrap ml-3 mt-2 border-l border-dashed border-[var(--el-border-color)] pl-3"
-                                    >
-                                      <div class="group-submenu-list py-1">
-                                        <ElCheckbox
-                                          v-for="item in group.operations"
-                                          :key="item.key"
-                                          class="group-submenu-item"
-                                          :model-value="
-                                            isOperationChecked(item.key)
-                                          "
-                                          @change="
-                                            (value) =>
-                                              toggleOperationSelection(
-                                                item.key,
-                                                Boolean(value),
-                                              )
-                                          "
+                                        :indeterminate="
+                                          isGroupIndeterminate(group.operations)
+                                        "
+                                        @change="
+                                          (value) =>
+                                            toggleGroupSelection(
+                                              group.operations,
+                                              Boolean(value),
+                                            )
+                                        "
+                                      >
+                                        <span class="font-medium">
+                                          {{ group.name }}
+                                        </span>
+                                        <span
+                                          class="ml-1 text-xs text-[var(--el-text-color-secondary)]"
                                         >
-                                          [{{ item.method.toUpperCase() }}]
-                                          {{ item.path }}
-                                          <span
-                                            class="text-[var(--el-text-color-secondary)]"
-                                          >
-                                            {{
-                                              item.summary || item.description
-                                                ? ` - ${item.summary || item.description}`
-                                                : ''
-                                            }}
-                                          </span>
-                                        </ElCheckbox>
+                                          ({{
+                                            getCheckedCountInGroup(
+                                              group.operations,
+                                            )
+                                          }}/{{ group.operations.length }})
+                                        </span>
+                                      </ElCheckbox>
+                                      <div
+                                        class="group-toggle-area"
+                                        role="button"
+                                        tabindex="0"
+                                        :aria-label="
+                                          isGroupExpanded(group.key)
+                                            ? '收起分组'
+                                            : '展开分组'
+                                        "
+                                        @click.stop="
+                                          toggleGroupExpanded(group.key)
+                                        "
+                                        @keydown.enter.prevent.stop="
+                                          toggleGroupExpanded(group.key)
+                                        "
+                                        @keydown.space.prevent.stop="
+                                          toggleGroupExpanded(group.key)
+                                        "
+                                      >
+                                        <component
+                                          :is="
+                                            isGroupExpanded(group.key)
+                                              ? SvgDoubleArrowUpIcon
+                                              : SvgDoubleArrowDownIcon
+                                          "
+                                          class="group-toggle-icon"
+                                        />
                                       </div>
                                     </div>
-                                  </Transition>
+
+                                    <Transition name="group-submenu-motion">
+                                      <div
+                                        v-show="isGroupExpanded(group.key)"
+                                        class="group-submenu-wrap ml-3 mt-2 border-l border-dashed border-[var(--el-border-color)] pl-3"
+                                      >
+                                        <div class="group-submenu-list py-1">
+                                          <ElCheckbox
+                                            v-for="item in group.operations"
+                                            :key="item.key"
+                                            class="group-submenu-item"
+                                            :title="
+                                              getOperationDisplayTitle(item)
+                                            "
+                                            :model-value="
+                                              isOperationChecked(item.key)
+                                            "
+                                            @change="
+                                              (value) =>
+                                                toggleOperationSelection(
+                                                  item.key,
+                                                  Boolean(value),
+                                                )
+                                            "
+                                          >
+                                            <span class="operation-label">
+                                              [{{ item.method.toUpperCase() }}]
+                                              {{ item.path }}
+                                              <span
+                                                v-if="
+                                                  item.summary ||
+                                                  item.description
+                                                "
+                                                class="operation-label__desc"
+                                              >
+                                                -
+                                                {{
+                                                  item.summary ||
+                                                  item.description
+                                                }}
+                                              </span>
+                                            </span>
+                                          </ElCheckbox>
+                                        </div>
+                                      </div>
+                                    </Transition>
+                                  </div>
                                 </div>
-                              </div>
-                            </template>
-                            <template v-else>
+                              </template>
+                              <template v-else>
+                                <div class="group-submenu-list py-1">
+                                  <ElCheckbox
+                                    v-for="item in serviceNode.operations"
+                                    :key="item.key"
+                                    class="group-submenu-item"
+                                    :title="getOperationDisplayTitle(item)"
+                                    :model-value="isOperationChecked(item.key)"
+                                    @change="
+                                      (value) =>
+                                        toggleOperationSelection(
+                                          item.key,
+                                          Boolean(value),
+                                        )
+                                    "
+                                  >
+                                    <span class="operation-label">
+                                      [{{ item.method.toUpperCase() }}]
+                                      {{ item.path }}
+                                      <span
+                                        v-if="item.summary || item.description"
+                                        class="operation-label__desc"
+                                      >
+                                        -
+                                        {{ item.summary || item.description }}
+                                      </span>
+                                    </span>
+                                  </ElCheckbox>
+                                </div>
+                              </template>
+                            </div>
+                          </Transition>
+                        </div>
+                      </div>
+                    </template>
+                    <div
+                      v-else
+                      class="py-8 text-center text-sm text-[var(--el-text-color-secondary)]"
+                    >
+                      暂无匹配接口
+                    </div>
+                  </template>
+                  <template v-else>
+                    <template v-if="groupedFilteredOperations.length > 0">
+                      <div
+                        class="divide-y divide-[var(--el-border-color-lighter)]"
+                      >
+                        <div
+                          v-for="group in groupedFilteredOperations"
+                          :key="group.code"
+                          class="py-2"
+                        >
+                          <div
+                            class="group-header flex items-center justify-between px-1 py-1"
+                            :class="{
+                              'group-node--checked':
+                                getCheckedCountInGroup(group.operations) > 0,
+                            }"
+                          >
+                            <ElCheckbox
+                              :model-value="isGroupChecked(group.operations)"
+                              :indeterminate="
+                                isGroupIndeterminate(group.operations)
+                              "
+                              @change="
+                                (value) =>
+                                  toggleGroupSelection(
+                                    group.operations,
+                                    Boolean(value),
+                                  )
+                              "
+                            >
+                              <span class="font-medium">{{ group.name }}</span>
+                              <span
+                                class="ml-1 text-xs text-[var(--el-text-color-secondary)]"
+                              >
+                                ({{
+                                  getCheckedCountInGroup(group.operations)
+                                }}/{{ group.operations.length }})
+                              </span>
+                            </ElCheckbox>
+                            <div
+                              class="group-toggle-area"
+                              role="button"
+                              tabindex="0"
+                              :aria-label="
+                                isGroupExpanded(group.code)
+                                  ? '收起分组'
+                                  : '展开分组'
+                              "
+                              @click.stop="toggleGroupExpanded(group.code)"
+                              @keydown.enter.prevent.stop="
+                                toggleGroupExpanded(group.code)
+                              "
+                              @keydown.space.prevent.stop="
+                                toggleGroupExpanded(group.code)
+                              "
+                            >
+                              <component
+                                :is="
+                                  isGroupExpanded(group.code)
+                                    ? SvgDoubleArrowUpIcon
+                                    : SvgDoubleArrowDownIcon
+                                "
+                                class="group-toggle-icon"
+                              />
+                            </div>
+                          </div>
+
+                          <Transition name="group-submenu-motion">
+                            <div
+                              v-show="isGroupExpanded(group.code)"
+                              class="group-submenu-wrap ml-3 mt-2 border-l border-dashed border-[var(--el-border-color)] pl-3"
+                            >
                               <div class="group-submenu-list py-1">
                                 <ElCheckbox
-                                  v-for="item in serviceNode.operations"
+                                  v-for="item in group.operations"
                                   :key="item.key"
                                   class="group-submenu-item"
+                                  :title="getOperationDisplayTitle(item)"
                                   :model-value="isOperationChecked(item.key)"
                                   @change="
                                     (value) =>
@@ -2443,215 +2576,106 @@ onBeforeUnmount(() => {
                                       )
                                   "
                                 >
-                                  [{{ item.method.toUpperCase() }}]
-                                  {{ item.path }}
-                                  <span
-                                    class="text-[var(--el-text-color-secondary)]"
-                                  >
-                                    {{
-                                      item.summary || item.description
-                                        ? ` - ${item.summary || item.description}`
-                                        : ''
-                                    }}
+                                  <span class="operation-label">
+                                    [{{ item.method.toUpperCase() }}]
+                                    {{ item.path }}
+                                    <span
+                                      v-if="item.summary || item.description"
+                                      class="operation-label__desc"
+                                    >
+                                      -
+                                      {{ item.summary || item.description }}
+                                    </span>
                                   </span>
                                 </ElCheckbox>
                               </div>
-                            </template>
-                          </div>
-                        </Transition>
-                      </div>
-                    </div>
-                  </template>
-                  <div
-                    v-else
-                    class="py-8 text-center text-sm text-[var(--el-text-color-secondary)]"
-                  >
-                    暂无匹配接口
-                  </div>
-                </template>
-                <template v-else>
-                  <template v-if="groupedFilteredOperations.length > 0">
-                    <div
-                      class="divide-y divide-[var(--el-border-color-lighter)]"
-                    >
-                      <div
-                        v-for="group in groupedFilteredOperations"
-                        :key="group.code"
-                        class="py-2"
-                      >
-                        <div
-                          class="group-header flex items-center justify-between px-1 py-1"
-                          :class="{
-                            'group-node--checked':
-                              getCheckedCountInGroup(group.operations) > 0,
-                          }"
-                        >
-                          <ElCheckbox
-                            :model-value="isGroupChecked(group.operations)"
-                            :indeterminate="
-                              isGroupIndeterminate(group.operations)
-                            "
-                            @change="
-                              (value) =>
-                                toggleGroupSelection(
-                                  group.operations,
-                                  Boolean(value),
-                                )
-                            "
-                          >
-                            <span class="font-medium">{{ group.name }}</span>
-                            <span
-                              class="ml-1 text-xs text-[var(--el-text-color-secondary)]"
-                            >
-                              ({{ getCheckedCountInGroup(group.operations) }}/{{
-                                group.operations.length
-                              }})
-                            </span>
-                          </ElCheckbox>
-                          <div
-                            class="group-toggle-area"
-                            role="button"
-                            tabindex="0"
-                            :aria-label="
-                              isGroupExpanded(group.code)
-                                ? '收起分组'
-                                : '展开分组'
-                            "
-                            @click.stop="toggleGroupExpanded(group.code)"
-                            @keydown.enter.prevent.stop="
-                              toggleGroupExpanded(group.code)
-                            "
-                            @keydown.space.prevent.stop="
-                              toggleGroupExpanded(group.code)
-                            "
-                          >
-                            <component
-                              :is="
-                                isGroupExpanded(group.code)
-                                  ? SvgDoubleArrowUpIcon
-                                  : SvgDoubleArrowDownIcon
-                              "
-                              class="group-toggle-icon"
-                            />
-                          </div>
-                        </div>
-
-                        <Transition name="group-submenu-motion">
-                          <div
-                            v-show="isGroupExpanded(group.code)"
-                            class="group-submenu-wrap ml-3 mt-2 border-l border-dashed border-[var(--el-border-color)] pl-3"
-                          >
-                            <div class="group-submenu-list py-1">
-                              <ElCheckbox
-                                v-for="item in group.operations"
-                                :key="item.key"
-                                class="group-submenu-item"
-                                :model-value="isOperationChecked(item.key)"
-                                @change="
-                                  (value) =>
-                                    toggleOperationSelection(
-                                      item.key,
-                                      Boolean(value),
-                                    )
-                                "
-                              >
-                                [{{ item.method.toUpperCase() }}]
-                                {{ item.path }}
-                                <span
-                                  class="text-[var(--el-text-color-secondary)]"
-                                >
-                                  {{
-                                    item.summary || item.description
-                                      ? ` - ${item.summary || item.description}`
-                                      : ''
-                                  }}
-                                </span>
-                              </ElCheckbox>
                             </div>
-                          </div>
-                        </Transition>
+                          </Transition>
+                        </div>
                       </div>
+                    </template>
+                    <div
+                      v-else
+                      class="py-8 text-center text-sm text-[var(--el-text-color-secondary)]"
+                    >
+                      暂无匹配接口
                     </div>
                   </template>
-                  <div
-                    v-else
-                    class="py-8 text-center text-sm text-[var(--el-text-color-secondary)]"
-                  >
-                    暂无匹配接口
-                  </div>
-                </template>
-              </div>
+                </div>
+              </template>
+              <template v-else>
+                <div
+                  class="rounded border p-3 text-sm text-[var(--el-text-color-secondary)]"
+                >
+                  已选择全部接口文档，无需单独勾选。
+                </div>
+              </template>
             </template>
-            <template v-else>
-              <div
-                class="rounded border p-3 text-sm text-[var(--el-text-color-secondary)]"
-              >
-                已选择全部接口文档，无需单独勾选。
-              </div>
+          </ElCard>
+
+          <ElCard shadow="never" class="doc-other-card">
+            <template #header>
+              <span class="font-medium">导出其他</span>
             </template>
-          </template>
-        </ElCard>
 
-        <ElCard shadow="never">
-          <template #header>
-            <span class="font-medium">导出其他</span>
-          </template>
-
-          <ElForm label-width="100px">
-            <ElFormItem label="附加内容">
-              <ElCheckboxGroup v-model="exportDocOptions">
-                <ElCheckbox value="info">Info</ElCheckbox>
-                <ElCheckbox value="brand">品牌信息</ElCheckbox>
-                <ElCheckbox value="otherDocs">其他文档</ElCheckbox>
-              </ElCheckboxGroup>
-            </ElFormItem>
-          </ElForm>
-        </ElCard>
+            <ElForm label-width="100px">
+              <ElFormItem label="附加内容">
+                <ElCheckboxGroup v-model="exportDocOptions">
+                  <ElCheckbox value="info">Info</ElCheckbox>
+                  <ElCheckbox value="brand">品牌信息</ElCheckbox>
+                  <ElCheckbox value="otherDocs">其他文档</ElCheckbox>
+                </ElCheckboxGroup>
+              </ElFormItem>
+            </ElForm>
+          </ElCard>
+        </div>
       </ElCol>
 
-      <ElCol :span="14">
-        <ElCard shadow="never" class="doc-preview-card h-full">
-          <template #header>
-            <div class="flex flex-wrap items-center justify-between gap-3">
-              <span class="font-medium">Markdown 实时预览</span>
-              <ElSpace wrap>
-                <ElDropdown trigger="click" @command="handleExportCommand">
-                  <ElButton type="primary">
-                    导出：{{ exportFormatTextMap[exportFormat] }}
-                  </ElButton>
-                  <template #dropdown>
-                    <ElDropdownMenu>
-                      <ElDropdownItem command="docx">
-                        Word(.docx)
-                      </ElDropdownItem>
-                      <ElDropdownItem command="pdf">PDF</ElDropdownItem>
-                      <ElDropdownItem command="markdown">
-                        Markdown
-                      </ElDropdownItem>
-                      <ElDropdownItem command="html">HTML</ElDropdownItem>
-                      <ElDropdownItem command="openapi.json">
-                        OpenAPI JSON
-                      </ElDropdownItem>
-                    </ElDropdownMenu>
-                  </template>
-                </ElDropdown>
-              </ElSpace>
-            </div>
-          </template>
+      <ElCol :span="14" class="doc-export-col">
+        <div class="doc-right-column">
+          <ElCard shadow="never" class="doc-preview-card">
+            <template #header>
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <span class="font-medium">Markdown 实时预览</span>
+                <ElSpace wrap>
+                  <ElDropdown trigger="click" @command="handleExportCommand">
+                    <ElButton type="primary">
+                      导出：{{ exportFormatTextMap[exportFormat] }}
+                    </ElButton>
+                    <template #dropdown>
+                      <ElDropdownMenu>
+                        <ElDropdownItem command="docx">
+                          Word(.docx)
+                        </ElDropdownItem>
+                        <ElDropdownItem command="pdf">PDF</ElDropdownItem>
+                        <ElDropdownItem command="markdown">
+                          Markdown
+                        </ElDropdownItem>
+                        <ElDropdownItem command="html">HTML</ElDropdownItem>
+                        <ElDropdownItem command="openapi.json">
+                          OpenAPI JSON
+                        </ElDropdownItem>
+                      </ElDropdownMenu>
+                    </template>
+                  </ElDropdown>
+                </ElSpace>
+              </div>
+            </template>
 
-          <ElSkeleton v-if="previewLoading" :rows="8" animated />
-          <template v-else>
-            <ElEmpty
-              v-if="isPreviewEmpty"
-              description="请选择导出范围或接口，预览将自动更新"
-            />
-            <div
-              v-else
-              class="doc-preview-html max-h-[calc(100vh-280px)] overflow-auto [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:p-2 [&_th]:border [&_th]:p-2"
-              v-html="previewHtml"
-            ></div>
-          </template>
-        </ElCard>
+            <ElSkeleton v-if="previewLoading" :rows="8" animated />
+            <template v-else>
+              <ElEmpty
+                v-if="isPreviewEmpty"
+                description="请选择导出范围或接口，预览将自动更新"
+              />
+              <div
+                v-else
+                class="doc-preview-html overflow-auto [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:p-2 [&_th]:border [&_th]:p-2"
+                v-html="previewHtml"
+              ></div>
+            </template>
+          </ElCard>
+        </div>
       </ElCol>
     </ElRow>
   </div>
@@ -2659,13 +2683,84 @@ onBeforeUnmount(() => {
 
 <style scoped lang="scss">
 .doc-export-page {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+
+  :deep(.doc-range-card .el-card__body),
+  :deep(.doc-preview-card .el-card__body) {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
+
   :deep(.doc-preview-card .el-card__body),
   :deep(.doc-preview-html) {
     contain: layout paint;
   }
 }
 
+.doc-export-layout {
+  flex: 1;
+  align-items: stretch;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.doc-export-col {
+  display: flex;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+}
+
+.doc-left-column,
+.doc-right-column {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.doc-range-card,
+.doc-preview-card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.doc-range-card {
+  flex: 1;
+  min-height: 0;
+}
+
+.doc-other-card {
+  margin-top: auto;
+  margin-bottom: 6px;
+}
+
+.doc-preview-card {
+  flex: 1;
+  min-height: 0;
+  margin-bottom: 6px;
+}
+
 .scope-tree-panel {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
   overflow: hidden auto;
   scrollbar-gutter: stable;
 }
@@ -2724,7 +2819,12 @@ onBeforeUnmount(() => {
 }
 
 .doc-preview-html {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
   line-height: 1.85;
+  overflow-wrap: anywhere;
 }
 
 .doc-preview-html:deep(p) {
@@ -2750,12 +2850,44 @@ onBeforeUnmount(() => {
 }
 
 .group-submenu-wrap {
+  width: 100%;
+  min-width: 0;
   overflow: hidden;
+}
+
+.group-submenu-list {
+  width: 100%;
+  min-width: 0;
 }
 
 .group-submenu-list :deep(.group-submenu-item.el-checkbox) {
   display: flex;
+  align-items: flex-start;
+  width: 100%;
+  min-width: 0;
   margin: 0;
+}
+
+.group-submenu-list :deep(.group-submenu-item .el-checkbox__label) {
+  display: block;
+  flex: 1;
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.operation-label {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.operation-label__desc {
+  color: var(--el-text-color-secondary);
 }
 
 .group-submenu-list
