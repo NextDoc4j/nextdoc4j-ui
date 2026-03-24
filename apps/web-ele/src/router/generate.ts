@@ -28,6 +28,20 @@ interface TagGroups {
   all: Record<string, PathMenuItem[]>;
 }
 
+const hasGlobalSecurityConfig = (doc?: OpenAPISpec) => {
+  return Object.keys(doc?.components?.securitySchemes ?? {}).length > 0;
+};
+
+const createAuthorizeRoute = (): RouteRecordStringComponent<string> => ({
+  meta: {
+    icon: SvgMenuSafetyIcon,
+    title: '全局认证',
+  },
+  name: '全局认证',
+  path: '/authorize',
+  component: 'views/authorize/index.vue',
+});
+
 const createApiSearchText = (api: PathMenuItem) => {
   return [
     api.summary,
@@ -97,6 +111,12 @@ export const fetchAggregationRoutesImpl: () => Promise<
   if (gatewayExtension?.markdown) {
     markDownMenus = initMarkdown(gatewayExtension.markdown);
   }
+  const gatewayFallbackRoutes: RouteRecordStringComponent<string>[] = [
+    ...markDownMenus,
+  ];
+  if (hasGlobalSecurityConfig(gatewayOpenApi)) {
+    gatewayFallbackRoutes.unshift(createAuthorizeRoute());
+  }
 
   if (gatewayOpenApi?.info?.title) {
     updatePreferences({
@@ -112,7 +132,7 @@ export const fetchAggregationRoutesImpl: () => Promise<
   const currentService = aggregationStore.currentService;
 
   if (!currentService) {
-    return [...markDownMenus];
+    return gatewayFallbackRoutes;
   }
 
   // 获取可用服务数据（首个服务不可用时自动回退到后续服务）
@@ -126,16 +146,16 @@ export const fetchAggregationRoutesImpl: () => Promise<
     config = data.config;
   } catch (error) {
     console.error('No available services for aggregation mode:', error);
-    return [...markDownMenus];
+    return gatewayFallbackRoutes;
   }
 
   // 检查服务数据是否有效
   if (!serviceData || !serviceData.paths) {
     console.error('Invalid service data:', serviceData);
-    return [...markDownMenus];
+    return gatewayFallbackRoutes;
   }
 
-  const { paths, components, security } = serviceData;
+  const { paths, components } = serviceData;
 
   // 初始化主路由（all 分组）
   const { access, allPath } = initGroupRoute(paths);
@@ -317,16 +337,8 @@ export const fetchAggregationRoutesImpl: () => Promise<
       ...markDownMenus,
     ];
 
-    if (security) {
-      routes.unshift({
-        meta: {
-          icon: SvgMenuSafetyIcon,
-          title: '全局认证',
-        },
-        name: '全局认证',
-        path: '/authorize',
-        component: 'views/authorize/index.vue',
-      });
+    if (hasGlobalSecurityConfig(gatewayOpenApi)) {
+      routes.unshift(createAuthorizeRoute());
     }
 
     resolve(routes);
@@ -341,7 +353,7 @@ const fetchSingleAppRoutes: (
   config?: SwaggerConfig,
 ) => Promise<RouteRecordStringComponent<string>[]> = async (data, config) => {
   const entries: RouteRecordStringComponent<string>[] = [];
-  const { paths, components, 'x-nextdoc4j': xNextdoc4j, security } = data;
+  const { paths, components, 'x-nextdoc4j': xNextdoc4j } = data;
   const { access, allPath } = initGroupRoute(paths);
 
   if (xNextdoc4j && xNextdoc4j.brand) {
@@ -506,16 +518,8 @@ const fetchSingleAppRoutes: (
       },
       ...markDownMenus,
     ];
-    if (security) {
-      routes.unshift({
-        meta: {
-          icon: SvgMenuSafetyIcon,
-          title: '全局认证',
-        },
-        name: '全局认证',
-        path: '/authorize',
-        component: 'views/authorize/index.vue',
-      });
+    if (hasGlobalSecurityConfig(data)) {
+      routes.unshift(createAuthorizeRoute());
     }
 
     resolve(routes);

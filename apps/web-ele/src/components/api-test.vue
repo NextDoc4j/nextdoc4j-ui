@@ -965,12 +965,9 @@ const normalizeSecurityIn = (value?: string) => {
 
 onMounted(async () => {
   const openApi = apiStore.openApi;
-  let securityList: any[] = [];
-  if (Array.isArray(props.security) && props.security.length > 0) {
-    securityList = props.security;
-  } else if (Array.isArray(openApi?.security)) {
-    securityList = openApi.security;
-  }
+  const securityList: any[] = Array.isArray(props.security)
+    ? props.security
+    : [];
   const tokenStore = useTokenStore();
   const securitySchemes = openApi?.components?.securitySchemes ?? {};
   const gatewayGlobalSecuritySchemes =
