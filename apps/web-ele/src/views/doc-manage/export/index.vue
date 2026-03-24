@@ -1385,6 +1385,13 @@ type ParameterRow = {
   type: string;
 };
 
+const PARAM_LOCATION_TEXT: Record<string, string> = {
+  cookie: 'Cookie 参数',
+  header: '请求头参数',
+  path: '路径参数',
+  query: '查询参数',
+};
+
 function appendParameterRows(lines: string[], rows: ParameterRow[]) {
   if (rows.length <= 0) {
     lines.push('- 暂无参数', '');
@@ -1407,9 +1414,12 @@ function buildParameterRowsFromParameters(params: any[], doc: OpenAPISpec) {
   return params.map((param) => {
     const normalizedSchema = normalizeSchema(param?.schema, doc);
     const location = `${param?.in || ''}`.trim().toLowerCase();
-    const locationPrefix = location ? `[${location}] ` : '';
+    const locationText =
+      PARAM_LOCATION_TEXT[location] ||
+      (location ? `${location.toUpperCase()} 参数` : '参数');
+    const baseName = `${param?.name || '-'}`.trim() || '-';
     return {
-      name: `${locationPrefix}${param?.name || '-'}`,
+      name: `${baseName}（${locationText}）`,
       type: schemaTypeText(normalizedSchema, doc),
       required: location === 'path' ? true : Boolean(param?.required ?? false),
       description: mergeDescriptionWithEnum(
