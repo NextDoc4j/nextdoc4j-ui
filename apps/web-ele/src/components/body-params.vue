@@ -26,6 +26,9 @@ const props = defineProps<{
   requestBodyType: string;
   urlEncodedParams: ParamsType[];
 }>();
+const emit = defineEmits<{
+  bodyChange: [];
+}>();
 
 const x2js = new X2JS({
   // 是否忽略根元素
@@ -199,6 +202,10 @@ const setEditorValue = async (value: string) => {
   editorRef.value?.setEditorValue?.(value ?? '');
 };
 
+const handleBodyChange = () => {
+  emit('bodyChange');
+};
+
 const handleExceed: UploadProps['onExceed'] = (files) => {
   uploadRef.value!.clearFiles();
   const file = files[0] as UploadRawFile;
@@ -336,6 +343,7 @@ defineExpose({
           :data="requestBodyExample"
           :descriptions="{}"
           :read-only="false"
+          @change="handleBodyChange"
         />
       </template>
 
@@ -346,6 +354,7 @@ defineExpose({
           :descriptions="{}"
           :read-only="false"
           language="null"
+          @change="handleBodyChange"
         />
       </template>
 
@@ -356,6 +365,7 @@ defineExpose({
           :descriptions="{}"
           :read-only="false"
           language="xml"
+          @change="handleBodyChange"
         />
       </template>
 

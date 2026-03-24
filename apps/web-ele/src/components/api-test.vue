@@ -1210,6 +1210,7 @@ onBeforeUnmount(() => {
             :form-data-params="formDataParams"
             :url-encoded-params="urlEncodedParams"
             :request-body-type="requestBodyType"
+            @body-change="schedulePersistCache"
           />
 
           <ElTabPane name="Headers" label="Headers">
