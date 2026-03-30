@@ -17,46 +17,34 @@ defineProps<{
 
 const foldState = ref<Record<string, boolean>>({});
 
-// 判断是否可展开
 const isExpandable = (item: any) => {
-  if (item.type === 'object' && item.properties) {
+  if (item?.type === 'object' && item?.properties) {
     return Object.keys(item.properties).length > 0;
   }
-  if (item.type === 'array' && item.items?.type === 'object') {
+  if (item?.type === 'array' && item?.items?.type === 'object') {
     return true;
   }
   return false;
 };
 
-// 获取子级 Schema
 const getChildSchema = (item: any) => {
-  if (!item.type || item.type === 'object') {
-    return item.properties || {};
+  if (!item?.type || item.type === 'object') {
+    return item?.properties || {};
   }
-  if (item.type === 'array' && item.items?.type === 'object') {
+  if (item.type === 'array' && item?.items?.type === 'object') {
     return item.items.properties || {};
   }
   return {};
 };
 
-// 切换折叠状态
 const toggleFold = (key: string, value: any) => {
   if (isExpandable(value)) {
     foldState.value[key] = !foldState.value[key];
   }
 };
 
-// 获取类型显示文本
-const getTypeText = (value: any) => {
-  if (value.enum) {
-    return `enum<${value.type}>`;
-  }
-  return value.type;
-};
-
-// 获取约束信息
 const getConstraints = (value: any) => {
-  const source = value.schema || value;
+  const source = value?.schema || value;
   const parts: string[] = [];
 
   if (source.minLength !== undefined) {
@@ -79,214 +67,357 @@ const getConstraints = (value: any) => {
   return parts.join(' 或 ');
 };
 
-// 判断描述是否包含 HTML
 const hasHtmlDescription = (desc: string) => desc?.includes('<');
 
-// 获取枚举项列表
 const getPropertyEnumItems = (value: any) => {
   return getEnumItems(value);
 };
 
-// 检查是否有扩展枚举
-const hasExtendedEnum = (value: any) => {
-  const items = getPropertyEnumItems(value);
-  return items.some((item) => item.description);
+const getTypeLabel = (value: any) => {
+  if (!value) return '-';
+
+  if (value.type === 'array') {
+    const itemType = value.items?.type || 'any';
+    const itemSuffix = value.items?.format ? `<${value.items.format}>` : '';
+    return `array<${itemType}${itemSuffix}>`;
+  }
+
+  const suffix = value.format ? `<${value.format}>` : '';
+  if (value.title && value.type === 'object') {
+    return `${value.type}<${value.title}>`;
+  }
+  return `${value.type || 'unknown'}${suffix}`;
+};
+
+const getExampleValue = (value: any) => {
+  return value?.example;
+};
+
+const getPatternValue = (value: any) => {
+  return value?.pattern || '';
+};
+
+const isRequired = (data: any, key: string, value: any) => {
+  return Boolean(data?.required?.includes?.(key) || value?.required === true);
+};
+
+const formatValue = (value: unknown) => {
+  if (value === undefined || value === null || value === '') return '';
+  if (typeof value === 'object') {
+    return JSON.stringify(value);
+  }
+  return String(value);
 };
 </script>
 
 <template>
-  <!-- 数组类型且 items 不是对象 -->
   <div
     v-if="data?.type === 'array' && data?.items?.type !== 'object'"
-    class="flex items-center gap-2"
+    class="schema-root-pill"
   >
-    <span class="text-primary font-mono text-base font-bold">
-      {{ data.type }}
-    </span>
-    <div
-      v-if="data.items.type"
-      class="flex rounded-md bg-gray-100/50 px-1.5 py-0.5 font-mono text-xs font-bold text-gray-600 dark:bg-white/5 dark:text-gray-200"
-    >
-      <span>{{ data.items.type }}</span>
-      <span v-if="data.items.format">{{ `<${data.items.format}>` }}</span>
-    </div>
+    <span class="schema-root-pill__title">数组结构</span>
+    <span class="schema-root-pill__value">{{ getTypeLabel(data) }}</span>
   </div>
 
-  <!-- 对象或数组对象类型 -->
-  <div
-    v-else
-    v-for="(value, key) in getChildSchema(data)"
-    :key="key"
-    class="border-b border-gray-100 py-6 last:border-b-0 last:pb-0 dark:border-gray-800"
-  >
-    <div class="flex items-center gap-2">
-      <SvgCaretRightIcon
-        v-if="isExpandable(value)"
-        :class="{
-          'rotate-90': !foldState[key],
-          'cursor-pointer': isExpandable(value),
-        }"
-        class="size-4 transition-transform"
-        @click="toggleFold(String(key), value)"
-      />
-      <div class="flex items-center gap-2">
-        <!-- 字段名 -->
-        <span class="text-primary font-mono text-base font-bold">
-          {{ key }}
-        </span>
-
-        <div
-          v-if="getTypeText(value)"
-          class="flex rounded-md bg-gray-100/50 px-1.5 py-0.5 font-mono text-xs font-bold text-gray-600 dark:bg-white/5 dark:text-gray-200"
+  <div v-else class="schema-stack">
+    <div
+      v-for="(value, key) in getChildSchema(data)"
+      :key="key"
+      class="schema-item"
+    >
+      <div class="schema-item__top">
+        <button
+          v-if="isExpandable(value)"
+          class="schema-item__toggle"
+          @click="toggleFold(String(key), value)"
         >
-          <div class="flex items-center">
-            <div>{{ getTypeText(value) }}</div>
-            <span v-if="value.title">{{ `<${value.title}>` }}</span>
-          </div>
-          <span
-            v-if="value.format"
-            class="ml-1 text-xs text-gray-600 dark:text-gray-400"
-            >{{ `<${value.format}>` }}
-          </span>
-        </div>
+          <SvgCaretRightIcon
+            class="size-4 transition-transform"
+            :class="{ 'rotate-90': !foldState[key] }"
+          />
+        </button>
 
-        <!-- 数组信息 -->
-        <template v-if="value.type === 'array'">
-          <div
-            class="flex rounded-md bg-gray-100/50 px-1.5 py-0.5 font-mono text-xs font-bold text-gray-600 dark:bg-white/5 dark:text-gray-200"
-          >
-            <div>
-              <span>{{ value.items.type }}[{{ value.items.title }}]</span>
+        <div class="schema-item__content">
+          <div class="schema-item__headline">
+            <div class="schema-item__name">
+              {{ key }}
+            </div>
+            <div class="schema-item__meta">
               <span
-                v-if="value.format"
-                class="ml-1 text-xs text-gray-600 dark:text-gray-400"
+                class="meta-pill"
+                :class="
+                  isRequired(data, String(key), value)
+                    ? 'meta-pill--required'
+                    : 'meta-pill--optional'
+                "
               >
-                {{ `<${value.format}>` }}
+                {{ isRequired(data, String(key), value) ? '必填' : '可选' }}
+              </span>
+              <span class="meta-pill meta-pill--type">
+                {{ getTypeLabel(value) }}
+              </span>
+              <ElTooltip
+                v-if="getExampleValue(value) !== undefined"
+                :content="formatValue(getExampleValue(value))"
+                placement="top"
+              >
+                <span class="meta-pill meta-pill--example">
+                  示例 {{ formatValue(getExampleValue(value)) }}
+                </span>
+              </ElTooltip>
+              <ElTooltip
+                v-if="getPatternValue(value)"
+                :content="getPatternValue(value)"
+                placement="top"
+              >
+                <span class="meta-pill meta-pill--pattern">
+                  正则 {{ getPatternValue(value) }}
+                </span>
+              </ElTooltip>
+              <span
+                v-if="getConstraints(value)"
+                class="meta-pill meta-pill--constraint"
+              >
+                约束 {{ getConstraints(value) }}
               </span>
             </div>
           </div>
-        </template>
 
-        <div
-          v-if="!isExpandable(value) && value.example"
-          class="flex items-center rounded-md bg-gray-100/50 px-1.5 py-0.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-200"
-        >
-          <span class="mr-0.5 text-gray-400 dark:text-gray-500">示例值:</span>
-          <ElTooltip placement="top" :content="String(value.example)">
-            <span class="max-w-24 truncate font-mono">
-              {{ value.example }}
-            </span>
-          </ElTooltip>
-        </div>
-
-        <div
-          v-if="!isExpandable(value) && value.default"
-          class="flex items-center rounded-md bg-gray-100/50 px-1.5 py-0.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-200"
-        >
-          <span class="mr-0.5 text-gray-400 dark:text-gray-500">默认值:</span>
-          <span class="font-mono">{{ value.default }}</span>
-        </div>
-
-        <div
-          v-if="getConstraints(value)"
-          class="flex items-center rounded-md bg-gray-100/50 px-1.5 py-0.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-200"
-        >
-          <span class="mr-0.5 text-gray-400 dark:text-gray-500">
-            取值范围:
-          </span>
-          <span class="font-mono">
-            {{ getConstraints(value) }}
-          </span>
-        </div>
-
-        <div
-          v-if="value.pattern"
-          class="flex items-center rounded-md bg-gray-100/50 px-1.5 py-0.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-200"
-        >
-          <span class="mr-0.5 text-gray-400 dark:text-gray-500">
-            正则匹配:
-          </span>
-          <ElTooltip placement="top" :content="String(value.pattern)">
-            <span class="max-w-24 truncate font-mono">
-              {{ value.pattern }}
-            </span>
-          </ElTooltip>
-        </div>
-
-        <div
-          v-if="data?.required?.includes(key)"
-          class="rounded-md bg-red-100/50 px-1.5 py-0.5 text-xs font-bold text-red-600 dark:bg-red-400/10 dark:text-red-300"
-        >
-          必须
-        </div>
-        <div
-          v-else
-          class="rounded-md bg-green-100/50 px-1.5 py-0.5 text-xs font-bold text-green-600 dark:bg-green-400/10 dark:text-green-300"
-        >
-          可选
-        </div>
-      </div>
-    </div>
-
-    <!-- 描述 -->
-    <div
-      v-if="value.description && !hasHtmlDescription(value.description)"
-      class="mt-4 text-gray-600 dark:text-gray-400"
-    >
-      {{ value.description }}
-    </div>
-
-    <!-- HTML 描述 -->
-    <div
-      v-if="value.description && hasHtmlDescription(value.description)"
-      class="mt-4 text-sm text-gray-600 dark:text-gray-400"
-      v-html="value.description"
-    ></div>
-
-    <!-- 扩展枚举值展示 - 优先显示 -->
-    <div v-if="hasExtendedEnum(value)" class="mt-4">
-      <div class="mb-2 text-xs font-medium text-gray-600 dark:text-gray-400">
-        可用值:
-      </div>
-      <div class="flex flex-wrap gap-2">
-        <div
-          v-for="item in getPropertyEnumItems(value)"
-          :key="item.value"
-          class="bg-primary/5 inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs"
-        >
-          <span class="text-primary font-mono font-semibold">
-            {{ item.value }}
-          </span>
-          <span
-            v-if="item.description"
-            class="text-gray-600 dark:text-gray-400"
+          <div
+            v-if="value.description && !hasHtmlDescription(value.description)"
+            class="schema-item__description"
           >
-            - {{ item.description }}
-          </span>
+            {{ value.description }}
+          </div>
+          <div
+            v-if="value.description && hasHtmlDescription(value.description)"
+            class="schema-item__description prose prose-sm max-w-none"
+            v-html="value.description"
+          ></div>
+
+          <div
+            v-if="getPropertyEnumItems(value).length > 0"
+            class="schema-item__enum"
+          >
+            <span class="schema-item__enum-label">枚举</span>
+            <div class="schema-item__enum-values">
+              <span
+                v-for="item in getPropertyEnumItems(value)"
+                :key="item.value"
+                class="enum-pill"
+              >
+                <span class="enum-pill__value">{{ item.value }}</span>
+                <span v-if="item.description" class="enum-pill__description">
+                  {{ item.description }}
+                </span>
+              </span>
+            </div>
+          </div>
+
+          <div
+            v-if="isExpandable(value) && !foldState[key]"
+            class="schema-item__children"
+          >
+            <SchemaView :data="value" />
+          </div>
         </div>
       </div>
-    </div>
-
-    <!-- 普通枚举值展示 - 仅当没有扩展枚举时显示 -->
-    <div v-else-if="value.enum" class="mt-6 flex items-center">
-      <span class="text-xs font-medium text-gray-600 dark:text-gray-400">
-        可用值:
-      </span>
-      <div
-        v-for="item in value.enum"
-        :key="item"
-        class="mr-2 rounded-md bg-gray-100/50 px-1.5 py-0.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-200"
-      >
-        <span class="font-mono">{{ item }}</span>
-      </div>
-    </div>
-
-    <!-- 子级展开 -->
-    <div
-      v-if="isExpandable(value) && !foldState[key]"
-      class="ml-8 overflow-hidden transition-all duration-200"
-    >
-      <SchemaView :data="value" />
     </div>
   </div>
 </template>
+
+<style scoped>
+.schema-root-pill {
+  --doc-chip-radius: calc(var(--radius) * 999);
+  --doc-radius-sm: calc(var(--radius) * 1.25);
+
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 14px;
+  background: var(--el-color-primary-light-9);
+  border: 1px solid var(--el-color-primary-light-7);
+  border-radius: calc(var(--radius) * 2.5);
+}
+
+.schema-root-pill__title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--el-text-color-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.schema-root-pill__value {
+  font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--el-color-primary);
+}
+
+.schema-stack {
+  display: grid;
+}
+
+.schema-item {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.schema-item:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.schema-item__top {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.schema-item__toggle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-top: 2px;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  background: var(--el-fill-color-light);
+  border: none;
+  border-radius: var(--doc-chip-radius);
+}
+
+.schema-item__content {
+  flex: 1;
+  min-width: 0;
+}
+
+.schema-item__name {
+  font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+}
+
+.schema-item__headline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  align-items: center;
+}
+
+.schema-item__meta,
+.schema-item__enum-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.schema-item__enum {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.schema-item__enum-label {
+  flex: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+}
+
+.schema-item__description {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--el-text-color-secondary);
+}
+
+.schema-item__children {
+  padding-left: 14px;
+  margin-top: 10px;
+  margin-left: 8px;
+  border-left: 1px solid var(--el-border-color-lighter);
+}
+
+.meta-pill {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  font-size: 11px;
+  color: var(--el-text-color-regular);
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--doc-chip-radius);
+}
+
+.meta-pill--type {
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary-light-7);
+}
+
+.meta-pill--required {
+  color: var(--el-color-danger);
+  background: var(--el-color-danger-light-9);
+  border-color: var(--el-color-danger-light-7);
+}
+
+.meta-pill--optional {
+  color: var(--el-color-success);
+  background: var(--el-color-success-light-9);
+  border-color: var(--el-color-success-light-7);
+}
+
+.meta-pill--example {
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary-light-7);
+}
+
+.meta-pill--pattern {
+  color: var(--el-color-warning-dark-2);
+  background: var(--el-color-warning-light-9);
+  border-color: var(--el-color-warning-light-7);
+}
+
+.meta-pill--constraint {
+  color: var(--el-color-success);
+  background: var(--el-color-success-light-9);
+  border-color: var(--el-color-success-light-7);
+}
+
+.enum-pill {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 10px;
+  background: var(--el-color-primary-light-9);
+  border: 1px solid var(--el-color-primary-light-7);
+  border-radius: var(--doc-radius-sm);
+}
+
+.enum-pill__value {
+  font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--el-color-primary);
+}
+
+.enum-pill__description {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+}
+</style>

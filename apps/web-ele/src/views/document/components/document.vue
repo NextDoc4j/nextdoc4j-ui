@@ -1,22 +1,22 @@
 <script setup lang="ts">
-import type { ApiInfo, Schema } from '#/typings/openApi';
+import type { ApiInfo, Schema, SecuritySchemeObject } from '#/typings/openApi';
+import type { SecurityMetadata } from '#/utils/securityexpand';
 
 import { computed, onBeforeMount, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 
 import { ApiLinkPrefix, ApiTestRun, ApiTestRunning } from '@vben/icons';
+import { usePreferences } from '@vben/preferences';
 
 import { useClipboard } from '@vueuse/core';
 import {
   ElButton,
-  ElCard,
   ElCollapse,
   ElCollapseItem,
-  ElDescriptions,
-  ElDescriptionsItem,
   ElMessage,
   ElRadioButton,
   ElRadioGroup,
+  ElTag,
   ElTooltip,
 } from 'element-plus';
 
@@ -24,27 +24,21 @@ import JsonViewer from '#/components/json-viewer/index.vue';
 import SchemaView from '#/components/schema-view.vue';
 import { methodType } from '#/constants/methods';
 import { useApiStore } from '#/store';
-import { generateExample, resolveSchema } from '#/utils/schema';
+import { resolveSchema } from '#/utils/schema';
+import { parseSecurityMetadata } from '#/utils/securityexpand';
 
 import ParameterView from './parameter-view.vue';
 import PathSegment from './path-segment.vue';
 import SecurityView from './security-view.vue';
 
-// 权限工具函数
-interface SecurityMetadata {
-  permissions?: Array<{
-    mode: string;
-    orType?: string;
-    orValues?: string[];
-    type?: string;
-    values: string[];
-  }>;
-  roles?: Array<{
-    mode: string;
-    type?: string;
-    values: string[];
-  }>;
-  ignore?: boolean;
+interface AuthMethodItem {
+  detail?: string;
+  label: string;
+}
+
+interface DebugPayload {
+  info: ApiInfo;
+  requestBodyType: string;
 }
 
 defineOptions({
@@ -59,72 +53,110 @@ const emits = defineEmits<{
   test: [data: ApiInfo];
 }>();
 
-const parseSecurityMetadata = (apiInfo: any): null | SecurityMetadata => {
-  if (!apiInfo) return null;
-  return (
-    (apiInfo['x-nextdoc4j-security'] as SecurityMetadata | undefined) || null
-  );
-};
-
-const hasSecurityRequirement = (apiInfo: any): boolean | undefined => {
-  const metadata = parseSecurityMetadata(apiInfo);
-  if (!metadata || metadata.ignore) return false;
-  const hasPermissions =
-    metadata.permissions && metadata.permissions.length > 0;
-  const hasRoles = metadata.roles && metadata.roles.length > 0;
-  return hasPermissions || hasRoles;
-};
-
+const { isDark } = usePreferences();
 const route = useRoute();
 const apiStore = useApiStore();
 
 const baseUrl = ref('');
 const apiInfo = ref({} as ApiInfo);
-const activeNames = ref<string>('200');
+const activeResponseCode = ref('');
 const requestBodyType = ref('');
-const defaultExpanded = ref(true);
-const jsonViewer = ref<InstanceType<typeof JsonViewer> | null>(null);
+const requestExampleOpen = ref(false);
+const responseExampleOpen = ref<Record<string, boolean>>({});
 
-// 权限信息
-const securityMetadata = computed(() => parseSecurityMetadata(apiInfo.value));
-const hasSecurityReq = computed(() => hasSecurityRequirement(apiInfo.value));
+const displayTags = computed(() => {
+  const tags = apiInfo.value?.tags?.filter(Boolean) ?? [];
+  if (tags.length > 0) {
+    return tags;
+  }
+
+  const routeName = route.name as string;
+  const fallbackTag = routeName?.split('*')[1] || '';
+  return fallbackTag ? [fallbackTag] : [];
+});
+
+const summaryText = computed(() => {
+  return apiInfo.value.summary || apiInfo.value.operationId || '未命名接口';
+});
+
+const descriptionText = computed(() => {
+  return apiInfo.value.description || '暂无描述';
+});
+
+const methodStyle = computed(() => {
+  const method = apiInfo.value.method?.toUpperCase?.() || 'GET';
+  return methodType[method] || methodType.GET;
+});
+
+const securityMetadata = computed<null | SecurityMetadata>(() => {
+  return parseSecurityMetadata(apiInfo.value);
+});
 
 const parametersInPath = computed(() => {
-  const data = apiInfo.value?.parameters?.filter((item) => item.in === 'path');
-  if (data && data.length > 0) {
-    return data;
-  }
-  return null;
+  return apiInfo.value?.parameters?.filter((item) => item.in === 'path') ?? [];
 });
 
 const parametersInQuery = computed(() => {
-  const data = apiInfo.value?.parameters?.filter((item) => item.in === 'query');
-  if (data && data.length > 0) {
-    return data;
+  return apiInfo.value?.parameters?.filter((item) => item.in === 'query') ?? [];
+});
+
+const securitySchemeMap = computed<Record<string, SecuritySchemeObject>>(() => {
+  return apiStore.openApi?.components?.securitySchemes || {};
+});
+
+const authMethods = computed<AuthMethodItem[]>(() => {
+  const security = apiInfo.value?.security;
+  if (!Array.isArray(security) || security.length === 0) {
+    return [{ label: '无需认证' }];
   }
-  return null;
-});
 
-const selectedStatusCode = ref('200');
+  const names = [
+    ...new Set(
+      security.flatMap((item) => {
+        return Object.keys(item || {});
+      }),
+    ),
+  ];
 
-const currentResponse = computed(() => {
-  return apiInfo.value?.responses?.[selectedStatusCode.value] || null;
-});
+  if (names.length === 0) {
+    return [{ label: '需要认证' }];
+  }
 
-const responseData = computed(() => {
-  if (!currentResponse.value) return null;
+  return names.map((name) => {
+    const scheme = securitySchemeMap.value[name];
+    if (!scheme) {
+      return {
+        label: name,
+      };
+    }
 
-  const content = currentResponse.value.content || {};
-  const schema =
-    content['application/json']?.schema ||
-    content['*/*']?.schema ||
-    currentResponse.value.schema;
+    if (scheme.type === 'http') {
+      const schemeName = scheme.scheme?.toLowerCase();
+      if (schemeName === 'bearer') {
+        return {
+          label: 'Bearer Token',
+          detail: scheme.bearerFormat || 'Header · Authorization',
+        };
+      }
 
-  return schema ? resolveSchema(schema) : null;
-});
+      return {
+        label: `HTTP ${scheme.scheme?.toUpperCase() || 'AUTH'}`,
+        detail: scheme.description,
+      };
+    }
 
-const responseExample = computed(() => {
-  return responseData.value ? generateExample(responseData.value) : null;
+    if (scheme.type === 'apiKey') {
+      return {
+        label: 'API Key',
+        detail: `${scheme.in || 'header'} · ${scheme.name || name}`,
+      };
+    }
+
+    return {
+      label: scheme.type || name,
+      detail: scheme.description,
+    };
+  });
 });
 
 const hasRenderableSchema = (schema: any) => {
@@ -139,6 +171,71 @@ const hasRenderableSchema = (schema: any) => {
   );
 };
 
+const prepareSchema = (schema: any): any => {
+  if (!schema) return null;
+
+  const resolved = schema.$ref ? resolveSchema(schema) : schema;
+  if (!resolved) {
+    return null;
+  }
+
+  if (Array.isArray(resolved.oneOf) && resolved.oneOf.length > 0) {
+    return {
+      ...resolved,
+      oneOf: resolved.oneOf.map((item: Schema) => prepareSchema(item)),
+    };
+  }
+
+  if (Array.isArray(resolved.allOf) && resolved.allOf.length > 0) {
+    const mergedProperties = { ...resolved.properties };
+    const required = new Set<string>(resolved.required || []);
+
+    resolved.allOf.forEach((item: Schema) => {
+      const current = prepareSchema(item);
+      if (current?.properties) {
+        Object.assign(mergedProperties, current.properties);
+      }
+      (current?.required || []).forEach((field: string) => required.add(field));
+    });
+
+    const normalized = {
+      ...resolved,
+      allOf: undefined,
+      properties: mergedProperties,
+      required: [...required],
+      type: resolved.type || 'object',
+    };
+
+    return prepareSchema(normalized);
+  }
+
+  if (
+    (resolved.type === 'object' || resolved.properties) &&
+    resolved.properties
+  ) {
+    return {
+      ...resolved,
+      properties: Object.fromEntries(
+        Object.entries(resolved.properties).map(([key, value]) => [
+          key,
+          prepareSchema(value),
+        ]),
+      ),
+      required: resolved.required || [],
+      type: 'object',
+    };
+  }
+
+  if (resolved.type === 'array' && resolved.items) {
+    return {
+      ...resolved,
+      items: prepareSchema(resolved.items),
+    };
+  }
+
+  return resolved;
+};
+
 const pickRequestBodySchema = () => {
   const content = apiInfo.value.requestBody?.content;
   if (!content) {
@@ -146,10 +243,12 @@ const pickRequestBodySchema = () => {
   }
 
   const entries = Object.entries(content);
-  const hit = entries.find(([, body]) => hasRenderableSchema(body?.schema));
+  const hit = entries.find(([, body]) =>
+    hasRenderableSchema((body as any)?.schema),
+  );
   if (hit) {
     const [contentType, body] = hit;
-    return { contentType, schema: body?.schema };
+    return { contentType, schema: (body as any)?.schema };
   }
 
   const first = entries[0];
@@ -157,7 +256,7 @@ const pickRequestBodySchema = () => {
     return null;
   }
   const [contentType, body] = first;
-  return { contentType, schema: body?.schema ?? null };
+  return { contentType, schema: (body as any)?.schema ?? null };
 };
 
 const requestBody = computed(() => {
@@ -166,29 +265,21 @@ const requestBody = computed(() => {
   if (!schema) return null;
 
   if (schema.oneOf) {
-    return schema.oneOf.map((item: Schema) => {
-      const resolved = resolveSchema(item);
+    return schema.oneOf
+      .map((item: Schema) => {
+        const resolved = prepareSchema(item);
+        if (!resolved) return null;
 
-      if (resolved.allOf) {
-        const allProperties: any = {};
-        resolved.allOf.forEach((one: Schema) => {
-          const resolvedOne = one.$ref ? resolveSchema(one) : one;
-          Object.assign(allProperties, resolvedOne.properties);
-        });
         return {
           ...resolved,
-          title: resolved.title || resolved.$ref?.split('/').pop() || '请求体',
-          properties: allProperties,
+          title: resolved.title || item.$ref?.split('/').pop() || '请求体',
         };
-      }
-
-      return {
-        ...resolved,
-        title: resolved.title || resolved.$ref?.split('/').pop() || '请求体',
-      };
-    });
+      })
+      .filter(Boolean);
   }
-  const resolved = resolveSchema(schema);
+
+  const resolved = prepareSchema(schema);
+  if (!resolved) return null;
 
   return {
     ...resolved,
@@ -196,7 +287,6 @@ const requestBody = computed(() => {
   };
 });
 
-// 获取 body 的实际 content type（用于显示）
 const requestBodyContentType = computed(() => {
   return pickRequestBodySchema()?.contentType || 'application/json';
 });
@@ -204,9 +294,17 @@ const requestBodyContentType = computed(() => {
 watch(
   requestBody,
   (newVal) => {
-    if (Array.isArray(newVal) && newVal.length > 0 && !requestBodyType.value) {
-      requestBodyType.value = newVal[0].title;
+    if (Array.isArray(newVal) && newVal.length > 0) {
+      const hasCurrent = newVal.some(
+        (item) => item.title === requestBodyType.value,
+      );
+      if (!hasCurrent) {
+        requestBodyType.value = newVal[0].title;
+      }
+      return;
     }
+
+    requestBodyType.value = '';
   },
   { immediate: true },
 );
@@ -225,78 +323,77 @@ const currentRequestBody = computed(() => {
   return requestBody.value;
 });
 
-const processSchema = (schema: Schema) => {
-  if (!schema) return {};
-
-  if (schema.properties) return schema.properties;
-
-  const processProperties = (props: any, parentRequired: string[] = []) => {
-    const result: Record<string, any> = {};
-    if (!props) return result;
-
-    Object.entries(props).forEach(([key, value]: [string, any]) => {
-      result[key] = {
-        ...value,
-        required: parentRequired.includes(key),
-      };
-
-      if (value.type === 'object' && value.properties) {
-        result[key].properties = processProperties(
-          value.properties,
-          value.required || [],
-        );
-      }
-
-      if (
-        value.type === 'array' &&
-        value.items?.type === 'object' &&
-        value.items.properties
-      ) {
-        result[key].items = {
-          ...value.items,
-          properties: processProperties(
-            value.items.properties,
-            value.items.required || [],
-          ),
-        };
-      }
-    });
-
-    return result;
-  };
-
-  return processProperties(schema.properties || {}, schema.required || []);
-};
-
-const responseSchema = computed(() => {
-  if (!currentResponse.value?.content) return {};
-
-  const content = currentResponse.value.content;
-  const schema =
-    content['application/json']?.schema ||
-    content['*/*']?.schema ||
-    currentResponse.value.schema;
-
-  if (!schema) return {};
-
-  const resolvedSchema = resolveSchema(schema);
-  return {
-    type: 'object',
-    properties: processSchema(resolvedSchema),
-  };
+const requestPreviewSchema = computed(() => {
+  return (
+    currentRequestBody.value ||
+    (Array.isArray(requestBody.value) ? null : requestBody.value)
+  );
 });
 
-// 复制功能
+const responseCodes = computed(() => {
+  return Object.keys(apiInfo.value?.responses || {});
+});
+
+watch(
+  responseCodes,
+  (codes) => {
+    const nextCode = codes.includes('200') ? '200' : codes[0] || '';
+    activeResponseCode.value = nextCode;
+    responseExampleOpen.value = Object.fromEntries(
+      codes.map((code) => [code, false]),
+    );
+  },
+  { immediate: true },
+);
+
+const pickContentSchema = (content?: Record<string, any>) => {
+  if (!content) return null;
+
+  return (
+    content['application/json']?.schema ||
+    content['*/*']?.schema ||
+    Object.values(content).find((item) => Boolean((item as any)?.schema))
+      ?.schema ||
+    null
+  );
+};
+
+const pickContentType = (content?: Record<string, any>) => {
+  if (!content) return '';
+  return Object.keys(content)[0] || '';
+};
+
+const responsePanels = computed(() => {
+  return responseCodes.value.map((code) => {
+    const response = apiInfo.value?.responses?.[code];
+    const schema = pickContentSchema(response?.content) || response?.schema;
+    return {
+      code,
+      contentType: pickContentType(response?.content),
+      response,
+      schema: prepareSchema(schema),
+    };
+  });
+});
+
+const hasAnyParameters = computed(() => {
+  return (
+    parametersInPath.value.length > 0 ||
+    parametersInQuery.value.length > 0 ||
+    Boolean(requestBody.value)
+  );
+});
+
 const { copy: copyToClipboard } = useClipboard();
 
-// 复制 baseUrl
 async function handleCopyBaseUrl() {
+  if (!baseUrl.value) return;
   await copyToClipboard(baseUrl.value);
   ElMessage.success('Base URL 已复制');
 }
 
-// 复制 path
 async function handleCopyPath() {
+  if (!apiInfo.value.path) return;
   await copyToClipboard(apiInfo.value.path);
   ElMessage.success('Path 已复制');
 }
@@ -310,10 +407,16 @@ const handleTest = () => {
   }
 };
 
-const tagName = computed(() => {
-  const routeName = route.name as string;
-  return routeName?.split('*')[1] || '';
-});
+const toggleResponseExample = (code: string) => {
+  responseExampleOpen.value[code] = !responseExampleOpen.value[code];
+};
+
+const getDebugPayload = (): DebugPayload => {
+  return {
+    info: apiInfo.value,
+    requestBodyType: requestBodyType.value,
+  };
+};
 
 onBeforeMount(() => {
   const routeName = route.name;
@@ -323,246 +426,768 @@ onBeforeMount(() => {
   }
 
   const [group = '', tag = '', operationId = ''] = routeName.split('*') ?? [];
-
   const data = apiStore.searchPathData(group, tag, operationId);
+
   if (data) {
     apiInfo.value = data;
-
-    if (data.responses) {
-      const codes = Object.keys(data.responses);
-      activeNames.value = codes[0] || '200';
-      selectedStatusCode.value = codes[0] || '200';
-    }
   }
+
   baseUrl.value = apiStore.openApi?.servers?.[0]?.url || '';
 });
 
 defineExpose({
+  apiInfo,
+  getDebugPayload,
   requestBodyType,
 });
 </script>
 
 <template>
-  <div class="relative flex h-full w-full gap-4 overflow-y-auto">
-    <div class="flex flex-1 flex-col">
-      <div class="flex flex-col p-5 pb-0">
-        <div class="text-primary text-sm font-semibold">
-          {{ tagName }}
-        </div>
-        <h1 class="mt-3 text-3xl font-bold">
-          {{ apiInfo.summary ?? '暂无描述' }}
-        </h1>
-        <div class="prose prose-gray dark:prose-invert mt-2 text-lg">
-          <div v-html="apiInfo.description || '暂无描述'"></div>
-        </div>
-      </div>
-
-      <div class="px-5">
-        <ElCard shadow="never" :body-style="{ padding: '10px' }" class="mt-6">
-          <div class="flex items-center justify-between">
-            <div class="font-mono">
-              <span
-                class="inline-flex items-center rounded-md px-1.5 py-1 font-bold"
-                :style="methodType[apiInfo.method.toUpperCase()]"
-              >
-                {{ apiInfo.method.toUpperCase() }}
-              </span>
-              <ElTooltip placement="top" :content="baseUrl" v-if="baseUrl">
-                <ElButton
-                  size="small"
-                  class="ml-2 !px-1"
-                  @click="handleCopyBaseUrl"
-                >
-                  <ApiLinkPrefix class="size-4" />
-                </ElButton>
-              </ElTooltip>
-              <span @click="handleCopyPath" class="ml-2 cursor-pointer">
-                <PathSegment
-                  :path="apiInfo.path"
-                  :param-style="{
-                    ...methodType[apiInfo.method.toUpperCase()],
-                    borderColor: methodType[apiInfo.method.toUpperCase()].color,
-                  }"
-                />
-              </span>
-            </div>
-            <ElButton
-              text
-              size="large"
-              :style="methodType[apiInfo.method.toUpperCase()]"
-              @click="handleTest"
-              :class="
-                showTest
-                  ? `${methodType[apiInfo.method.toUpperCase()].backgroundColor} !cursor-not-allowed opacity-50`
-                  : ''
-              "
+  <div class="document-detail" :class="{ 'document-detail--dark': isDark }">
+    <div class="document-detail__stack">
+      <section class="panel hero-panel">
+        <div class="hero-panel__top">
+          <div class="hero-panel__tags">
+            <ElTag
+              v-for="tag in displayTags"
+              :key="tag"
+              effect="plain"
+              round
+              class="hero-tag"
             >
-              {{ showTest ? '' : '调试' }}
-              <ApiTestRunning
-                class="ml-0.5 size-4 animate-spin"
-                v-if="showTest"
-              />
-              <ApiTestRun class="ml-0.5 size-4" v-else />
-            </ElButton>
+              {{ tag }}
+            </ElTag>
           </div>
-        </ElCard>
-      </div>
 
-      <!-- 权限要求 -->
-      <div v-if="hasSecurityReq && securityMetadata" class="p-5">
-        <ElCard shadow="never" header="访问权限">
-          <SecurityView :metadata="securityMetadata" />
-        </ElCard>
-      </div>
+          <ElButton
+            class="hero-panel__debug-button"
+            :style="methodStyle"
+            @click="handleTest"
+            :disabled="showTest"
+          >
+            {{ showTest ? '调试中' : '在线调试' }}
+            <ApiTestRunning v-if="showTest" class="ml-1 size-4 animate-spin" />
+            <ApiTestRun v-else class="ml-1 size-4" />
+          </ElButton>
+        </div>
 
-      <ElDescriptions
-        :column="1"
-        title="请求参数"
-        class="mt-4 p-5"
-        v-if="parametersInPath || parametersInQuery || requestBody"
-      >
-        <ElDescriptionsItem v-if="parametersInPath">
-          <ElCard bordered shadow="never" header="Path 参数">
+        <div class="hero-panel__body">
+          <h1 class="hero-panel__title">
+            {{ summaryText }}
+          </h1>
+          <div class="hero-panel__description" v-html="descriptionText"></div>
+
+          <div class="hero-panel__endpoint">
+            <span class="endpoint-method" :style="methodStyle">
+              {{ apiInfo.method?.toUpperCase() }}
+            </span>
+
+            <ElTooltip v-if="baseUrl" :content="baseUrl" placement="top">
+              <button class="endpoint-prefix" @click="handleCopyBaseUrl">
+                <ApiLinkPrefix class="size-4" />
+              </button>
+            </ElTooltip>
+
+            <button class="endpoint-path" @click="handleCopyPath">
+              <PathSegment
+                :path="apiInfo.path"
+                :param-style="{
+                  ...methodStyle,
+                  borderColor: methodStyle.color,
+                }"
+              />
+            </button>
+          </div>
+        </div>
+
+        <div class="hero-panel__security">
+          <SecurityView
+            :auth-methods="authMethods"
+            :metadata="securityMetadata"
+          />
+        </div>
+      </section>
+
+      <section v-if="hasAnyParameters" class="panel section-panel">
+        <div class="section-panel__header">
+          <div class="section-panel__title">请求参数</div>
+        </div>
+
+        <div class="section-panel__stack">
+          <article v-if="parametersInPath.length > 0" class="sub-panel">
+            <div class="sub-panel__header">
+              <div class="sub-panel__title-wrap">
+                <div class="sub-panel__title">Path 参数</div>
+                <span class="sub-panel__count">{{
+                  parametersInPath.length
+                }}</span>
+              </div>
+            </div>
+
             <ParameterView
               v-for="item in parametersInPath"
               :key="item.name"
               :parameter="item"
             />
-          </ElCard>
-        </ElDescriptionsItem>
-        <ElDescriptionsItem v-if="parametersInQuery">
-          <ElCard bordered shadow="never" header="Query 参数">
+          </article>
+
+          <article v-if="parametersInQuery.length > 0" class="sub-panel">
+            <div class="sub-panel__header">
+              <div class="sub-panel__title-wrap">
+                <div class="sub-panel__title">Query 参数</div>
+                <span class="sub-panel__count">{{
+                  parametersInQuery.length
+                }}</span>
+              </div>
+            </div>
+
             <ParameterView
               v-for="item in parametersInQuery"
               :key="item.name"
               :parameter="item"
             />
-          </ElCard>
-        </ElDescriptionsItem>
-        <ElDescriptionsItem v-if="requestBody">
-          <ElCard bordered shadow="never" header="Body 参数">
-            <template #header>
-              <div class="flex justify-between">
-                <div class="flex items-center gap-2">
-                  <span>Body 参数</span>
-                  <div
-                    v-if="requestBodyType"
-                    class="rounded-md bg-red-100/50 px-1.5 py-0.5 font-mono text-xs font-bold text-red-600 dark:bg-red-400/10 dark:text-red-300"
-                  >
-                    {{ requestBodyType }}
-                  </div>
-                </div>
-                <div
-                  class="px-2 py-0.5 font-mono text-xs text-gray-600 dark:text-gray-300"
+          </article>
+
+          <article v-if="requestBody" class="sub-panel">
+            <div class="sub-panel__header sub-panel__header--wrap">
+              <div class="sub-panel__title-wrap">
+                <div class="sub-panel__title">Body 参数</div>
+                <span class="sub-panel__count">{{
+                  requestBodyContentType
+                }}</span>
+              </div>
+
+              <div class="sub-panel__actions">
+                <ElRadioGroup
+                  v-if="Array.isArray(requestBody)"
+                  v-model="requestBodyType"
+                  size="small"
+                  class="body-type-switch"
                 >
-                  {{ requestBodyContentType }}
+                  <ElRadioButton
+                    v-for="item in requestBody"
+                    :key="item.title"
+                    :label="item.title"
+                    :value="item.title"
+                  >
+                    {{ item.title }}
+                  </ElRadioButton>
+                </ElRadioGroup>
+
+                <ElButton
+                  size="small"
+                  class="example-toggle-button"
+                  :class="{
+                    'example-toggle-button--active': requestExampleOpen,
+                  }"
+                  @click="requestExampleOpen = !requestExampleOpen"
+                >
+                  {{ requestExampleOpen ? '收起示例' : '请求示例' }}
+                </ElButton>
+              </div>
+            </div>
+
+            <div
+              class="schema-layout"
+              :class="{ 'schema-layout--open': requestExampleOpen }"
+            >
+              <div class="schema-layout__main">
+                <SchemaView
+                  v-if="requestPreviewSchema"
+                  :data="requestPreviewSchema"
+                />
+              </div>
+
+              <div
+                v-if="requestExampleOpen && requestPreviewSchema"
+                class="schema-layout__aside"
+              >
+                <div class="json-panel__header">请求 JSON</div>
+                <JsonViewer
+                  class="json-panel app-json-schema-viewer"
+                  :schema="requestPreviewSchema"
+                />
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel section-panel">
+        <div class="section-panel__header">
+          <div class="section-panel__title">响应参数</div>
+        </div>
+
+        <ElCollapse
+          v-if="responsePanels.length > 0"
+          v-model="activeResponseCode"
+          accordion
+          class="response-collapse"
+        >
+          <ElCollapseItem
+            v-for="panel in responsePanels"
+            :key="panel.code"
+            :name="panel.code"
+            class="response-collapse__item"
+          >
+            <template #title>
+              <div class="response-collapse__title">
+                <div class="response-collapse__status">
+                  <span class="response-code">{{ panel.code }}</span>
+                  <span class="response-desc">
+                    {{ panel.response?.description || '响应结果' }}
+                  </span>
                 </div>
+                <span v-if="panel.contentType" class="response-content-type">
+                  {{ panel.contentType }}
+                </span>
               </div>
             </template>
-            <div v-if="Array.isArray(requestBody)">
-              <ElRadioGroup v-model="requestBodyType" size="small">
-                <ElRadioButton
-                  v-for="value in requestBody"
-                  :key="value.title"
-                  :value="value.title"
-                  :label="value.title"
+
+            <div class="response-content">
+              <div class="response-content__toolbar">
+                <ElButton
+                  size="small"
+                  class="example-toggle-button"
+                  :class="{
+                    'example-toggle-button--active':
+                      responseExampleOpen[panel.code],
+                  }"
+                  @click.stop="toggleResponseExample(panel.code)"
                 >
-                  {{ value.title }}
-                </ElRadioButton>
-              </ElRadioGroup>
-              <SchemaView
-                v-if="currentRequestBody"
-                :key="requestBodyType"
-                :data="currentRequestBody"
-              />
-            </div>
-            <div v-else>
-              <SchemaView :data="requestBody" />
-            </div>
-          </ElCard>
-        </ElDescriptionsItem>
-      </ElDescriptions>
+                  {{
+                    responseExampleOpen[panel.code] ? '收起示例' : '响应示例'
+                  }}
+                </ElButton>
+              </div>
 
-      <ElDescriptions :column="1" title="响应结果" class="p-5">
-        <ElDescriptionsItem>
-          <ElCard shadow="never">
-            <ElCollapse
-              v-if="apiInfo"
-              v-model="activeNames"
-              accordion
-              style="border: none"
-            >
-              <ElCollapseItem
-                v-for="(_, code) in apiInfo.responses"
-                :key="code"
-                :name="code"
+              <div
+                class="schema-layout"
+                :class="{
+                  'schema-layout--open': responseExampleOpen[panel.code],
+                }"
               >
-                <template #title>
-                  {{ code }}
-                </template>
-                <SchemaView :data="responseSchema" />
-              </ElCollapseItem>
-            </ElCollapse>
-          </ElCard>
-        </ElDescriptionsItem>
-      </ElDescriptions>
-    </div>
+                <div class="schema-layout__main">
+                  <SchemaView v-if="panel.schema" :data="panel.schema" />
+                  <div v-else class="empty-hint">暂无可展示的响应结构</div>
+                </div>
 
-    <div
-      class="sticky top-0 max-h-[calc(100vh-40px)] flex-1 overflow-y-auto [&::-webkit-scrollbar]:hidden"
-      v-if="!showTest"
-    >
-      <div class="p-5">
-        <ElCard shadow="never">
-          <template #header>
-            <div class="font-bold">示例</div>
-          </template>
-
-          <div v-if="requestBody" class="mb-6">
-            <div class="mb-3 text-sm text-gray-700 dark:text-gray-300">
-              请求示例
+                <div
+                  v-if="responseExampleOpen[panel.code] && panel.schema"
+                  class="schema-layout__aside"
+                >
+                  <div class="json-panel__header">响应 JSON</div>
+                  <JsonViewer
+                    class="json-panel app-json-schema-viewer"
+                    :schema="panel.schema"
+                  />
+                </div>
+              </div>
             </div>
-            <JsonViewer
-              ref="jsonViewer"
-              :schema="currentRequestBody"
-              :default-expanded="defaultExpanded"
-            />
-          </div>
-
-          <div v-if="responseExample">
-            <div class="mb-3 text-sm text-gray-700 dark:text-gray-300">
-              响应示例
-            </div>
-            <JsonViewer
-              ref="jsonViewer"
-              :schema="responseData"
-              :default-expanded="defaultExpanded"
-            />
-          </div>
-
-          <div
-            v-if="!requestBody && !responseExample"
-            class="py-8 text-center text-gray-400"
-          >
-            暂无示例数据
-          </div>
-        </ElCard>
-      </div>
+          </ElCollapseItem>
+        </ElCollapse>
+        <div v-else class="empty-hint">暂无可展示的响应结构</div>
+      </section>
     </div>
   </div>
 </template>
 
-<style lang="scss" scoped>
-.full-space {
-  > :deep(.el-space__item) {
-    width: 100%;
+<style scoped lang="scss">
+.document-detail {
+  --doc-chip-radius: calc(var(--radius) * 999);
+  --doc-radius-xs: calc(var(--radius) * 1.5);
+  --doc-radius-sm: calc(var(--radius) * 2);
+  --doc-radius-md: calc(var(--radius) * 2.75);
+  --doc-radius-lg: calc(var(--radius) * 3.5);
+  --doc-panel-bg: #fff;
+  --doc-soft-bg: color-mix(
+    in srgb,
+    var(--el-bg-color) 86%,
+    var(--el-fill-color-light) 14%
+  );
+  --doc-soft-bg-alt: color-mix(
+    in srgb,
+    var(--el-bg-color) 82%,
+    var(--el-fill-color-light) 18%
+  );
+  --doc-soft-bg-strong: color-mix(
+    in srgb,
+    var(--el-bg-color) 78%,
+    var(--el-fill-color-light) 22%
+  );
+
+  height: 100%;
+  padding-right: 2px;
+  overflow-y: auto;
+
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: color-mix(
+      in srgb,
+      var(--el-text-color-primary) 10%,
+      transparent
+    );
+    border-radius: var(--doc-chip-radius);
   }
 }
 
-:deep(.el-collapse-item) {
-  .el-collapse-item__header,
-  .el-collapse-item__wrap {
-    border: none;
+.document-detail--dark {
+  --doc-panel-bg: #000;
+  --doc-soft-bg: #0a0a0a;
+  --doc-soft-bg-alt: #111;
+  --doc-soft-bg-strong: #151515;
+}
+
+.document-detail__stack {
+  display: grid;
+  gap: 14px;
+}
+
+.panel {
+  position: relative;
+  overflow: hidden;
+  background: var(--doc-panel-bg);
+  border: 1px solid
+    color-mix(in srgb, var(--el-text-color-primary) 8%, transparent);
+  border-radius: var(--doc-radius-lg);
+  box-shadow: 0 8px 18px
+    color-mix(in srgb, var(--el-text-color-primary) 4%, transparent);
+}
+
+.hero-panel,
+.section-panel {
+  padding: 16px;
+}
+
+.hero-panel__top,
+.hero-panel__endpoint,
+.section-panel__header,
+.sub-panel__header,
+.response-content__toolbar,
+.sub-panel__title-wrap {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.hero-panel__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.hero-tag {
+  color: var(--el-text-color-secondary);
+  background: color-mix(
+    in srgb,
+    var(--el-bg-color) 82%,
+    var(--el-fill-color-light) 18%
+  );
+  border: 1px solid var(--el-border-color-light);
+}
+
+.hero-panel__body {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.hero-panel__security {
+  padding: 10px 12px;
+  margin-top: 12px;
+  background: var(--doc-soft-bg-strong);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--doc-radius-sm);
+}
+
+.hero-panel__title {
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1.16;
+  color: var(--el-text-color-primary);
+}
+
+.hero-panel__description {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--el-text-color-regular);
+}
+
+.hero-panel__description :deep(p) {
+  margin: 0;
+}
+
+.hero-panel__debug-button {
+  flex: none;
+  min-width: 108px;
+  height: 36px;
+  padding: 0 14px;
+  font-weight: 700;
+  border: none;
+}
+
+.hero-panel__endpoint {
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-start;
+  padding: 10px;
+  margin-top: 2px;
+  background: var(--doc-soft-bg-alt);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--doc-radius-sm);
+}
+
+.endpoint-method {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 72px;
+  height: 32px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 800;
+  border-radius: var(--doc-chip-radius);
+}
+
+.endpoint-prefix,
+.endpoint-path {
+  display: inline-flex;
+  align-items: center;
+  background: transparent;
+  border: none;
+}
+
+.endpoint-prefix {
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  background: var(--el-fill-color-light);
+  border-radius: var(--doc-chip-radius);
+  transition: all 0.2s ease;
+}
+
+.endpoint-path {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  cursor: pointer;
+  background: color-mix(
+    in srgb,
+    var(--el-bg-color) 84%,
+    var(--el-fill-color-light) 16%
+  );
+  border-radius: var(--doc-radius-xs);
+  transition: all 0.2s ease;
+}
+
+.endpoint-prefix:hover,
+.endpoint-path:hover {
+  background: color-mix(
+    in srgb,
+    var(--el-bg-color) 72%,
+    var(--el-color-primary-light-9) 28%
+  );
+}
+
+.section-panel__header {
+  margin-bottom: 10px;
+}
+
+.section-panel__title,
+.sub-panel__title {
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.2;
+  color: var(--el-text-color-primary);
+}
+
+.section-panel__stack {
+  display: grid;
+  gap: 12px;
+}
+
+.sub-panel {
+  min-width: 0;
+  padding: 12px;
+  background: var(--doc-soft-bg);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--doc-radius-sm);
+}
+
+.sub-panel__header {
+  margin-bottom: 6px;
+}
+
+.sub-panel__header--wrap {
+  flex-wrap: wrap;
+}
+
+.sub-panel__count {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 10px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--doc-chip-radius);
+}
+
+.sub-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.body-type-switch {
+  :deep(.el-radio-button__inner) {
+    border-radius: var(--doc-chip-radius);
+  }
+}
+
+.example-toggle-button {
+  min-width: 88px;
+  height: 30px;
+  padding: 0 12px;
+  color: var(--el-color-primary);
+  background: color-mix(
+    in srgb,
+    var(--doc-panel-bg) 88%,
+    var(--el-color-primary-light-9) 12%
+  );
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 28%, transparent);
+  border-radius: var(--doc-chip-radius);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--el-color-primary) 8%, transparent);
+  transition: all 0.2s ease;
+}
+
+.example-toggle-button:hover {
+  color: var(--el-color-primary);
+  background: color-mix(
+    in srgb,
+    var(--doc-panel-bg) 74%,
+    var(--el-color-primary-light-9) 26%
+  );
+  border-color: color-mix(in srgb, var(--el-color-primary) 42%, transparent);
+}
+
+.example-toggle-button--active {
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary-light-7);
+}
+
+.schema-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  transition: grid-template-columns 0.24s ease;
+}
+
+.schema-layout--open {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.schema-layout__main {
+  min-width: 0;
+}
+
+.schema-layout__aside {
+  min-width: 0;
+  padding: 10px;
+  background: var(--doc-soft-bg-strong);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--doc-radius-xs);
+}
+
+.json-panel__header {
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--el-text-color-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.json-panel {
+  background: var(--doc-soft-bg-alt);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--doc-radius-xs);
+}
+
+.json-panel :deep(.theme-light),
+.json-panel :deep(.theme-dark) {
+  padding: 10px;
+  background: transparent;
+  border: none;
+}
+
+.json-panel :deep(.json-node) {
+  margin: 0;
+}
+
+.json-panel :deep(.node-header),
+.json-panel :deep(.node-primitive) {
+  min-height: 20px;
+  font-size: 12px;
+}
+
+.response-collapse {
+  --el-collapse-border-color: transparent;
+
+  :deep(.el-collapse-item__wrap) {
+    background: transparent;
+    border-bottom: none;
+  }
+
+  :deep(.el-collapse-item__header) {
+    height: auto;
+    padding: 0;
+    background: transparent;
+    border-bottom: none;
+  }
+
+  :deep(.el-collapse-item__content) {
+    padding-bottom: 0;
+  }
+
+  :deep(.el-collapse-item__arrow) {
+    margin: 0 0 0 8px;
+    font-size: 12px;
+  }
+}
+
+.response-collapse__item {
+  padding: 10px;
+  margin-bottom: 8px;
+  background: var(--doc-soft-bg);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--doc-radius-sm);
+}
+
+.response-collapse__item:last-child {
+  margin-bottom: 0;
+}
+
+.response-collapse__title {
+  display: flex;
+  flex: 1;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.response-collapse__status {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.response-code {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 42px;
+  height: 24px;
+  padding: 0 8px;
+  font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+  border: 1px solid var(--el-color-primary-light-7);
+  border-radius: var(--doc-chip-radius);
+}
+
+.response-desc {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+}
+
+.response-content-type {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+}
+
+.response-content {
+  margin-top: 8px;
+}
+
+.response-content__toolbar {
+  justify-content: flex-end;
+  margin-bottom: 2px;
+}
+
+.empty-hint {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 12px;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--doc-radius-xs);
+}
+
+@media (max-width: 768px) {
+  .hero-panel,
+  .section-panel {
+    padding: 14px;
+  }
+
+  .hero-panel__title {
+    font-size: 22px;
+  }
+
+  .hero-panel__top,
+  .sub-panel__header,
+  .response-content__toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .hero-panel__tags,
+  .sub-panel__actions,
+  .sub-panel__title-wrap {
+    justify-content: flex-start;
+  }
+
+  .schema-layout--open {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .response-collapse__title {
+    gap: 8px;
+    align-items: flex-start;
+  }
+
+  .response-collapse__status {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .response-content-type {
+    max-width: 100%;
   }
 }
 </style>

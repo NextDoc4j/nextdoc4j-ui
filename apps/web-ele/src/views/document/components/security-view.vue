@@ -1,14 +1,19 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 
-import { ElDivider, ElTag } from 'element-plus';
+import { ElButton } from 'element-plus';
 
 interface AuthInfo {
-  values: string[];
   mode: string;
-  type?: string;
-  orValues?: string[];
   orType?: string;
+  orValues?: string[];
+  type?: string;
+  values: string[];
+}
+
+interface AuthMethod {
+  detail?: string;
+  label: string;
 }
 
 interface SecurityMetadata {
@@ -19,23 +24,69 @@ interface SecurityMetadata {
 
 defineOptions({ name: 'SecurityView' });
 
-const props = defineProps<{ metadata: SecurityMetadata }>();
+const props = withDefaults(
+  defineProps<{
+    authMethods?: AuthMethod[];
+    metadata?: null | SecurityMetadata;
+  }>(),
+  {
+    authMethods: () => [],
+    metadata: null,
+  },
+);
+
+const expanded = ref(false);
 
 const isIgnored = computed(() => props.metadata?.ignore || false);
-const hasRequirements = computed(() => {
-  if (isIgnored.value) return false;
+
+const permissionGroups = computed(() => {
+  return (props.metadata?.permissions || []).filter(
+    (item) => Array.isArray(item.values) && item.values.length > 0,
+  );
+});
+
+const fallbackRoleGroups = computed(() => {
+  return (props.metadata?.permissions || []).filter(
+    (item) => Array.isArray(item.orValues) && item.orValues.length > 0,
+  );
+});
+
+const roleGroups = computed(() => {
+  return (props.metadata?.roles || []).filter(
+    (item) => Array.isArray(item.values) && item.values.length > 0,
+  );
+});
+
+const hasPermissionPayload = computed(() => {
   return (
-    (props.metadata?.permissions?.length ?? 0) > 0 ||
-    (props.metadata?.roles?.length ?? 0) > 0
+    permissionGroups.value.length > 0 ||
+    fallbackRoleGroups.value.length > 0 ||
+    roleGroups.value.length > 0
+  );
+});
+
+const permissionCount = computed(() => {
+  return permissionGroups.value.reduce((total, item) => {
+    return total + item.values.length;
+  }, 0);
+});
+
+const roleCount = computed(() => {
+  return (
+    roleGroups.value.reduce((total, item) => total + item.values.length, 0) +
+    fallbackRoleGroups.value.reduce(
+      (total, item) => total + (item.orValues?.length || 0),
+      0,
+    )
   );
 });
 
 const formatMode = (mode: string) => {
   const modeMap: Record<string, string> = {
-    AND: '&',
-    OR: '|',
-    and: '&',
-    or: '|',
+    AND: 'AND',
+    OR: 'OR',
+    and: 'AND',
+    or: 'OR',
   };
   return modeMap[mode] || mode;
 };
@@ -43,153 +94,275 @@ const formatMode = (mode: string) => {
 
 <template>
   <div class="security-view">
-    <!-- 无权限要求 -->
-    <div v-if="!hasRequirements" class="empty-state">
-      <ElTag type="success" effect="light" size="default">
-        {{ isIgnored ? '跳过权限校验' : '无权限要求' }}
-      </ElTag>
-    </div>
+    <section class="security-strip">
+      <div class="security-strip__label">认证方式</div>
+      <div class="security-strip__content">
+        <div
+          v-for="item in authMethods"
+          :key="`${item.label}-${item.detail}`"
+          class="auth-chip"
+        >
+          <span class="auth-chip__title">{{ item.label }}</span>
+          <span v-if="item.detail" class="auth-chip__detail">
+            {{ item.detail }}
+          </span>
+        </div>
+      </div>
+    </section>
 
-    <!-- 有权限要求 -->
-    <div v-else class="security-content">
-      <!-- 角色 -->
-      <div v-if="metadata.roles?.length" class="security-item">
-        <span class="label">角色校验：</span>
-        <div class="value-content">
-          <template v-for="(roleGroup, i) in metadata.roles" :key="i">
-            <template v-for="(value, j) in roleGroup.values" :key="`${i}-${j}`">
-              <ElTag type="primary" effect="light">{{ value }}</ElTag>
-              <span
-                v-if="j < roleGroup.values.length - 1"
-                class="connector-badge"
-              >
-                {{ formatMode(roleGroup.mode) }}
+    <section class="security-strip">
+      <div class="security-strip__label">权限码</div>
+      <div class="security-strip__content security-strip__content--column">
+        <div class="permission-summary">
+          <div class="permission-summary__chips">
+            <span v-if="isIgnored" class="summary-chip">跳过校验</span>
+            <template v-else-if="hasPermissionPayload">
+              <span v-if="permissionCount > 0" class="summary-chip">
+                权限 {{ permissionCount }}
+              </span>
+              <span v-if="roleCount > 0" class="summary-chip">
+                角色 {{ roleCount }}
               </span>
             </template>
-            <span v-if="i < metadata.roles.length - 1" class="connector-badge">
-              |
-            </span>
-          </template>
+            <span v-else class="summary-chip">无</span>
+          </div>
+
+          <ElButton
+            v-if="!isIgnored && hasPermissionPayload"
+            text
+            size="small"
+            @click="expanded = !expanded"
+          >
+            {{ expanded ? '收起规则' : '展开规则' }}
+          </ElButton>
         </div>
-      </div>
 
-      <ElDivider
-        v-if="metadata.roles?.length && metadata.permissions?.length"
-      />
-
-      <!-- 权限字符 -->
-      <div v-if="metadata.permissions?.length" class="security-item">
-        <span class="label">权限校验：</span>
-        <div class="value-content">
-          <template v-for="(permGroup, i) in metadata.permissions" :key="i">
-            <template v-if="permGroup.values.length > 0">
+        <div
+          v-if="expanded && !isIgnored && hasPermissionPayload"
+          class="permission-detail"
+        >
+          <div
+            v-for="(group, index) in permissionGroups"
+            :key="`permission-${index}`"
+            class="permission-row"
+          >
+            <div class="permission-row__title">权限</div>
+            <div class="permission-row__values">
               <template
-                v-for="(value, j) in permGroup.values"
-                :key="`perm-${i}-${j}`"
+                v-for="(value, valueIndex) in group.values"
+                :key="value"
               >
-                <ElTag type="success" effect="light">{{ value }}</ElTag>
+                <span class="value-chip value-chip--permission">{{
+                  value
+                }}</span>
                 <span
-                  v-if="j < permGroup.values.length - 1"
-                  class="connector-badge"
+                  v-if="valueIndex < group.values.length - 1"
+                  class="connector-chip"
                 >
-                  {{ formatMode(permGroup.mode) }}
+                  {{ formatMode(group.mode) }}
                 </span>
               </template>
-            </template>
-            <span
-              v-if="i < metadata.permissions.length - 1"
-              class="connector-badge"
-            >
-              |
-            </span>
-          </template>
-        </div>
-      </div>
+            </div>
+          </div>
 
-      <!-- 角色校验 -->
-      <div
-        v-if="metadata.permissions?.some((p) => p.orValues?.length)"
-        class="security-item"
-      >
-        <span class="label">角色校验：</span>
-        <div class="value-content">
-          <template v-for="(permGroup, i) in metadata.permissions" :key="i">
-            <template v-if="permGroup.orValues?.length">
+          <div
+            v-for="(group, index) in fallbackRoleGroups"
+            :key="`fallback-${index}`"
+            class="permission-row"
+          >
+            <div class="permission-row__title">角色兜底</div>
+            <div class="permission-row__values">
               <template
-                v-for="(orValue, j) in permGroup.orValues"
-                :key="`or-${i}-${j}`"
+                v-for="(value, valueIndex) in group.orValues"
+                :key="`fallback-role-${value}`"
               >
-                <ElTag type="primary" effect="light">{{ orValue }}</ElTag>
+                <span class="value-chip value-chip--role">{{ value }}</span>
                 <span
-                  v-if="j < permGroup.orValues.length - 1"
-                  class="connector-badge"
+                  v-if="valueIndex < (group.orValues?.length || 0) - 1"
+                  class="connector-chip"
                 >
-                  |
+                  OR
                 </span>
               </template>
-            </template>
-          </template>
+            </div>
+          </div>
+
+          <div
+            v-for="(group, index) in roleGroups"
+            :key="`role-${index}`"
+            class="permission-row"
+          >
+            <div class="permission-row__title">角色</div>
+            <div class="permission-row__values">
+              <template
+                v-for="(value, valueIndex) in group.values"
+                :key="value"
+              >
+                <span class="value-chip value-chip--role">{{ value }}</span>
+                <span
+                  v-if="valueIndex < group.values.length - 1"
+                  class="connector-chip"
+                >
+                  {{ formatMode(group.mode) }}
+                </span>
+              </template>
+            </div>
+          </div>
         </div>
       </div>
-    </div>
+    </section>
   </div>
 </template>
 
 <style scoped>
 .security-view {
-  width: 100%;
+  --doc-chip-radius: calc(var(--radius) * 999);
+  --doc-radius-sm: calc(var(--radius) * 2);
+
+  display: grid;
+  gap: 8px;
 }
 
-.empty-state {
+.security-strip {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.security-strip__label {
+  padding-top: 3px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--el-text-color-secondary);
+}
+
+.security-strip__content {
   display: flex;
-  justify-content: center;
-  padding: 20px 0;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
 }
 
-.security-content {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+.security-strip__content--column {
+  display: grid;
+  gap: 8px;
 }
 
-.security-item {
+.auth-chip,
+.summary-chip,
+.value-chip,
+.connector-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  font-size: 11px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--doc-chip-radius);
+}
+
+.auth-chip {
+  flex-wrap: wrap;
+  gap: 6px;
+  background: var(--el-fill-color-light);
+}
+
+.auth-chip__title {
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+}
+
+.auth-chip__detail {
+  color: var(--el-text-color-secondary);
+}
+
+.permission-summary {
   display: flex;
   gap: 8px;
   align-items: center;
-  padding: 8px 0;
+  justify-content: space-between;
 }
 
-.label {
-  min-width: 70px;
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--el-text-color-regular);
-  white-space: nowrap;
-}
-
-.value-content {
+.permission-summary__chips {
   display: flex;
-  flex: 1;
   flex-wrap: wrap;
-  gap: 2px;
-  align-items: center;
+  gap: 6px;
 }
 
-.connector-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 20px;
-  padding: 0 4px;
-  font-size: 12px;
-  font-weight: 500;
+.summary-chip {
   color: var(--el-text-color-secondary);
-  background-color: var(--el-fill-color-light);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 4px;
+  background: var(--el-fill-color-light);
 }
 
-:deep(.el-divider--horizontal) {
-  margin: 4px 0;
+.permission-detail {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  background: color-mix(
+    in srgb,
+    var(--el-bg-color) 76%,
+    var(--el-fill-color-light) 24%
+  );
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--doc-radius-sm);
+}
+
+.permission-row {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.permission-row__title {
+  padding-top: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--el-text-color-secondary);
+}
+
+.permission-row__values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+}
+
+.value-chip--permission {
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary-light-7);
+}
+
+.value-chip--role {
+  color: var(--el-color-warning-dark-2);
+  background: var(--el-color-warning-light-9);
+  border-color: var(--el-color-warning-light-7);
+}
+
+.connector-chip {
+  justify-content: center;
+  min-width: 34px;
+  font-weight: 700;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-light);
+}
+
+@media (max-width: 768px) {
+  .security-strip,
+  .permission-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  .security-strip__label,
+  .permission-row__title {
+    padding-top: 0;
+  }
+
+  .permission-summary {
+    align-items: flex-start;
+  }
 }
 </style>
