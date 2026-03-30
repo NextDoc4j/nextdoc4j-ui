@@ -175,6 +175,10 @@ const debugReady = computed(() =>
     padding: 4px;
   }
 
+  :deep(.el-tabs__nav-wrap::after) {
+    display: none;
+  }
+
   :deep(.el-tabs__nav) {
     gap: 4px;
   }

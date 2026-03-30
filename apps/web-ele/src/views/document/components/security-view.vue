@@ -45,12 +45,6 @@ const permissionGroups = computed(() => {
   );
 });
 
-const fallbackRoleGroups = computed(() => {
-  return (props.metadata?.permissions || []).filter(
-    (item) => Array.isArray(item.orValues) && item.orValues.length > 0,
-  );
-});
-
 const roleGroups = computed(() => {
   return (props.metadata?.roles || []).filter(
     (item) => Array.isArray(item.values) && item.values.length > 0,
@@ -58,11 +52,7 @@ const roleGroups = computed(() => {
 });
 
 const hasPermissionPayload = computed(() => {
-  return (
-    permissionGroups.value.length > 0 ||
-    fallbackRoleGroups.value.length > 0 ||
-    roleGroups.value.length > 0
-  );
+  return permissionGroups.value.length > 0 || roleGroups.value.length > 0;
 });
 
 const permissionCount = computed(() => {
@@ -72,12 +62,9 @@ const permissionCount = computed(() => {
 });
 
 const roleCount = computed(() => {
-  return (
-    roleGroups.value.reduce((total, item) => total + item.values.length, 0) +
-    fallbackRoleGroups.value.reduce(
-      (total, item) => total + (item.orValues?.length || 0),
-      0,
-    )
+  return roleGroups.value.reduce(
+    (total, item) => total + item.values.length,
+    0,
   );
 });
 
@@ -166,28 +153,6 @@ const formatMode = (mode: string) => {
           </div>
 
           <div
-            v-for="(group, index) in fallbackRoleGroups"
-            :key="`fallback-${index}`"
-            class="permission-row"
-          >
-            <div class="permission-row__title">角色兜底</div>
-            <div class="permission-row__values">
-              <template
-                v-for="(value, valueIndex) in group.orValues"
-                :key="`fallback-role-${value}`"
-              >
-                <span class="value-chip value-chip--role">{{ value }}</span>
-                <span
-                  v-if="valueIndex < (group.orValues?.length || 0) - 1"
-                  class="connector-chip"
-                >
-                  OR
-                </span>
-              </template>
-            </div>
-          </div>
-
-          <div
             v-for="(group, index) in roleGroups"
             :key="`role-${index}`"
             class="permission-row"
@@ -233,7 +198,7 @@ const formatMode = (mode: string) => {
 .security-strip__label {
   padding-top: 3px;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 800;
   color: var(--el-text-color-secondary);
 }
 
@@ -269,11 +234,12 @@ const formatMode = (mode: string) => {
 }
 
 .auth-chip__title {
-  font-weight: 700;
+  font-weight: 800;
   color: var(--el-text-color-primary);
 }
 
 .auth-chip__detail {
+  font-weight: 700;
   color: var(--el-text-color-secondary);
 }
 
@@ -291,6 +257,7 @@ const formatMode = (mode: string) => {
 }
 
 .summary-chip {
+  font-weight: 800;
   color: var(--el-text-color-secondary);
   background: var(--el-fill-color-light);
 }
@@ -330,12 +297,14 @@ const formatMode = (mode: string) => {
 }
 
 .value-chip--permission {
+  font-weight: 800;
   color: var(--el-color-primary);
   background: var(--el-color-primary-light-9);
   border-color: var(--el-color-primary-light-7);
 }
 
 .value-chip--role {
+  font-weight: 800;
   color: var(--el-color-warning-dark-2);
   background: var(--el-color-warning-light-9);
   border-color: var(--el-color-warning-light-7);

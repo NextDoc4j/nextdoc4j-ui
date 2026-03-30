@@ -582,7 +582,7 @@ defineExpose({
                   }"
                   @click="requestExampleOpen = !requestExampleOpen"
                 >
-                  {{ requestExampleOpen ? '收起示例' : '请求示例' }}
+                  {{ requestExampleOpen ? '收起示例' : 'JSON 示例' }}
                 </ElButton>
               </div>
             </div>
@@ -602,7 +602,6 @@ defineExpose({
                 v-if="requestExampleOpen && requestPreviewSchema"
                 class="schema-layout__aside"
               >
-                <div class="json-panel__header">请求 JSON</div>
                 <JsonViewer
                   class="json-panel app-json-schema-viewer"
                   :schema="requestPreviewSchema"
@@ -656,7 +655,7 @@ defineExpose({
                   @click.stop="toggleResponseExample(panel.code)"
                 >
                   {{
-                    responseExampleOpen[panel.code] ? '收起示例' : '响应示例'
+                    responseExampleOpen[panel.code] ? '收起示例' : 'JSON 示例'
                   }}
                 </ElButton>
               </div>
@@ -676,7 +675,6 @@ defineExpose({
                   v-if="responseExampleOpen[panel.code] && panel.schema"
                   class="schema-layout__aside"
                 >
-                  <div class="json-panel__header">响应 JSON</div>
                   <JsonViewer
                     class="json-panel app-json-schema-viewer"
                     :schema="panel.schema"
@@ -1005,19 +1003,10 @@ defineExpose({
 
 .schema-layout__aside {
   min-width: 0;
-  padding: 10px;
-  background: var(--doc-soft-bg-strong);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: var(--doc-radius-xs);
-}
-
-.json-panel__header {
-  margin-bottom: 8px;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--el-text-color-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
 }
 
 .json-panel {
