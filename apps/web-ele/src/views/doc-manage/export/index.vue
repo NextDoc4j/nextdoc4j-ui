@@ -1,10 +1,19 @@
 <script setup lang="ts">
+import type { Component } from 'vue';
 import type { ServiceItem } from '#/store/aggregation';
 import type { OpenAPISpec, SwaggerConfig } from '#/typings/openApi';
 
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
 
-import { SvgDoubleArrowDownIcon, SvgDoubleArrowUpIcon } from '@vben/icons';
+import {
+  SvgDocExportHtmlIcon,
+  SvgDocExportMarkdownIcon,
+  SvgDocExportOpenapiIcon,
+  SvgDocExportPdfIcon,
+  SvgDocExportWordIcon,
+  SvgDoubleArrowDownIcon,
+  SvgDoubleArrowUpIcon,
+} from '@vben/icons';
 import { preferences } from '@vben/preferences';
 
 import {
@@ -25,9 +34,7 @@ import {
   ElCheckbox,
   ElCheckboxGroup,
   ElCol,
-  ElDropdown,
-  ElDropdownItem,
-  ElDropdownMenu,
+  ElDialog,
   ElEmpty,
   ElForm,
   ElFormItem,
@@ -39,7 +46,6 @@ import {
   ElRow,
   ElSelect,
   ElSkeleton,
-  ElSpace,
 } from 'element-plus';
 import MarkdownIt from 'markdown-it';
 import { storeToRefs } from 'pinia';
@@ -104,6 +110,13 @@ interface ServiceExportDocItem {
   service: ServiceItem;
 }
 
+interface ExportFormatOption {
+  description: string;
+  format: ExportFormat;
+  icon: Component;
+  title: string;
+}
+
 const HTTP_METHODS = new Set(['delete', 'get', 'patch', 'post', 'put']);
 const PREVIEW_AUTO_DELAY = 120;
 const PREVIEW_AUTO_DELAY_LARGE = 260;
@@ -122,6 +135,8 @@ const { isAggregation, services } = storeToRefs(aggregationStore);
 const loading = ref(false);
 const previewLoading = ref(false);
 const themeSwitching = ref(false);
+const exportDialogVisible = ref(false);
+const exportSubmitting = ref(false);
 
 const scopeMode = ref<ScopeMode>('all');
 const selectedOperations = shallowRef<string[]>([]);
@@ -311,6 +326,12 @@ const previewNoticeText = computed(() => {
   }
   return `当前已选择 ${previewSelectionState.value.total} 个接口，为保证页面流畅，仅预览前 ${PREVIEW_MAX_OPERATION_COUNT} 个接口，导出仍会包含全部已选接口。`;
 });
+const activeExportOption = computed<ExportFormatOption>(() => {
+  return (
+    exportFormatOptions.find((item) => item.format === exportFormat.value) ||
+    exportFormatOptions[0]!
+  );
+});
 
 const summaryText = computed(() => {
   const base = currentOpenApi.value;
@@ -340,6 +361,38 @@ const exportFormatTextMap: Record<ExportFormat, string> = {
   html: 'HTML',
   'openapi.json': 'OpenAPI JSON',
 };
+const exportFormatOptions: ExportFormatOption[] = [
+  {
+    format: 'docx',
+    title: 'Word 文档',
+    description: '适合发送、归档和继续编辑，保留清晰的章节结构。',
+    icon: SvgDocExportWordIcon,
+  },
+  {
+    format: 'pdf',
+    title: 'PDF',
+    description: '适合打印和正式交付，导出后可直接另存为 PDF。',
+    icon: SvgDocExportPdfIcon,
+  },
+  {
+    format: 'markdown',
+    title: 'Markdown',
+    description: '适合纳入代码仓库、继续改写或二次加工。',
+    icon: SvgDocExportMarkdownIcon,
+  },
+  {
+    format: 'html',
+    title: 'HTML',
+    description: '适合浏览器查看与网页分发，结构完整、打开直接可读。',
+    icon: SvgDocExportHtmlIcon,
+  },
+  {
+    format: 'openapi.json',
+    title: 'OpenAPI JSON',
+    description: '适合导入其他工具链，继续测试、生成 SDK 或同步文档。',
+    icon: SvgDocExportOpenapiIcon,
+  },
+];
 
 function parseGroupCode(url: string) {
   const segments = url.split('/');
@@ -2205,7 +2258,7 @@ async function exportDocument() {
   const subset = buildSubsetOpenApi(selectedOps);
   if (!subset) {
     ElMessage.warning('请先选择导出范围');
-    return;
+    return false;
   }
 
   const title = subset.info?.title || 'api-doc';
@@ -2227,11 +2280,11 @@ async function exportDocument() {
           'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
         const docxBlob = await DocxPacker.toBlob(docxDocument);
         downloadFile(docxBlob, `${title}.docx`, mimeType);
-        break;
+        return true;
       }
       case 'html': {
         downloadFile(htmlContent, `${title}.html`, 'text/html;charset=utf-8');
-        break;
+        return true;
       }
       case 'markdown': {
         downloadFile(
@@ -2239,7 +2292,7 @@ async function exportDocument() {
           `${title}.md`,
           'text/markdown;charset=utf-8',
         );
-        break;
+        return true;
       }
       case 'openapi.json': {
         downloadFile(
@@ -2247,13 +2300,13 @@ async function exportDocument() {
           `${title}.openapi.json`,
           'application/json;charset=utf-8',
         );
-        break;
+        return true;
       }
       case 'pdf': {
         const printWindow = window.open('', '_blank');
         if (!printWindow) {
           ElMessage.warning('浏览器拦截了弹窗，请允许后重试');
-          return;
+          return false;
         }
         printWindow.document.open();
         printWindow.document.write(htmlContent);
@@ -2261,18 +2314,36 @@ async function exportDocument() {
         printWindow.focus();
         printWindow.print();
         ElMessage.success('已打开打印窗口，请选择“另存为 PDF”');
-        break;
+        return true;
       }
     }
   } catch (error: any) {
     console.error(error);
     ElMessage.error(error?.message || '导出失败，请稍后重试');
+    return false;
   }
+
+  return false;
 }
 
-async function handleExportCommand(command: ExportFormat) {
-  exportFormat.value = command;
-  await exportDocument();
+function openExportDialog() {
+  exportDialogVisible.value = true;
+}
+
+async function confirmExportDocument() {
+  if (exportSubmitting.value) {
+    return;
+  }
+
+  exportSubmitting.value = true;
+  try {
+    const success = await exportDocument();
+    if (success) {
+      exportDialogVisible.value = false;
+    }
+  } finally {
+    exportSubmitting.value = false;
+  }
 }
 
 function scheduleAutoPreview() {
@@ -2837,28 +2908,14 @@ onBeforeUnmount(() => {
             <template #header>
               <div class="flex flex-wrap items-center justify-between gap-3">
                 <span class="font-medium">Markdown 实时预览</span>
-                <ElSpace wrap>
-                  <ElDropdown trigger="click" @command="handleExportCommand">
-                    <ElButton type="primary">
-                      导出：{{ exportFormatTextMap[exportFormat] }}
-                    </ElButton>
-                    <template #dropdown>
-                      <ElDropdownMenu>
-                        <ElDropdownItem command="docx">
-                          Word(.docx)
-                        </ElDropdownItem>
-                        <ElDropdownItem command="pdf">PDF</ElDropdownItem>
-                        <ElDropdownItem command="markdown">
-                          Markdown
-                        </ElDropdownItem>
-                        <ElDropdownItem command="html">HTML</ElDropdownItem>
-                        <ElDropdownItem command="openapi.json">
-                          OpenAPI JSON
-                        </ElDropdownItem>
-                      </ElDropdownMenu>
-                    </template>
-                  </ElDropdown>
-                </ElSpace>
+                <div class="flex items-center gap-3">
+                  <span class="text-xs text-[var(--el-text-color-secondary)]">
+                    当前格式：{{ exportFormatTextMap[exportFormat] }}
+                  </span>
+                  <ElButton type="primary" @click="openExportDialog">
+                    导出文档
+                  </ElButton>
+                </div>
               </div>
             </template>
 
@@ -2886,6 +2943,65 @@ onBeforeUnmount(() => {
         </div>
       </ElCol>
     </ElRow>
+
+    <ElDialog
+      v-model="exportDialogVisible"
+      title="选择导出格式"
+      width="780px"
+      class="doc-export-dialog"
+      destroy-on-close
+      align-center
+    >
+      <div class="export-dialog-panel">
+        <div class="export-dialog-intro">
+          <div class="export-dialog-intro__title">
+            选择一个适合当前场景的导出格式
+          </div>
+          <div class="export-dialog-intro__desc">
+            左侧导出范围与附加内容会一并生效。当前已选格式为
+            <strong>{{ activeExportOption.title }}</strong>
+            ，确认后立即开始导出。
+          </div>
+        </div>
+
+        <div class="export-format-grid">
+          <button
+            v-for="option in exportFormatOptions"
+            :key="option.format"
+            type="button"
+            class="export-format-card"
+            :class="{
+              'is-active': exportFormat === option.format,
+            }"
+            @click="exportFormat = option.format"
+          >
+            <span class="export-format-card__badge">
+              {{ exportFormat === option.format ? '已选' : '格式' }}
+            </span>
+            <span class="export-format-card__logo">
+              <component :is="option.icon" class="export-format-card__icon" />
+            </span>
+            <span class="export-format-card__title">{{ option.title }}</span>
+            <span class="export-format-card__desc">
+              {{ option.description }}
+            </span>
+          </button>
+        </div>
+      </div>
+
+      <template #footer>
+        <div class="export-dialog-footer">
+          <ElButton @click="exportDialogVisible = false">取消</ElButton>
+          <ElButton
+            type="primary"
+            :loading="exportSubmitting"
+            @click="confirmExportDocument"
+          >
+            导出 {{ activeExportOption.title }}
+          </ElButton>
+        </div>
+      </template>
+    </ElDialog>
   </div>
 </template>
 
@@ -2966,6 +3082,189 @@ onBeforeUnmount(() => {
 
 .doc-all-selected-tip {
   margin-top: 8px;
+}
+
+:deep(.doc-export-dialog) {
+  max-width: calc(100vw - 24px);
+}
+
+:deep(.doc-export-dialog .el-dialog) {
+  overflow: hidden;
+  background: linear-gradient(
+    180deg,
+    rgb(var(--el-color-primary-rgb) / 12%) 0%,
+    var(--el-bg-color) 22%,
+    var(--el-bg-color) 100%
+  );
+  border: 1px solid var(--el-border-color);
+  border-radius: 28px;
+  box-shadow: 0 28px 80px rgb(15 23 42 / 18%);
+}
+
+:deep(.doc-export-dialog .el-dialog__header) {
+  margin-right: 0;
+  padding: 24px 24px 0;
+}
+
+:deep(.doc-export-dialog .el-dialog__title) {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+  letter-spacing: 0.01em;
+}
+
+:deep(.doc-export-dialog .el-dialog__body) {
+  padding: 20px 24px 8px;
+}
+
+:deep(.doc-export-dialog .el-dialog__footer) {
+  padding: 0 24px 24px;
+}
+
+.export-dialog-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.export-dialog-intro {
+  padding: 18px 20px;
+  background: linear-gradient(
+    135deg,
+    rgb(var(--el-color-primary-rgb) / 14%) 0%,
+    rgb(var(--el-color-primary-rgb) / 4%) 52%,
+    var(--el-fill-color-light) 100%
+  );
+  border: 1px solid rgb(var(--el-color-primary-rgb) / 18%);
+  border-radius: 22px;
+}
+
+.export-dialog-intro__title {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--el-text-color-primary);
+}
+
+.export-dialog-intro__desc {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--el-text-color-regular);
+}
+
+.export-format-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.export-format-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-height: 176px;
+  padding: 14px;
+  text-align: left;
+  cursor: pointer;
+  user-select: none;
+  background: linear-gradient(
+    180deg,
+    var(--el-bg-color) 0%,
+    var(--el-fill-color-lighter) 100%
+  );
+  border: 1px solid var(--el-border-color);
+  border-radius: 22px;
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease;
+}
+
+.export-format-card:hover,
+.export-format-card:focus-visible {
+  transform: translateY(-2px);
+  border-color: rgb(var(--el-color-primary-rgb) / 42%);
+  box-shadow: 0 18px 36px rgb(15 23 42 / 10%);
+  outline: none;
+}
+
+.export-format-card.is-active {
+  background: linear-gradient(
+    180deg,
+    rgb(var(--el-color-primary-rgb) / 12%) 0%,
+    var(--el-bg-color) 100%
+  );
+  border-color: rgb(var(--el-color-primary-rgb) / 46%);
+  box-shadow:
+    0 0 0 1px rgb(var(--el-color-primary-rgb) / 18%),
+    0 20px 44px rgb(var(--el-color-primary-rgb) / 14%);
+}
+
+.export-format-card__badge {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  padding: 3px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 999px;
+}
+
+.export-format-card.is-active .export-format-card__badge {
+  color: var(--el-color-primary);
+  background: rgb(var(--el-color-primary-rgb) / 12%);
+  border-color: rgb(var(--el-color-primary-rgb) / 20%);
+}
+
+.export-format-card__logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 72px;
+  margin-bottom: 14px;
+  background: linear-gradient(
+    180deg,
+    rgb(var(--el-color-primary-rgb) / 12%) 0%,
+    rgb(var(--el-color-primary-rgb) / 4%) 100%
+  );
+  border: 1px solid rgb(var(--el-color-primary-rgb) / 14%);
+  border-radius: 18px;
+}
+
+.export-format-card__icon {
+  width: 52px;
+  height: 52px;
+}
+
+.export-format-card__title {
+  display: block;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--el-text-color-primary);
+}
+
+.export-format-card__desc {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--el-text-color-secondary);
+}
+
+.export-dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
 }
 
 .scope-tree-panel {
@@ -3132,6 +3431,44 @@ onBeforeUnmount(() => {
     transition-duration: 0s !important;
     animation-duration: 0s !important;
     animation-delay: 0s !important;
+  }
+}
+
+@media (max-width: 920px) {
+  .export-format-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  :deep(.doc-export-dialog .el-dialog__header) {
+    padding: 20px 20px 0;
+  }
+
+  :deep(.doc-export-dialog .el-dialog__body) {
+    padding: 16px 20px 8px;
+  }
+
+  :deep(.doc-export-dialog .el-dialog__footer) {
+    padding: 0 20px 20px;
+  }
+
+  .export-dialog-intro__title {
+    font-size: 18px;
+  }
+
+  .export-format-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .export-format-card {
+    min-height: 168px;
+  }
+}
+
+@media (max-width: 520px) {
+  .export-format-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>
