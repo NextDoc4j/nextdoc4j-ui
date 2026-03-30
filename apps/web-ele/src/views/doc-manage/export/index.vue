@@ -2,7 +2,7 @@
 import type { ServiceItem } from '#/store/aggregation';
 import type { OpenAPISpec, SwaggerConfig } from '#/typings/openApi';
 
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
 
 import { SvgDoubleArrowDownIcon, SvgDoubleArrowUpIcon } from '@vben/icons';
 import { preferences } from '@vben/preferences';
@@ -68,6 +68,7 @@ interface OperationItem {
   operationId?: string;
   path: string;
   raw: any;
+  searchText: string;
   serviceName?: string;
   serviceUrl?: string;
   summary?: string;
@@ -91,6 +92,7 @@ interface AggregationServiceTreeNode {
   allOperations: OperationItem[];
   groups: AggregationGroupTreeNode[];
   hasGroupLevel: boolean;
+  key: string;
   operations: OperationItem[];
   serviceName: string;
   serviceUrl: string;
@@ -103,6 +105,9 @@ interface ServiceExportDocItem {
 }
 
 const HTTP_METHODS = new Set(['delete', 'get', 'patch', 'post', 'put']);
+const PREVIEW_AUTO_DELAY = 120;
+const PREVIEW_AUTO_DELAY_LARGE = 260;
+const PREVIEW_MAX_OPERATION_COUNT = 200;
 const md = new MarkdownIt({
   html: true,
   linkify: true,
@@ -119,7 +124,7 @@ const previewLoading = ref(false);
 const themeSwitching = ref(false);
 
 const scopeMode = ref<ScopeMode>('all');
-const selectedOperations = ref<string[]>([]);
+const selectedOperations = shallowRef<string[]>([]);
 const operationKeyword = ref('');
 const operationMethod = ref('all');
 const expandedGroups = ref<Record<string, boolean>>({});
@@ -135,31 +140,25 @@ const includeMarkdownDocs = computed(() =>
 const exportFormat = ref<ExportFormat>('docx');
 const previewHtml = ref('');
 
-const currentOpenApi = ref<null | OpenAPISpec>(null);
-const currentSwaggerConfig = ref<null | SwaggerConfig>(null);
-const groupDocs = ref<GroupDocItem[]>([]);
-const operations = ref<OperationItem[]>([]);
-const aggregationGatewayOpenApi = ref<null | OpenAPISpec>(null);
-const aggregationServiceDocs = ref<ServiceExportDocItem[]>([]);
+const currentOpenApi = shallowRef<null | OpenAPISpec>(null);
+const currentSwaggerConfig = shallowRef<null | SwaggerConfig>(null);
+const groupDocs = shallowRef<GroupDocItem[]>([]);
+const operations = shallowRef<OperationItem[]>([]);
+const aggregationGatewayOpenApi = shallowRef<null | OpenAPISpec>(null);
+const aggregationServiceDocs = shallowRef<ServiceExportDocItem[]>([]);
 let previewAutoTimer: null | number = null;
+let previewGenerationToken = 0;
 let themeSwitchTimer: null | number = null;
 
 const filteredOperations = computed(() => {
   const keyword = operationKeyword.value.trim().toLowerCase();
+  const method = operationMethod.value;
+  if (!keyword && method === 'all') {
+    return operations.value;
+  }
   return operations.value.filter((item) => {
-    const passMethod =
-      operationMethod.value === 'all' || item.method === operationMethod.value;
-    const passKeyword =
-      !keyword ||
-      (item.serviceName || '').toLowerCase().includes(keyword) ||
-      getGroupTitle(item.groupCode, item.serviceUrl)
-        .toLowerCase()
-        .includes(keyword) ||
-      item.path.toLowerCase().includes(keyword) ||
-      (item.summary || '').toLowerCase().includes(keyword) ||
-      (item.description || '').toLowerCase().includes(keyword) ||
-      (item.operationId || '').toLowerCase().includes(keyword) ||
-      (item.tags || []).join(' ').toLowerCase().includes(keyword);
+    const passMethod = method === 'all' || item.method === method;
+    const passKeyword = !keyword || item.searchText.includes(keyword);
     return passMethod && passKeyword;
   });
 });
@@ -173,7 +172,7 @@ const groupedFilteredOperations = computed<GroupedOperationItem[]>(() => {
     if (!map.has(item.groupCode)) {
       map.set(item.groupCode, {
         code: item.groupCode,
-        name: getGroupTitle(item.groupCode),
+        name: item.groupName || getGroupTitle(item.groupCode),
         operations: [],
       });
     }
@@ -216,7 +215,7 @@ const aggregationServiceTree = computed<AggregationServiceTreeNode[]>(() => {
       target.groupMap.set(groupCode, {
         code: groupCode,
         key: getGroupNodeKey(serviceUrl, groupCode),
-        name: getGroupTitle(groupCode, serviceUrl),
+        name: item.groupName || getGroupTitle(groupCode, serviceUrl),
         operations: [],
       });
     }
@@ -249,6 +248,7 @@ const aggregationServiceTree = computed<AggregationServiceTreeNode[]>(() => {
         serviceName: serviceNode.serviceName,
         hasGroupLevel,
         groups: hasGroupLevel ? nonAllGroups : [],
+        key: getServiceNodeKey(serviceNode.serviceUrl),
         operations: directOperations,
       };
     })
@@ -261,6 +261,56 @@ const selectedOperationItems = computed(() => {
 });
 
 const selectedOperationSet = computed(() => new Set(selectedOperations.value));
+const selectedCountByNodeKey = computed(() => {
+  const counts = new Map<string, number>();
+  const selected = selectedOperationSet.value;
+  if (selected.size <= 0) {
+    return counts;
+  }
+
+  filteredOperations.value.forEach((item) => {
+    if (!selected.has(item.key)) {
+      return;
+    }
+
+    if (isAggregation.value) {
+      const serviceKey = getServiceNodeKey(
+        item.serviceUrl || '__aggregation__',
+      );
+      counts.set(serviceKey, (counts.get(serviceKey) || 0) + 1);
+
+      const groupKey = getGroupNodeKey(
+        item.serviceUrl || '__aggregation__',
+        item.groupCode || 'all',
+      );
+      counts.set(groupKey, (counts.get(groupKey) || 0) + 1);
+      return;
+    }
+
+    const groupKey = item.groupCode || 'all';
+    counts.set(groupKey, (counts.get(groupKey) || 0) + 1);
+  });
+
+  return counts;
+});
+const previewSelectionState = computed(() => {
+  const total =
+    scopeMode.value === 'all'
+      ? operations.value.length
+      : selectedOperationItems.value.length;
+  const limited = total > PREVIEW_MAX_OPERATION_COUNT;
+  return {
+    limited,
+    previewCount: limited ? PREVIEW_MAX_OPERATION_COUNT : total,
+    total,
+  };
+});
+const previewNoticeText = computed(() => {
+  if (!previewSelectionState.value.limited) {
+    return '';
+  }
+  return `当前已选择 ${previewSelectionState.value.total} 个接口，为保证页面流畅，仅预览前 ${PREVIEW_MAX_OPERATION_COUNT} 个接口，导出仍会包含全部已选接口。`;
+});
 
 const summaryText = computed(() => {
   const base = currentOpenApi.value;
@@ -268,7 +318,9 @@ const summaryText = computed(() => {
 
   const totalOps = operations.value.length;
   const totalGroups = isAggregation.value
-    ? aggregationServiceTree.value.length
+    ? new Set(
+        operations.value.map((item) => item.serviceUrl || '__aggregation__'),
+      ).size
     : new Set(operations.value.map((item) => item.groupCode)).size;
   if (scopeMode.value === 'all') {
     return isAggregation.value
@@ -302,6 +354,29 @@ function getOperationKey(
   operationId?: string,
 ) {
   return `${serviceUrl}::${groupCode}::${method}::${path}::${operationId || ''}`;
+}
+
+function buildOperationSearchText(item: {
+  description?: string;
+  groupName?: string;
+  operationId?: string;
+  path: string;
+  serviceName?: string;
+  summary?: string;
+  tags?: string[];
+}) {
+  return [
+    item.serviceName,
+    item.groupName,
+    item.path,
+    item.summary,
+    item.description,
+    item.operationId,
+    (item.tags || []).join(' '),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
 }
 
 function getServiceNodeKey(serviceUrl: string) {
@@ -440,6 +515,15 @@ function collectOperationsFromPaths(
         summary: raw?.summary,
         description: raw?.description,
         operationId: raw?.operationId,
+        searchText: buildOperationSearchText({
+          groupName,
+          path,
+          serviceName,
+          summary: raw?.summary,
+          description: raw?.description,
+          operationId: raw?.operationId,
+          tags: raw?.tags ?? [],
+        }),
         tags: raw?.tags ?? [],
         raw,
       });
@@ -742,6 +826,21 @@ function parseSchemaRef(ref?: string) {
   return ref.replace('#/components/schemas/', '');
 }
 
+const SCHEMA_REF_MARKER = '__docExportSchemaRefName';
+
+function appendSchemaSeen(schema: any, seen: Set<string>) {
+  const refName =
+    schema?.[SCHEMA_REF_MARKER] ||
+    (schema?.$ref ? parseSchemaRef(schema.$ref) : '');
+  if (!refName || seen.has(refName)) {
+    return seen;
+  }
+
+  const nextSeen = new Set(seen);
+  nextSeen.add(refName);
+  return nextSeen;
+}
+
 function resolveSchemaRef(
   schema: any,
   doc: OpenAPISpec,
@@ -753,6 +852,7 @@ function resolveSchemaRef(
   const refName = parseSchemaRef(schema.$ref);
   if (!refName || seen.has(refName)) {
     return {
+      [SCHEMA_REF_MARKER]: refName,
       description: schema.description || '',
       title: refName || schema.$ref,
       type: 'object',
@@ -762,6 +862,7 @@ function resolveSchemaRef(
   const source = doc.components?.schemas?.[refName];
   if (!source) {
     return {
+      [SCHEMA_REF_MARKER]: refName,
       description: schema.description || '',
       title: refName,
       type: 'object',
@@ -772,7 +873,9 @@ function resolveSchemaRef(
   nextSeen.add(refName);
   const resolved = resolveSchemaRef(source, doc, nextSeen);
   return {
+    ...schema,
     ...resolved,
+    [SCHEMA_REF_MARKER]: refName,
     description: schema.description || resolved?.description || '',
     title: resolved?.title || refName,
   };
@@ -802,15 +905,20 @@ function normalizeSchema(
   seen = new Set<string>(),
 ): any {
   if (!schema) return null;
+  const nextSeen = appendSchemaSeen(schema, seen);
   const resolvedRef = resolveSchemaRef(schema, doc, seen);
   if (!resolvedRef) return null;
 
   if (resolvedRef.allOf?.length) {
-    return mergeAllOf(resolvedRef, doc, seen);
+    return mergeAllOf(resolvedRef, doc, nextSeen);
   }
 
   if (resolvedRef.oneOf?.length) {
-    return normalizeSchema(resolvedRef.oneOf[0], doc, seen);
+    return normalizeSchema(resolvedRef.oneOf[0], doc, nextSeen);
+  }
+
+  if (resolvedRef.anyOf?.length) {
+    return normalizeSchema(resolvedRef.anyOf[0], doc, nextSeen);
   }
 
   return resolvedRef;
@@ -848,14 +956,16 @@ function collectSchemaFields(
   schema: any,
   doc: OpenAPISpec,
   parentPath = '',
+  seen = new Set<string>(),
 ): SchemaFieldRow[] {
-  const normalized = normalizeSchema(schema, doc);
+  const normalized = normalizeSchema(schema, doc, seen);
   if (!normalized) return [];
 
+  const nextSeen = appendSchemaSeen(schema, seen);
   const rows: SchemaFieldRow[] = [];
 
   if (normalized.type === 'array') {
-    const itemSchema = normalizeSchema(normalized.items, doc);
+    const itemSchema = normalizeSchema(normalized.items, doc, nextSeen);
     const arrayPath = parentPath ? `${parentPath}[]` : '[]';
     rows.push({
       name: arrayPath,
@@ -869,7 +979,14 @@ function collectSchemaFields(
     });
 
     if (itemSchema?.type === 'object' || itemSchema?.properties) {
-      rows.push(...collectSchemaFields(itemSchema, doc, arrayPath));
+      rows.push(
+        ...collectSchemaFields(
+          normalized.items || itemSchema,
+          doc,
+          arrayPath,
+          nextSeen,
+        ),
+      );
     }
     return rows;
   }
@@ -877,7 +994,7 @@ function collectSchemaFields(
   if (normalized.type === 'object' || normalized.properties) {
     const requiredSet = new Set<string>(normalized.required || []);
     Object.entries(normalized.properties || {}).forEach(([key, raw]) => {
-      const field = normalizeSchema(raw, doc);
+      const field = normalizeSchema(raw, doc, nextSeen);
       const path = parentPath ? `${parentPath}.${key}` : key;
       rows.push({
         name: path,
@@ -888,9 +1005,9 @@ function collectSchemaFields(
       });
 
       if (field?.type === 'object' || field?.properties) {
-        rows.push(...collectSchemaFields(field, doc, path));
+        rows.push(...collectSchemaFields(raw || field, doc, path, nextSeen));
       } else if (field?.type === 'array') {
-        rows.push(...collectSchemaFields(field, doc, path));
+        rows.push(...collectSchemaFields(raw || field, doc, path, nextSeen));
       }
     });
     return rows;
@@ -915,6 +1032,7 @@ function extractSchemaVariants(
   doc: OpenAPISpec,
   seen = new Set<string>(),
 ): any[] {
+  const nextSeen = appendSchemaSeen(schema, seen);
   const resolved = resolveSchemaRef(schema, doc, seen);
   if (!resolved) {
     return [];
@@ -922,13 +1040,13 @@ function extractSchemaVariants(
 
   if (resolved.oneOf?.length) {
     return resolved.oneOf.flatMap((item: any) =>
-      extractSchemaVariants(item, doc, new Set(seen)),
+      extractSchemaVariants(item, doc, new Set(nextSeen)),
     );
   }
 
   if (resolved.anyOf?.length) {
     return resolved.anyOf.flatMap((item: any) =>
-      extractSchemaVariants(item, doc, new Set(seen)),
+      extractSchemaVariants(item, doc, new Set(nextSeen)),
     );
   }
 
@@ -1099,6 +1217,15 @@ function rebuildOperations(useCachedGrouping = false) {
               summary: source?.summary,
               description: source?.description,
               operationId: source?.operationId,
+              searchText: buildOperationSearchText({
+                groupName: getGroupTitle(groupCode),
+                path: api.path,
+                serviceName: currentOpenApi.value?.info?.title || '当前文档',
+                summary: source?.summary,
+                description: source?.description,
+                operationId: source?.operationId,
+                tags: source?.tags ?? api?.tags ?? [],
+              }),
               tags: source?.tags ?? api?.tags ?? [],
               raw: source,
             },
@@ -1143,6 +1270,7 @@ function rebuildOperations(useCachedGrouping = false) {
 
 async function loadDocContext() {
   loading.value = true;
+  previewGenerationToken += 1;
   resetPreviewState();
   try {
     aggregationServiceDocs.value = [];
@@ -1552,13 +1680,37 @@ function getCheckedCountInGroup(items: OperationItem[]) {
   return items.filter((item) => selected.has(item.key)).length;
 }
 
-function isGroupChecked(items: OperationItem[]) {
-  return items.length > 0 && getCheckedCountInGroup(items) === items.length;
+function getCheckedCountInGroupByNode(nodeKey: string, items: OperationItem[]) {
+  return (
+    selectedCountByNodeKey.value.get(nodeKey) ?? getCheckedCountInGroup(items)
+  );
 }
 
-function isGroupIndeterminate(items: OperationItem[]) {
-  const checkedCount = getCheckedCountInGroup(items);
+function isGroupChecked(items: OperationItem[], nodeKey?: string) {
+  const checkedCount = nodeKey
+    ? getCheckedCountInGroupByNode(nodeKey, items)
+    : getCheckedCountInGroup(items);
+  return items.length > 0 && checkedCount === items.length;
+}
+
+function isGroupIndeterminate(items: OperationItem[], nodeKey?: string) {
+  const checkedCount = nodeKey
+    ? getCheckedCountInGroupByNode(nodeKey, items)
+    : getCheckedCountInGroup(items);
   return checkedCount > 0 && checkedCount < items.length;
+}
+
+function getPreviewOperations(selectedOps: OperationItem[]) {
+  if (selectedOps.length <= PREVIEW_MAX_OPERATION_COUNT) {
+    return selectedOps;
+  }
+  return selectedOps.slice(0, PREVIEW_MAX_OPERATION_COUNT);
+}
+
+function waitForNextFrame() {
+  return new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => resolve());
+  });
 }
 
 function toggleGroupSelection(items: OperationItem[], checked: boolean) {
@@ -2003,13 +2155,30 @@ function downloadFile(content: BlobPart, fileName: string, mimeType: string) {
 }
 
 function resetPreviewState() {
+  previewLoading.value = false;
   previewHtml.value = '';
 }
 
 async function generatePreview(silentOrEvent?: boolean | Event) {
   const silent = typeof silentOrEvent === 'boolean' ? silentOrEvent : false;
   const selectedOps = buildSelectedOperations();
-  const subset = buildSubsetOpenApi(selectedOps);
+  if (selectedOps.length <= 0) {
+    resetPreviewState();
+    if (!silent) {
+      ElMessage.warning('请先选择导出范围');
+    }
+    return;
+  }
+
+  const previewOps = getPreviewOperations(selectedOps);
+  const currentToken = ++previewGenerationToken;
+  previewLoading.value = true;
+  await waitForNextFrame();
+  if (currentToken !== previewGenerationToken) {
+    return;
+  }
+
+  const subset = buildSubsetOpenApi(previewOps);
   if (!subset) {
     resetPreviewState();
     if (!silent) {
@@ -2018,12 +2187,16 @@ async function generatePreview(silentOrEvent?: boolean | Event) {
     return;
   }
 
-  previewLoading.value = true;
   try {
-    const markdownContent = buildMarkdownDocument(subset, selectedOps);
+    const markdownContent = buildMarkdownDocument(subset, previewOps);
+    if (currentToken !== previewGenerationToken) {
+      return;
+    }
     previewHtml.value = md.render(markdownContent);
   } finally {
-    previewLoading.value = false;
+    if (currentToken === previewGenerationToken) {
+      previewLoading.value = false;
+    }
   }
 }
 
@@ -2106,13 +2279,19 @@ function scheduleAutoPreview() {
   if (previewAutoTimer) {
     window.clearTimeout(previewAutoTimer);
   }
-  previewAutoTimer = window.setTimeout(() => {
-    previewAutoTimer = null;
-    if (loading.value) {
-      return;
-    }
-    void generatePreview(true);
-  }, 120);
+  previewGenerationToken += 1;
+  previewAutoTimer = window.setTimeout(
+    () => {
+      previewAutoTimer = null;
+      if (loading.value) {
+        return;
+      }
+      void generatePreview(true);
+    },
+    operations.value.length > PREVIEW_MAX_OPERATION_COUNT
+      ? PREVIEW_AUTO_DELAY_LARGE
+      : PREVIEW_AUTO_DELAY,
+  );
 }
 
 function toggleThemeSwitchingState() {
@@ -2148,14 +2327,13 @@ watch(
     scopeMode,
     selectedOperations,
     operations,
-    exportDocOptions,
+    () => exportDocOptions.value.join('|'),
     currentOpenApi,
     aggregationGatewayOpenApi,
   ],
   () => {
     scheduleAutoPreview();
   },
-  { deep: true },
 );
 
 watch(loading, (value) => {
@@ -2176,6 +2354,7 @@ onBeforeUnmount(() => {
     window.clearTimeout(previewAutoTimer);
     previewAutoTimer = null;
   }
+  previewGenerationToken += 1;
   if (themeSwitchTimer) {
     window.clearTimeout(themeSwitchTimer);
     themeSwitchTimer = null;
@@ -2253,17 +2432,24 @@ onBeforeUnmount(() => {
                             class="service-header flex items-center justify-between px-1 py-1"
                             :class="{
                               'group-node--checked':
-                                getCheckedCountInGroup(
+                                getCheckedCountInGroupByNode(
+                                  serviceNode.key,
                                   serviceNode.allOperations,
                                 ) > 0,
                             }"
                           >
                             <ElCheckbox
                               :model-value="
-                                isGroupChecked(serviceNode.allOperations)
+                                isGroupChecked(
+                                  serviceNode.allOperations,
+                                  serviceNode.key,
+                                )
                               "
                               :indeterminate="
-                                isGroupIndeterminate(serviceNode.allOperations)
+                                isGroupIndeterminate(
+                                  serviceNode.allOperations,
+                                  serviceNode.key,
+                                )
                               "
                               @change="
                                 (value) =>
@@ -2280,7 +2466,8 @@ onBeforeUnmount(() => {
                                 class="ml-1 text-xs text-[var(--el-text-color-secondary)]"
                               >
                                 ({{
-                                  getCheckedCountInGroup(
+                                  getCheckedCountInGroupByNode(
+                                    serviceNode.key,
                                     serviceNode.allOperations,
                                   )
                                 }}/{{ serviceNode.allOperations.length }})
@@ -2291,33 +2478,21 @@ onBeforeUnmount(() => {
                               role="button"
                               tabindex="0"
                               :aria-label="
-                                isGroupExpanded(
-                                  getServiceNodeKey(serviceNode.serviceUrl),
-                                )
+                                isGroupExpanded(serviceNode.key)
                                   ? '收起微服务'
                                   : '展开微服务'
                               "
-                              @click.stop="
-                                toggleGroupExpanded(
-                                  getServiceNodeKey(serviceNode.serviceUrl),
-                                )
-                              "
+                              @click.stop="toggleGroupExpanded(serviceNode.key)"
                               @keydown.enter.prevent.stop="
-                                toggleGroupExpanded(
-                                  getServiceNodeKey(serviceNode.serviceUrl),
-                                )
+                                toggleGroupExpanded(serviceNode.key)
                               "
                               @keydown.space.prevent.stop="
-                                toggleGroupExpanded(
-                                  getServiceNodeKey(serviceNode.serviceUrl),
-                                )
+                                toggleGroupExpanded(serviceNode.key)
                               "
                             >
                               <component
                                 :is="
-                                  isGroupExpanded(
-                                    getServiceNodeKey(serviceNode.serviceUrl),
-                                  )
+                                  isGroupExpanded(serviceNode.key)
                                     ? SvgDoubleArrowUpIcon
                                     : SvgDoubleArrowDownIcon
                                 "
@@ -2328,11 +2503,7 @@ onBeforeUnmount(() => {
 
                           <Transition name="group-submenu-motion">
                             <div
-                              v-show="
-                                isGroupExpanded(
-                                  getServiceNodeKey(serviceNode.serviceUrl),
-                                )
-                              "
+                              v-if="isGroupExpanded(serviceNode.key)"
                               class="group-submenu-wrap ml-3 mt-2 border-l border-dashed border-[var(--el-border-color)] pl-3"
                             >
                               <template v-if="serviceNode.hasGroupLevel">
@@ -2346,17 +2517,24 @@ onBeforeUnmount(() => {
                                       class="group-header flex items-center justify-between px-1 py-1"
                                       :class="{
                                         'group-node--checked':
-                                          getCheckedCountInGroup(
+                                          getCheckedCountInGroupByNode(
+                                            group.key,
                                             group.operations,
                                           ) > 0,
                                       }"
                                     >
                                       <ElCheckbox
                                         :model-value="
-                                          isGroupChecked(group.operations)
+                                          isGroupChecked(
+                                            group.operations,
+                                            group.key,
+                                          )
                                         "
                                         :indeterminate="
-                                          isGroupIndeterminate(group.operations)
+                                          isGroupIndeterminate(
+                                            group.operations,
+                                            group.key,
+                                          )
                                         "
                                         @change="
                                           (value) =>
@@ -2373,7 +2551,8 @@ onBeforeUnmount(() => {
                                           class="ml-1 text-xs text-[var(--el-text-color-secondary)]"
                                         >
                                           ({{
-                                            getCheckedCountInGroup(
+                                            getCheckedCountInGroupByNode(
+                                              group.key,
                                               group.operations,
                                             )
                                           }}/{{ group.operations.length }})
@@ -2411,7 +2590,7 @@ onBeforeUnmount(() => {
 
                                     <Transition name="group-submenu-motion">
                                       <div
-                                        v-show="isGroupExpanded(group.key)"
+                                        v-if="isGroupExpanded(group.key)"
                                         class="group-submenu-wrap ml-3 mt-2 border-l border-dashed border-[var(--el-border-color)] pl-3"
                                       >
                                         <div class="group-submenu-list py-1">
@@ -2513,13 +2692,21 @@ onBeforeUnmount(() => {
                             class="group-header flex items-center justify-between px-1 py-1"
                             :class="{
                               'group-node--checked':
-                                getCheckedCountInGroup(group.operations) > 0,
+                                getCheckedCountInGroupByNode(
+                                  group.code,
+                                  group.operations,
+                                ) > 0,
                             }"
                           >
                             <ElCheckbox
-                              :model-value="isGroupChecked(group.operations)"
+                              :model-value="
+                                isGroupChecked(group.operations, group.code)
+                              "
                               :indeterminate="
-                                isGroupIndeterminate(group.operations)
+                                isGroupIndeterminate(
+                                  group.operations,
+                                  group.code,
+                                )
                               "
                               @change="
                                 (value) =>
@@ -2534,7 +2721,10 @@ onBeforeUnmount(() => {
                                 class="ml-1 text-xs text-[var(--el-text-color-secondary)]"
                               >
                                 ({{
-                                  getCheckedCountInGroup(group.operations)
+                                  getCheckedCountInGroupByNode(
+                                    group.code,
+                                    group.operations,
+                                  )
                                 }}/{{ group.operations.length }})
                               </span>
                             </ElCheckbox>
@@ -2568,7 +2758,7 @@ onBeforeUnmount(() => {
 
                           <Transition name="group-submenu-motion">
                             <div
-                              v-show="isGroupExpanded(group.code)"
+                              v-if="isGroupExpanded(group.code)"
                               class="group-submenu-wrap ml-3 mt-2 border-l border-dashed border-[var(--el-border-color)] pl-3"
                             >
                               <div class="group-submenu-list py-1">
@@ -2615,7 +2805,7 @@ onBeforeUnmount(() => {
               </template>
               <template v-else>
                 <div
-                  class="rounded border p-3 text-sm text-[var(--el-text-color-secondary)]"
+                  class="doc-all-selected-tip rounded border p-3 text-sm text-[var(--el-text-color-secondary)]"
                 >
                   已选择全部接口文档，无需单独勾选。
                 </div>
@@ -2674,6 +2864,14 @@ onBeforeUnmount(() => {
 
             <ElSkeleton v-if="previewLoading" :rows="8" animated />
             <template v-else>
+              <ElAlert
+                v-if="previewNoticeText"
+                class="mb-4"
+                type="warning"
+                :closable="false"
+              >
+                <template #default>{{ previewNoticeText }}</template>
+              </ElAlert>
               <ElEmpty
                 v-if="isPreviewEmpty"
                 description="请选择导出范围或接口，预览将自动更新"
@@ -2764,6 +2962,10 @@ onBeforeUnmount(() => {
   flex: 1;
   min-height: 0;
   margin-bottom: 6px;
+}
+
+.doc-all-selected-tip {
+  margin-top: 8px;
 }
 
 .scope-tree-panel {
