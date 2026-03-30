@@ -7,6 +7,7 @@ import type {
   OpenAPISpec,
   PathMenuItem,
   Paths,
+  SchemaObject,
   SwaggerConfig,
 } from '#/typings/openApi';
 
@@ -42,20 +43,128 @@ const createAuthorizeRoute = (): RouteRecordStringComponent<string> => ({
   component: 'views/authorize/index.vue',
 });
 
-const createApiSearchText = (api: PathMenuItem) => {
-  return [
-    api.summary,
-    api.description,
-    api.operationId,
-    api.path,
-    ...(api.tags ?? []),
-  ]
-    .filter(Boolean)
-    .join(' ');
+const SCHEMA_REF_PREFIX = '#/components/schemas/';
+
+const appendSearchToken = (tokens: Set<string>, value?: unknown) => {
+  if (
+    value === null ||
+    value === undefined ||
+    typeof value === 'function' ||
+    typeof value === 'object'
+  ) {
+    return;
+  }
+  const text = `${value}`.trim();
+  if (text) {
+    tokens.add(text);
+  }
 };
 
-const createEntitySearchText = (name: string, description?: string) => {
-  return [name, description].filter(Boolean).join(' ');
+const parseSchemaRefName = (ref?: string) => {
+  if (!ref || !ref.startsWith(SCHEMA_REF_PREFIX)) {
+    return '';
+  }
+  return ref.slice(SCHEMA_REF_PREFIX.length);
+};
+
+const collectSchemaSearchTokens = (
+  schema: null | SchemaObject | undefined,
+  tokens: Set<string>,
+  seenObjects = new WeakSet<object>(),
+  seenRefs = new Set<string>(),
+) => {
+  if (!schema || typeof schema !== 'object') {
+    return;
+  }
+
+  if (seenObjects.has(schema)) {
+    return;
+  }
+  seenObjects.add(schema);
+
+  appendSearchToken(tokens, schema.title);
+  appendSearchToken(tokens, schema.description);
+  appendSearchToken(tokens, schema.type);
+  appendSearchToken(tokens, schema.format);
+  schema.required?.forEach((item) => appendSearchToken(tokens, item));
+  schema.enum?.forEach((item) => appendSearchToken(tokens, item));
+
+  const refName = parseSchemaRefName(schema.$ref);
+  if (refName) {
+    appendSearchToken(tokens, refName);
+    if (seenRefs.has(refName)) {
+      return;
+    }
+    seenRefs.add(refName);
+  }
+
+  Object.entries(schema.properties ?? {}).forEach(
+    ([propertyName, property]) => {
+      appendSearchToken(tokens, propertyName);
+      collectSchemaSearchTokens(property, tokens, seenObjects, seenRefs);
+    },
+  );
+
+  if (schema.items) {
+    collectSchemaSearchTokens(schema.items, tokens, seenObjects, seenRefs);
+  }
+
+  schema.allOf?.forEach((item) =>
+    collectSchemaSearchTokens(item, tokens, seenObjects, seenRefs),
+  );
+  schema.oneOf?.forEach((item) =>
+    collectSchemaSearchTokens(item, tokens, seenObjects, seenRefs),
+  );
+  (schema as any).anyOf?.forEach((item: SchemaObject) =>
+    collectSchemaSearchTokens(item, tokens, seenObjects, seenRefs),
+  );
+};
+
+const createApiSearchText = (api: PathMenuItem) => {
+  const tokens = new Set<string>();
+
+  appendSearchToken(tokens, api.summary);
+  appendSearchToken(tokens, api.description);
+  appendSearchToken(tokens, api.operationId);
+  appendSearchToken(tokens, api.path);
+  appendSearchToken(tokens, api.method);
+  api.tags?.forEach((tag) => appendSearchToken(tokens, tag));
+
+  api.parameters?.forEach((parameter) => {
+    appendSearchToken(tokens, parameter.name);
+    appendSearchToken(tokens, parameter.in);
+    appendSearchToken(tokens, parameter.description);
+    collectSchemaSearchTokens(parameter.schema, tokens);
+  });
+
+  appendSearchToken(tokens, api.requestBody?.description);
+  Object.entries(api.requestBody?.content ?? {}).forEach(
+    ([contentType, body]) => {
+      appendSearchToken(tokens, contentType);
+      collectSchemaSearchTokens(body?.schema, tokens);
+    },
+  );
+
+  Object.entries(api.responses ?? {}).forEach(([code, response]) => {
+    appendSearchToken(tokens, code);
+    appendSearchToken(tokens, response?.description);
+    if (response?.schema) {
+      collectSchemaSearchTokens(response.schema, tokens);
+    }
+    Object.entries(response?.content ?? {}).forEach(([contentType, body]) => {
+      appendSearchToken(tokens, contentType);
+      collectSchemaSearchTokens(body?.schema, tokens);
+    });
+  });
+
+  return [...tokens].join(' ');
+};
+
+const createEntitySearchText = (name: string, schema?: null | SchemaObject) => {
+  const tokens = new Set<string>();
+  appendSearchToken(tokens, name);
+  collectSchemaSearchTokens(schema, tokens);
+  return [...tokens].join(' ');
 };
 
 export const fetchMenuListAsync: () => Promise<
@@ -174,7 +283,7 @@ export const fetchAggregationRoutesImpl: () => Promise<
         title: key,
         keepAlive: true,
         description: schemaDescription,
-        searchText: createEntitySearchText(key, schemaDescription),
+        searchText: createEntitySearchText(key, components?.schemas?.[key]),
       },
       path: `/entity/all/${key}`,
     });
@@ -293,7 +402,10 @@ export const fetchAggregationRoutesImpl: () => Promise<
               meta: {
                 title: key,
                 description: schemaDescription,
-                searchText: createEntitySearchText(key, schemaDescription),
+                searchText: createEntitySearchText(
+                  key,
+                  groupComponents?.schemas?.[key],
+                ),
               },
             });
           });
@@ -372,7 +484,7 @@ const fetchSingleAppRoutes: (
         title: key,
         keepAlive: true,
         description: schemaDescription,
-        searchText: createEntitySearchText(key, schemaDescription),
+        searchText: createEntitySearchText(key, components?.schemas?.[key]),
       },
       path: `/entity/all/${key}`,
     });
@@ -476,7 +588,10 @@ const fetchSingleAppRoutes: (
               meta: {
                 title: key,
                 description: schemaDescription,
-                searchText: createEntitySearchText(key, schemaDescription),
+                searchText: createEntitySearchText(
+                  key,
+                  components?.schemas?.[key],
+                ),
               },
             });
           });
