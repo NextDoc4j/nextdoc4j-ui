@@ -165,7 +165,8 @@ const debugReady = computed(() =>
   :deep(.el-tabs__header) {
     margin: 0 0 12px;
     background: var(--doc-page-bg);
-    border: 1px solid var(--el-border-color-light);
+    border: 1px solid
+      color-mix(in srgb, var(--el-border-color) 92%, transparent);
     border-radius: var(--doc-radius-lg);
     box-shadow: 0 8px 18px
       color-mix(in srgb, var(--el-text-color-primary) 4%, transparent);
@@ -180,7 +181,7 @@ const debugReady = computed(() =>
   }
 
   :deep(.el-tabs__nav) {
-    gap: 4px;
+    gap: 6px;
   }
 
   :deep(.el-tabs__active-bar) {
@@ -203,32 +204,59 @@ const debugReady = computed(() =>
   }
 
   :deep(.is-active .document-tab-label) {
-    color: var(--el-text-color-primary);
+    color: var(--el-color-primary);
     background: color-mix(
       in srgb,
-      var(--el-bg-color) 88%,
-      var(--el-color-primary-light-9) 12%
+      var(--el-bg-color) 82%,
+      var(--el-color-primary-light-9) 18%
     );
+    border-color: color-mix(in srgb, var(--el-color-primary) 45%, transparent);
     box-shadow:
       inset 0 0 0 1px
-        color-mix(in srgb, var(--el-color-primary) 18%, transparent),
-      0 8px 18px color-mix(in srgb, var(--el-color-primary) 12%, transparent);
+        color-mix(in srgb, var(--el-color-primary) 28%, transparent),
+      0 10px 22px color-mix(in srgb, var(--el-color-primary) 20%, transparent);
+    transform: translateY(-1px);
+  }
+
+  :deep(.is-active .document-tab-label__title) {
+    font-weight: 800;
+  }
+
+  :deep(.el-tabs__item:not(.is-active) .document-tab-label:hover) {
+    color: var(--el-text-color-primary);
+    border-color: color-mix(
+      in srgb,
+      var(--el-text-color-primary) 16%,
+      transparent
+    );
+    background: color-mix(
+      in srgb,
+      var(--el-bg-color) 90%,
+      var(--el-fill-color-light) 10%
+    );
   }
 }
 
 .document-tab-label {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 92px;
-  padding: 7px 12px;
+  min-width: 108px;
+  padding: 8px 14px;
   color: var(--el-text-color-secondary);
+  background: color-mix(
+    in srgb,
+    var(--el-bg-color) 92%,
+    var(--el-fill-color-light) 8%
+  );
+  border: 1px solid transparent;
   border-radius: var(--doc-radius-sm);
-  transition: all 0.2s ease;
+  transition: all 0.18s ease;
 }
 
 .document-tab-label__title {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   line-height: 1.2;
 }

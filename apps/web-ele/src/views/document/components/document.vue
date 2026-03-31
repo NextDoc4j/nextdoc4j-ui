@@ -32,6 +32,7 @@ import PathSegment from './path-segment.vue';
 import SecurityView from './security-view.vue';
 
 interface AuthMethodItem {
+  description?: string;
   detail?: string;
   label: string;
 }
@@ -107,7 +108,7 @@ const securitySchemeMap = computed<Record<string, SecuritySchemeObject>>(() => {
 const authMethods = computed<AuthMethodItem[]>(() => {
   const security = apiInfo.value?.security;
   if (!Array.isArray(security) || security.length === 0) {
-    return [{ label: '无需认证' }];
+    return [];
   }
 
   const names = [
@@ -119,7 +120,7 @@ const authMethods = computed<AuthMethodItem[]>(() => {
   ];
 
   if (names.length === 0) {
-    return [{ label: '需要认证' }];
+    return [];
   }
 
   return names.map((name) => {
@@ -135,11 +136,13 @@ const authMethods = computed<AuthMethodItem[]>(() => {
       if (schemeName === 'bearer') {
         return {
           label: 'Bearer Token',
+          description: scheme.description,
           detail: scheme.bearerFormat || 'Header · Authorization',
         };
       }
 
       return {
+        description: scheme.description,
         label: `HTTP ${scheme.scheme?.toUpperCase() || 'AUTH'}`,
         detail: scheme.description,
       };
@@ -147,16 +150,40 @@ const authMethods = computed<AuthMethodItem[]>(() => {
 
     if (scheme.type === 'apiKey') {
       return {
+        description: scheme.description,
         label: 'API Key',
         detail: `${scheme.in || 'header'} · ${scheme.name || name}`,
       };
     }
 
     return {
+      description: scheme.description,
       label: scheme.type || name,
       detail: scheme.description,
     };
   });
+});
+
+const showSecurityPanel = computed(() => {
+  const hasAuthMethods = authMethods.value.length > 0;
+  const metadata = securityMetadata.value;
+  if (!metadata) {
+    return hasAuthMethods;
+  }
+  if (metadata.ignore) {
+    return true;
+  }
+
+  const hasPermissionGroups = (metadata.permissions || []).some((item: any) => {
+    return (
+      (Array.isArray(item.values) && item.values.length > 0) ||
+      (Array.isArray(item.orValues) && item.orValues.length > 0)
+    );
+  });
+  const hasRoleGroups = (metadata.roles || []).some((item: any) => {
+    return Array.isArray(item.values) && item.values.length > 0;
+  });
+  return hasAuthMethods || hasPermissionGroups || hasRoleGroups;
 });
 
 const hasRenderableSchema = (schema: any) => {
@@ -500,7 +527,7 @@ defineExpose({
           </div>
         </div>
 
-        <div class="hero-panel__security">
+        <div v-if="showSecurityPanel" class="hero-panel__security">
           <SecurityView
             :auth-methods="authMethods"
             :metadata="securityMetadata"
@@ -713,6 +740,16 @@ defineExpose({
     var(--el-bg-color) 78%,
     var(--el-fill-color-light) 22%
   );
+  --doc-panel-border: color-mix(
+    in srgb,
+    var(--el-text-color-primary) 12%,
+    transparent
+  );
+  --doc-sub-panel-border: color-mix(
+    in srgb,
+    var(--el-text-color-primary) 14%,
+    transparent
+  );
 
   height: 100%;
   padding-right: 2px;
@@ -737,6 +774,16 @@ defineExpose({
   --doc-soft-bg: #0a0a0a;
   --doc-soft-bg-alt: #111;
   --doc-soft-bg-strong: #151515;
+  --doc-panel-border: color-mix(
+    in srgb,
+    var(--el-text-color-primary) 22%,
+    transparent
+  );
+  --doc-sub-panel-border: color-mix(
+    in srgb,
+    var(--el-text-color-primary) 20%,
+    transparent
+  );
 }
 
 .document-detail__stack {
@@ -748,8 +795,7 @@ defineExpose({
   position: relative;
   overflow: hidden;
   background: var(--doc-panel-bg);
-  border: 1px solid
-    color-mix(in srgb, var(--el-text-color-primary) 8%, transparent);
+  border: 1px solid var(--doc-panel-border);
   border-radius: var(--doc-radius-lg);
   box-shadow: 0 8px 18px
     color-mix(in srgb, var(--el-text-color-primary) 4%, transparent);
@@ -798,7 +844,7 @@ defineExpose({
   padding: 10px 12px;
   margin-top: 12px;
   background: var(--doc-soft-bg-strong);
-  border: 1px solid var(--el-border-color-lighter);
+  border: 1px solid var(--doc-sub-panel-border);
   border-radius: var(--doc-radius-sm);
 }
 
@@ -835,7 +881,7 @@ defineExpose({
   padding: 10px;
   margin-top: 2px;
   background: var(--doc-soft-bg-alt);
-  border: 1px solid var(--el-border-color-lighter);
+  border: 1px solid var(--doc-sub-panel-border);
   border-radius: var(--doc-radius-sm);
 }
 
@@ -914,7 +960,7 @@ defineExpose({
   min-width: 0;
   padding: 12px;
   background: var(--doc-soft-bg);
-  border: 1px solid var(--el-border-color-lighter);
+  border: 1px solid var(--doc-sub-panel-border);
   border-radius: var(--doc-radius-sm);
 }
 

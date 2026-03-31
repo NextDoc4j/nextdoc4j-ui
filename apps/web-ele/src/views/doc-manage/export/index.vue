@@ -3273,8 +3273,19 @@ onBeforeUnmount(() => {
             }"
             @click="exportFormat = option.format"
           >
-            <span class="export-format-card__badge">
-              {{ exportFormat === option.format ? '已选' : '格式' }}
+            <span
+              v-if="exportFormat === option.format"
+              class="export-format-card__badge"
+            >
+              <svg width="9" height="9" viewBox="0 0 9 9" fill="none">
+                <path
+                  d="M1.5 4.5L3.5 6.5L7.5 2.5"
+                  stroke="white"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
             </span>
             <span class="export-format-card__logo">
               <component :is="option.icon" class="export-format-card__icon" />
@@ -3423,6 +3434,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 18px;
+  padding-bottom: 12px;
 }
 
 .export-dialog-intro {
@@ -3503,22 +3515,15 @@ onBeforeUnmount(() => {
 
 .export-format-card__badge {
   position: absolute;
-  top: 12px;
-  right: 12px;
-  padding: 3px 7px;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1;
-  color: var(--el-text-color-secondary);
-  background: var(--el-fill-color);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 999px;
-}
-
-.export-format-card.is-active .export-format-card__badge {
-  color: var(--el-color-primary);
-  background: rgb(var(--el-color-primary-rgb) / 12%);
-  border-color: rgb(var(--el-color-primary-rgb) / 20%);
+  top: 7px;
+  right: 8px;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: var(--el-color-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .export-format-card__logo {
