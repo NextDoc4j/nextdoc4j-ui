@@ -3526,10 +3526,10 @@ onBeforeUnmount(() => {
   justify-content: center;
   width: 17px;
   height: 17px;
+  color: var(--el-color-primary);
   background: transparent;
   border: 1.5px solid var(--el-color-primary);
   border-radius: var(--doc-export-badge-radius);
-  color: var(--el-color-primary);
   box-shadow: 0 0 0 2px var(--el-bg-color);
 }
 
