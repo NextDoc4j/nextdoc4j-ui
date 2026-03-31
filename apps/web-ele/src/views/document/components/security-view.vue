@@ -17,6 +17,11 @@ interface AuthMethod {
   label: string;
 }
 
+interface RuleSegment {
+  isConnector: boolean;
+  text: string;
+}
+
 interface SecurityMetadata {
   permissions?: AuthInfo[];
   roles?: AuthInfo[];
@@ -103,12 +108,34 @@ const formatModeConnector = (mode?: string) => {
   return normalizeMode(mode) === 'AND' ? '&' : '/';
 };
 
-const formatRuleValues = (values: string[] = [], mode?: string) => {
+const normalizeRuleValues = (values: string[] = []) => {
   if (!Array.isArray(values) || values.length <= 0) {
-    return '';
+    return [];
   }
-  const connector = ` ${formatModeConnector(mode)} `;
-  return values.join(connector);
+  return values
+    .map((item) => `${item ?? ''}`.trim())
+    .filter((item) => item.length > 0);
+};
+
+const buildRuleSegments = (
+  values: string[] = [],
+  mode?: string,
+): RuleSegment[] => {
+  const normalizedValues = normalizeRuleValues(values);
+  if (normalizedValues.length <= 0) {
+    return [];
+  }
+  const connector = formatModeConnector(mode);
+  return normalizedValues.flatMap((item, index) => {
+    const valueSegment: RuleSegment = {
+      isConnector: false,
+      text: item,
+    };
+    if (index >= normalizedValues.length - 1) {
+      return [valueSegment];
+    }
+    return [valueSegment, { isConnector: true, text: connector }];
+  });
 };
 
 const resolveOrRuleTitle = (orType?: string) => {
@@ -192,11 +219,23 @@ const formatOrTypeLabel = (orType?: string) => {
             >
               <div class="rule-row__title">权限校验</div>
               <div class="rule-row__values">
-                <span
-                  class="rule-expression-chip rule-expression-chip--permission"
+                <template
+                  v-for="(segment, segmentIndex) in buildRuleSegments(
+                    group.values,
+                    group.mode,
+                  )"
+                  :key="`permission-${index}-${segment.text}-${segmentIndex}`"
                 >
-                  {{ formatRuleValues(group.values, group.mode) }}
-                </span>
+                  <span v-if="segment.isConnector" class="rule-connector">
+                    {{ segment.text }}
+                  </span>
+                  <span
+                    v-else
+                    class="rule-expression-chip rule-expression-chip--permission"
+                  >
+                    {{ segment.text }}
+                  </span>
+                </template>
               </div>
             </div>
 
@@ -208,12 +247,24 @@ const formatOrTypeLabel = (orType?: string) => {
                 {{ resolveOrRuleTitle(group.orType) }}
               </div>
               <div class="rule-row__values">
-                <span
-                  class="rule-expression-chip rule-expression-chip--or"
-                  :title="`备选${formatOrTypeLabel(group.orType)}`"
+                <template
+                  v-for="(segment, segmentIndex) in buildRuleSegments(
+                    group.orValues,
+                    group.mode,
+                  )"
+                  :key="`or-${index}-${segment.text}-${segmentIndex}`"
                 >
-                  {{ formatRuleValues(group.orValues, group.mode) }}
-                </span>
+                  <span v-if="segment.isConnector" class="rule-connector">
+                    {{ segment.text }}
+                  </span>
+                  <span
+                    v-else
+                    class="rule-expression-chip rule-expression-chip--or"
+                    :title="`备选${formatOrTypeLabel(group.orType)}`"
+                  >
+                    {{ segment.text }}
+                  </span>
+                </template>
               </div>
             </div>
           </template>
@@ -225,9 +276,23 @@ const formatOrTypeLabel = (orType?: string) => {
           >
             <div class="rule-row__title">角色校验</div>
             <div class="rule-row__values">
-              <span class="rule-expression-chip rule-expression-chip--role">
-                {{ formatRuleValues(group.values, group.mode) }}
-              </span>
+              <template
+                v-for="(segment, segmentIndex) in buildRuleSegments(
+                  group.values,
+                  group.mode,
+                )"
+                :key="`role-${index}-${segment.text}-${segmentIndex}`"
+              >
+                <span v-if="segment.isConnector" class="rule-connector">
+                  {{ segment.text }}
+                </span>
+                <span
+                  v-else
+                  class="rule-expression-chip rule-expression-chip--role"
+                >
+                  {{ segment.text }}
+                </span>
+              </template>
             </div>
           </div>
         </template>
@@ -268,7 +333,7 @@ const formatOrTypeLabel = (orType?: string) => {
 
 .security-strip__content--column {
   display: grid;
-  gap: 6px;
+  gap: 5px;
 }
 
 .permission-summary {
@@ -317,9 +382,9 @@ const formatOrTypeLabel = (orType?: string) => {
 .rule-row {
   display: grid;
   grid-template-columns: 64px minmax(0, 1fr);
-  gap: 8px;
-  align-items: start;
-  padding: 8px 10px;
+  gap: 6px;
+  align-items: center;
+  padding: 7px 10px;
   background: color-mix(
     in srgb,
     var(--el-bg-color) 82%,
@@ -330,7 +395,9 @@ const formatOrTypeLabel = (orType?: string) => {
 }
 
 .rule-row__title {
-  padding-top: 4px;
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
   font-size: 12px;
   font-weight: 800;
   color: var(--el-text-color-primary);
@@ -339,8 +406,20 @@ const formatOrTypeLabel = (orType?: string) => {
 .rule-row__values {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  row-gap: 2px;
+  column-gap: 4px;
   align-items: center;
+}
+
+.rule-connector {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--el-text-color-secondary);
+  line-height: 1;
 }
 
 .mode-chip,
@@ -375,8 +454,8 @@ const formatOrTypeLabel = (orType?: string) => {
 .rule-expression-chip {
   display: inline-flex;
   align-items: center;
-  min-height: 26px;
-  padding: 0 10px;
+  min-height: 24px;
+  padding: 0 8px;
   font-size: 12px;
   font-weight: 800;
   white-space: nowrap;
