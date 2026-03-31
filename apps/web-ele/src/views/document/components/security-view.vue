@@ -406,8 +406,7 @@ const formatOrTypeLabel = (orType?: string) => {
 .rule-row__values {
   display: flex;
   flex-wrap: wrap;
-  row-gap: 2px;
-  column-gap: 4px;
+  gap: 2px 4px;
   align-items: center;
 }
 
@@ -418,8 +417,8 @@ const formatOrTypeLabel = (orType?: string) => {
   min-height: 24px;
   font-size: 12px;
   font-weight: 700;
-  color: var(--el-text-color-secondary);
   line-height: 1;
+  color: var(--el-text-color-secondary);
 }
 
 .mode-chip,
