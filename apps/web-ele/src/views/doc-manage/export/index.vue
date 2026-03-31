@@ -1,9 +1,17 @@
 <script setup lang="ts">
 import type { Component } from 'vue';
+
 import type { ServiceItem } from '#/store/aggregation';
 import type { OpenAPISpec, SwaggerConfig } from '#/typings/openApi';
 
-import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  ref,
+  shallowRef,
+  watch,
+} from 'vue';
 
 import {
   SvgDocExportHtmlIcon,
@@ -14,7 +22,6 @@ import {
   SvgDoubleArrowDownIcon,
   SvgDoubleArrowUpIcon,
 } from '@vben/icons';
-import { preferences } from '@vben/preferences';
 
 import {
   Document as DocxDocument,
@@ -121,6 +128,10 @@ const HTTP_METHODS = new Set(['delete', 'get', 'patch', 'post', 'put']);
 const PREVIEW_AUTO_DELAY = 120;
 const PREVIEW_AUTO_DELAY_LARGE = 260;
 const PREVIEW_MAX_OPERATION_COUNT = 200;
+const PREVIEW_VIRTUAL_BLOCK_CHUNK_SIZE = 24;
+const PREVIEW_VIRTUAL_BLOCK_MIN_COUNT = 24;
+const PREVIEW_CHUNK_PREFETCH_COUNT = 1;
+const PREVIEW_CHUNK_ROOT_MARGIN = '1100px 0px';
 const md = new MarkdownIt({
   html: true,
   linkify: true,
@@ -134,7 +145,6 @@ const { isAggregation, services } = storeToRefs(aggregationStore);
 
 const loading = ref(false);
 const previewLoading = ref(false);
-const themeSwitching = ref(false);
 const exportDialogVisible = ref(false);
 const exportSubmitting = ref(false);
 
@@ -154,6 +164,12 @@ const includeMarkdownDocs = computed(() =>
 
 const exportFormat = ref<ExportFormat>('docx');
 const previewHtml = ref('');
+const previewChunks = shallowRef<string[]>([]);
+const previewChunkPlaceholderHeights = shallowRef<number[]>([]);
+const previewLoadedChunkIndexes = shallowRef<Set<number>>(new Set());
+const previewVisibleChunkIndexes = shallowRef<Set<number>>(new Set());
+const previewScrollRef = ref<HTMLElement | null>(null);
+const previewChunkElements = shallowRef<(HTMLElement | null)[]>([]);
 
 const currentOpenApi = shallowRef<null | OpenAPISpec>(null);
 const currentSwaggerConfig = shallowRef<null | SwaggerConfig>(null);
@@ -163,7 +179,8 @@ const aggregationGatewayOpenApi = shallowRef<null | OpenAPISpec>(null);
 const aggregationServiceDocs = shallowRef<ServiceExportDocItem[]>([]);
 let previewAutoTimer: null | number = null;
 let previewGenerationToken = 0;
-let themeSwitchTimer: null | number = null;
+let previewChunkObserver: IntersectionObserver | null = null;
+let previewChunkMeasureFrame: null | number = null;
 
 const filteredOperations = computed(() => {
   const keyword = operationKeyword.value.trim().toLowerCase();
@@ -353,7 +370,9 @@ const summaryText = computed(() => {
     : `当前已选择接口 ${selectedOperationItems.value.length} 个（可按分组勾选部分接口）`;
 });
 
-const isPreviewEmpty = computed(() => !previewHtml.value);
+const isPreviewEmpty = computed(
+  () => !previewHtml.value && previewChunks.value.length <= 0,
+);
 const exportFormatTextMap: Record<ExportFormat, string> = {
   docx: 'Word(.docx)',
   pdf: 'PDF',
@@ -1989,6 +2008,84 @@ function buildExportHtml(markdownContent: string, title: string) {
 </html>`;
 }
 
+function buildPreviewContent(markdownContent: string) {
+  const rendered = md.render(markdownContent);
+  if (typeof window === 'undefined') {
+    return {
+      html: rendered,
+      chunks: [] as string[],
+      placeholderHeights: [] as number[],
+    };
+  }
+  const template = document.createElement('template');
+  template.innerHTML = rendered;
+  const topLevelBlocks = [...template.content.children];
+  if (topLevelBlocks.length <= PREVIEW_VIRTUAL_BLOCK_MIN_COUNT) {
+    return {
+      html: rendered,
+      chunks: [],
+      placeholderHeights: [],
+    };
+  }
+
+  const chunks: string[] = [];
+  const placeholderHeights: number[] = [];
+  const appendChunk = (nodes: Element[]) => {
+    if (nodes.length <= 0) {
+      return;
+    }
+    const container = document.createElement('section');
+    nodes.forEach((node) => {
+      container.append(node);
+    });
+    chunks.push(container.innerHTML);
+    placeholderHeights.push(Math.max(560, nodes.length * 56));
+  };
+
+  const semanticChunks: Element[][] = [];
+  let currentChunk: Element[] = [];
+  let chunkHasOperationHeading = false;
+
+  topLevelBlocks.forEach((block) => {
+    const isOperationHeading = block.tagName === 'H4';
+    if (isOperationHeading && chunkHasOperationHeading) {
+      semanticChunks.push(currentChunk);
+      currentChunk = [];
+      chunkHasOperationHeading = false;
+    }
+    currentChunk.push(block);
+    if (isOperationHeading) {
+      chunkHasOperationHeading = true;
+    }
+  });
+
+  if (currentChunk.length > 0) {
+    semanticChunks.push(currentChunk);
+  }
+
+  if (semanticChunks.length <= 1) {
+    for (
+      let index = 0;
+      index < topLevelBlocks.length;
+      index += PREVIEW_VIRTUAL_BLOCK_CHUNK_SIZE
+    ) {
+      appendChunk(
+        topLevelBlocks.slice(index, index + PREVIEW_VIRTUAL_BLOCK_CHUNK_SIZE),
+      );
+    }
+  } else {
+    semanticChunks.forEach((chunkNodes) => {
+      appendChunk(chunkNodes);
+    });
+  }
+
+  return {
+    html: '',
+    chunks,
+    placeholderHeights,
+  };
+}
+
 function decodeHtmlEntities(text: string) {
   return text
     .replaceAll('&nbsp;', ' ')
@@ -2207,9 +2304,191 @@ function downloadFile(content: BlobPart, fileName: string, mimeType: string) {
   URL.revokeObjectURL(url);
 }
 
+function resetPreviewChunkObserver() {
+  if (previewChunkObserver) {
+    previewChunkObserver.disconnect();
+    previewChunkObserver = null;
+  }
+  previewVisibleChunkIndexes.value = new Set();
+}
+
+function resetPreviewChunkMeasureFrame() {
+  if (previewChunkMeasureFrame) {
+    window.cancelAnimationFrame(previewChunkMeasureFrame);
+    previewChunkMeasureFrame = null;
+  }
+}
+
+function isSameNumberSet(a: Set<number>, b: Set<number>) {
+  if (a.size !== b.size) {
+    return false;
+  }
+  for (const value of a) {
+    if (!b.has(value)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function initPreviewLoadedChunkIndexes(totalChunkCount: number) {
+  const loaded = new Set<number>();
+  const initialCount = Math.min(
+    totalChunkCount,
+    PREVIEW_CHUNK_PREFETCH_COUNT * 2 + 1,
+  );
+  for (let index = 0; index < initialCount; index += 1) {
+    loaded.add(index);
+  }
+  previewLoadedChunkIndexes.value = loaded;
+}
+
+function updatePreviewLoadedChunkIndexesByVisible() {
+  if (previewChunks.value.length <= 0) {
+    previewLoadedChunkIndexes.value = new Set();
+    return;
+  }
+
+  const nextLoaded = new Set<number>();
+  if (previewVisibleChunkIndexes.value.size <= 0) {
+    initPreviewLoadedChunkIndexes(previewChunks.value.length);
+    return;
+  }
+
+  previewVisibleChunkIndexes.value.forEach((chunkIndex) => {
+    const startIndex = Math.max(0, chunkIndex - PREVIEW_CHUNK_PREFETCH_COUNT);
+    const endIndex = Math.min(
+      previewChunks.value.length - 1,
+      chunkIndex + PREVIEW_CHUNK_PREFETCH_COUNT,
+    );
+    for (let index = startIndex; index <= endIndex; index += 1) {
+      nextLoaded.add(index);
+    }
+  });
+
+  if (!isSameNumberSet(nextLoaded, previewLoadedChunkIndexes.value)) {
+    previewLoadedChunkIndexes.value = nextLoaded;
+  }
+}
+
+function syncPreviewChunkPlaceholderHeights() {
+  const nextHeights = [...previewChunkPlaceholderHeights.value];
+  let changed = false;
+  previewLoadedChunkIndexes.value.forEach((index) => {
+    const element = previewChunkElements.value[index];
+    if (!element) {
+      return;
+    }
+    const height = Math.ceil(element.getBoundingClientRect().height);
+    if (height <= 0) {
+      return;
+    }
+    const currentHeight = nextHeights[index] || 0;
+    if (Math.abs(currentHeight - height) > 12) {
+      nextHeights[index] = height;
+      changed = true;
+    }
+  });
+  if (changed) {
+    previewChunkPlaceholderHeights.value = nextHeights;
+  }
+}
+
+function scheduleSyncPreviewChunkPlaceholderHeights() {
+  if (previewChunkMeasureFrame) {
+    return;
+  }
+  previewChunkMeasureFrame = window.requestAnimationFrame(() => {
+    previewChunkMeasureFrame = null;
+    syncPreviewChunkPlaceholderHeights();
+  });
+}
+
+function isPreviewChunkLoaded(index: number) {
+  return previewLoadedChunkIndexes.value.has(index);
+}
+
+function setPreviewChunkRef(element: Element | null, index: number) {
+  previewChunkElements.value[index] = (element as HTMLElement) || null;
+}
+
+function setupPreviewChunkObserver() {
+  resetPreviewChunkObserver();
+
+  if (previewChunks.value.length <= 0) {
+    return;
+  }
+
+  const root = previewScrollRef.value;
+  if (!root || typeof window === 'undefined') {
+    previewLoadedChunkIndexes.value = new Set(
+      previewChunks.value.map((_, index) => index),
+    );
+    return;
+  }
+
+  if (window.IntersectionObserver === undefined) {
+    previewLoadedChunkIndexes.value = new Set(
+      previewChunks.value.map((_, index) => index),
+    );
+    return;
+  }
+
+  const observer = new window.IntersectionObserver(
+    (entries) => {
+      const nextVisible = new Set(previewVisibleChunkIndexes.value);
+      let visibleChanged = false;
+      entries.forEach((entry) => {
+        const chunkIndex = Number.parseInt(
+          (entry.target as HTMLElement).dataset.previewChunkIndex || '-1',
+          10,
+        );
+        if (chunkIndex < 0 || chunkIndex >= previewChunks.value.length) {
+          return;
+        }
+        if (entry.isIntersecting) {
+          if (!nextVisible.has(chunkIndex)) {
+            nextVisible.add(chunkIndex);
+            visibleChanged = true;
+          }
+        } else if (nextVisible.delete(chunkIndex)) {
+          visibleChanged = true;
+        }
+      });
+      if (!visibleChanged) {
+        return;
+      }
+      previewVisibleChunkIndexes.value = nextVisible;
+      updatePreviewLoadedChunkIndexesByVisible();
+      void nextTick().then(() => {
+        scheduleSyncPreviewChunkPlaceholderHeights();
+      });
+    },
+    {
+      root,
+      rootMargin: PREVIEW_CHUNK_ROOT_MARGIN,
+      threshold: 0,
+    },
+  );
+
+  previewChunkObserver = observer;
+  previewChunkElements.value.forEach((element) => {
+    if (element) {
+      observer.observe(element);
+    }
+  });
+}
+
 function resetPreviewState() {
+  resetPreviewChunkObserver();
+  resetPreviewChunkMeasureFrame();
   previewLoading.value = false;
   previewHtml.value = '';
+  previewChunks.value = [];
+  previewChunkPlaceholderHeights.value = [];
+  previewLoadedChunkIndexes.value = new Set();
+  previewVisibleChunkIndexes.value = new Set();
+  previewChunkElements.value = [];
 }
 
 async function generatePreview(silentOrEvent?: boolean | Event) {
@@ -2245,10 +2524,30 @@ async function generatePreview(silentOrEvent?: boolean | Event) {
     if (currentToken !== previewGenerationToken) {
       return;
     }
-    previewHtml.value = md.render(markdownContent);
+    const previewContent = buildPreviewContent(markdownContent);
+    previewHtml.value = previewContent.html;
+    previewChunks.value = previewContent.chunks;
+    previewChunkPlaceholderHeights.value = previewContent.placeholderHeights;
+    previewChunkElements.value = Array.from(
+      { length: previewContent.chunks.length },
+      () => null,
+    );
+    if (previewContent.chunks.length > 0) {
+      initPreviewLoadedChunkIndexes(previewContent.chunks.length);
+    } else {
+      previewLoadedChunkIndexes.value = new Set();
+      resetPreviewChunkObserver();
+    }
   } finally {
     if (currentToken === previewGenerationToken) {
       previewLoading.value = false;
+      if (previewChunks.value.length > 0) {
+        await nextTick();
+        if (currentToken === previewGenerationToken) {
+          setupPreviewChunkObserver();
+          scheduleSyncPreviewChunkPlaceholderHeights();
+        }
+      }
     }
   }
 }
@@ -2365,17 +2664,6 @@ function scheduleAutoPreview() {
   );
 }
 
-function toggleThemeSwitchingState() {
-  themeSwitching.value = true;
-  if (themeSwitchTimer) {
-    window.clearTimeout(themeSwitchTimer);
-  }
-  themeSwitchTimer = window.setTimeout(() => {
-    themeSwitching.value = false;
-    themeSwitchTimer = null;
-  }, 220);
-}
-
 watch(
   () => isAggregation.value,
   async () => {
@@ -2413,31 +2701,19 @@ watch(loading, (value) => {
   }
 });
 
-watch(
-  () => preferences.theme.mode,
-  () => {
-    toggleThemeSwitchingState();
-  },
-);
-
 onBeforeUnmount(() => {
   if (previewAutoTimer) {
     window.clearTimeout(previewAutoTimer);
     previewAutoTimer = null;
   }
   previewGenerationToken += 1;
-  if (themeSwitchTimer) {
-    window.clearTimeout(themeSwitchTimer);
-    themeSwitchTimer = null;
-  }
+  resetPreviewChunkObserver();
+  resetPreviewChunkMeasureFrame();
 });
 </script>
 
 <template>
-  <div
-    class="doc-export-page h-full overflow-hidden px-5 pb-2 pt-5"
-    :class="[{ 'theme-switching': themeSwitching }]"
-  >
+  <div class="doc-export-page h-full overflow-hidden px-5 pb-2 pt-5">
     <ElRow :gutter="16" class="doc-export-layout">
       <ElCol :span="10" class="doc-export-col">
         <div class="doc-left-column">
@@ -2935,9 +3211,34 @@ onBeforeUnmount(() => {
               />
               <div
                 v-else
+                ref="previewScrollRef"
                 class="doc-preview-html overflow-auto [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:p-2 [&_th]:border [&_th]:p-2"
-                v-html="previewHtml"
-              ></div>
+              >
+                <div
+                  v-if="previewChunks.length <= 0"
+                  class="doc-preview-html-content"
+                  v-html="previewHtml"
+                ></div>
+                <template v-else>
+                  <section
+                    v-for="(chunk, index) in previewChunks"
+                    :key="`preview-chunk-${index}`"
+                    :ref="
+                      (el) => setPreviewChunkRef(el as Element | null, index)
+                    "
+                    :data-preview-chunk-index="index"
+                    class="doc-preview-virtual-block"
+                    :style="
+                      isPreviewChunkLoaded(index)
+                        ? undefined
+                        : {
+                            minHeight: `${previewChunkPlaceholderHeights[index] || 720}px`,
+                          }
+                    "
+                    v-html="isPreviewChunkLoaded(index) ? chunk : ''"
+                  ></section>
+                </template>
+              </div>
             </template>
           </ElCard>
         </div>
@@ -3338,6 +3639,20 @@ onBeforeUnmount(() => {
   overflow-wrap: anywhere;
 }
 
+.doc-preview-html-content,
+.doc-preview-virtual-block {
+  width: 100%;
+}
+
+@supports (content-visibility: auto) {
+  .doc-preview-html:deep(.doc-preview-virtual-block) {
+    display: block;
+    contain: content;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 1200px;
+  }
+}
+
 .doc-preview-html:deep(p) {
   margin: 0 0 14px;
 }
@@ -3424,14 +3739,6 @@ onBeforeUnmount(() => {
 .group-submenu-motion-leave-from {
   max-height: 1000px;
   opacity: 1;
-}
-
-.doc-export-page.theme-switching {
-  :deep(*) {
-    transition-duration: 0s !important;
-    animation-duration: 0s !important;
-    animation-delay: 0s !important;
-  }
 }
 
 @media (max-width: 920px) {
