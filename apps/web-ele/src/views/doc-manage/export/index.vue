@@ -3277,11 +3277,11 @@ onBeforeUnmount(() => {
               v-if="exportFormat === option.format"
               class="export-format-card__badge"
             >
-              <svg width="9" height="9" viewBox="0 0 9 9" fill="none">
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
                 <path
-                  d="M1.5 4.5L3.5 6.5L7.5 2.5"
-                  stroke="white"
-                  stroke-width="1.6"
+                  d="M2 5.2L4 7.2L8 3"
+                  stroke="currentColor"
+                  stroke-width="1.5"
                   stroke-linecap="round"
                   stroke-linejoin="round"
                 />
@@ -3431,6 +3431,10 @@ onBeforeUnmount(() => {
 }
 
 .export-dialog-panel {
+  --doc-export-card-radius: calc(var(--radius) * 2.75);
+  --doc-export-card-inner-radius: calc(var(--radius) * 2.25);
+  --doc-export-badge-radius: calc(var(--radius) * 2);
+
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -3485,7 +3489,7 @@ onBeforeUnmount(() => {
     var(--el-fill-color-lighter) 100%
   );
   border: 1px solid var(--el-border-color);
-  border-radius: 22px;
+  border-radius: var(--doc-export-card-radius);
   transition:
     transform 0.18s ease,
     box-shadow 0.18s ease,
@@ -3496,7 +3500,7 @@ onBeforeUnmount(() => {
 .export-format-card:hover,
 .export-format-card:focus-visible {
   outline: none;
-  border-color: rgb(var(--el-color-primary-rgb) / 42%);
+  border-color: color-mix(in srgb, var(--el-color-primary) 42%, transparent);
   box-shadow: 0 18px 36px rgb(15 23 42 / 10%);
   transform: translateY(-2px);
 }
@@ -3507,23 +3511,26 @@ onBeforeUnmount(() => {
     rgb(var(--el-color-primary-rgb) / 12%) 0%,
     var(--el-bg-color) 100%
   );
-  border-color: rgb(var(--el-color-primary-rgb) / 46%);
+  border-color: var(--el-color-primary);
   box-shadow:
-    0 0 0 1px rgb(var(--el-color-primary-rgb) / 18%),
-    0 20px 44px rgb(var(--el-color-primary-rgb) / 14%);
+    0 0 0 1px color-mix(in srgb, var(--el-color-primary) 22%, transparent),
+    0 20px 44px color-mix(in srgb, var(--el-color-primary) 16%, transparent);
 }
 
 .export-format-card__badge {
   position: absolute;
-  top: 7px;
-  right: 8px;
+  top: max(7px, calc(var(--radius) * 1.1));
+  right: max(8px, calc(var(--radius) * 1.1));
   display: flex;
   align-items: center;
   justify-content: center;
   width: 17px;
   height: 17px;
-  background: var(--el-color-primary);
-  border-radius: 50%;
+  background: transparent;
+  border: 1.5px solid var(--el-color-primary);
+  border-radius: var(--doc-export-badge-radius);
+  color: var(--el-color-primary);
+  box-shadow: 0 0 0 2px var(--el-bg-color);
 }
 
 .export-format-card__logo {
@@ -3539,7 +3546,7 @@ onBeforeUnmount(() => {
     rgb(var(--el-color-primary-rgb) / 4%) 100%
   );
   border: 1px solid rgb(var(--el-color-primary-rgb) / 14%);
-  border-radius: 18px;
+  border-radius: var(--doc-export-card-inner-radius);
 }
 
 .export-format-card__icon {
