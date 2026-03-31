@@ -300,8 +300,8 @@ const formatOrTypeLabel = (orType?: string) => {
 .auth-chip {
   flex-wrap: wrap;
   gap: 5px;
-  background: var(--el-fill-color-light);
   cursor: default;
+  background: var(--el-fill-color-light);
 }
 
 .auth-chip__title {

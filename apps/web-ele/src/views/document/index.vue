@@ -224,15 +224,15 @@ const debugReady = computed(() =>
 
   :deep(.el-tabs__item:not(.is-active) .document-tab-label:hover) {
     color: var(--el-text-color-primary);
-    border-color: color-mix(
-      in srgb,
-      var(--el-text-color-primary) 16%,
-      transparent
-    );
     background: color-mix(
       in srgb,
       var(--el-bg-color) 90%,
       var(--el-fill-color-light) 10%
+    );
+    border-color: color-mix(
+      in srgb,
+      var(--el-text-color-primary) 16%,
+      transparent
     );
   }
 }

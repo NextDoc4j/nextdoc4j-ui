@@ -3517,13 +3517,13 @@ onBeforeUnmount(() => {
   position: absolute;
   top: 7px;
   right: 8px;
-  width: 17px;
-  height: 17px;
-  border-radius: 50%;
-  background: var(--el-color-primary);
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 17px;
+  height: 17px;
+  background: var(--el-color-primary);
+  border-radius: 50%;
 }
 
 .export-format-card__logo {
