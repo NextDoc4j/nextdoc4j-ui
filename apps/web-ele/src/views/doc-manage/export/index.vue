@@ -127,7 +127,8 @@ interface ExportFormatOption {
 const HTTP_METHODS = new Set(['delete', 'get', 'patch', 'post', 'put']);
 const PREVIEW_AUTO_DELAY = 120;
 const PREVIEW_AUTO_DELAY_LARGE = 260;
-const PREVIEW_MAX_OPERATION_COUNT = 200;
+const PREVIEW_LARGE_DATA_THRESHOLD = 200;
+const PREVIEW_RENDER_YIELD_THRESHOLD = 120;
 const PREVIEW_VIRTUAL_BLOCK_CHUNK_SIZE = 24;
 const PREVIEW_VIRTUAL_BLOCK_MIN_COUNT = 24;
 const PREVIEW_CHUNK_PREFETCH_COUNT = 1;
@@ -325,24 +326,7 @@ const selectedCountByNodeKey = computed(() => {
 
   return counts;
 });
-const previewSelectionState = computed(() => {
-  const total =
-    scopeMode.value === 'all'
-      ? operations.value.length
-      : selectedOperationItems.value.length;
-  const limited = total > PREVIEW_MAX_OPERATION_COUNT;
-  return {
-    limited,
-    previewCount: limited ? PREVIEW_MAX_OPERATION_COUNT : total,
-    total,
-  };
-});
-const previewNoticeText = computed(() => {
-  if (!previewSelectionState.value.limited) {
-    return '';
-  }
-  return `当前已选择 ${previewSelectionState.value.total} 个接口，为保证页面流畅，仅预览前 ${PREVIEW_MAX_OPERATION_COUNT} 个接口，导出仍会包含全部已选接口。`;
-});
+const previewNoticeText = computed(() => '');
 const activeExportOption = computed<ExportFormatOption>(() => {
   return (
     exportFormatOptions.find((item) => item.format === exportFormat.value) ||
@@ -1773,10 +1757,7 @@ function isGroupIndeterminate(items: OperationItem[], nodeKey?: string) {
 }
 
 function getPreviewOperations(selectedOps: OperationItem[]) {
-  if (selectedOps.length <= PREVIEW_MAX_OPERATION_COUNT) {
-    return selectedOps;
-  }
-  return selectedOps.slice(0, PREVIEW_MAX_OPERATION_COUNT);
+  return selectedOps;
 }
 
 function waitForNextFrame() {
@@ -2520,9 +2501,21 @@ async function generatePreview(silentOrEvent?: boolean | Event) {
   }
 
   try {
+    if (previewOps.length > PREVIEW_RENDER_YIELD_THRESHOLD) {
+      await waitForNextFrame();
+      if (currentToken !== previewGenerationToken) {
+        return;
+      }
+    }
     const markdownContent = buildMarkdownDocument(subset, previewOps);
     if (currentToken !== previewGenerationToken) {
       return;
+    }
+    if (previewOps.length > PREVIEW_RENDER_YIELD_THRESHOLD) {
+      await waitForNextFrame();
+      if (currentToken !== previewGenerationToken) {
+        return;
+      }
     }
     const previewContent = buildPreviewContent(markdownContent);
     previewHtml.value = previewContent.html;
@@ -2649,6 +2642,10 @@ function scheduleAutoPreview() {
   if (previewAutoTimer) {
     window.clearTimeout(previewAutoTimer);
   }
+  const previewOperationCount =
+    scopeMode.value === 'all'
+      ? operations.value.length
+      : selectedOperationItems.value.length;
   previewGenerationToken += 1;
   previewAutoTimer = window.setTimeout(
     () => {
@@ -2658,7 +2655,7 @@ function scheduleAutoPreview() {
       }
       void generatePreview(true);
     },
-    operations.value.length > PREVIEW_MAX_OPERATION_COUNT
+    previewOperationCount > PREVIEW_LARGE_DATA_THRESHOLD
       ? PREVIEW_AUTO_DELAY_LARGE
       : PREVIEW_AUTO_DELAY,
   );
@@ -3403,8 +3400,8 @@ onBeforeUnmount(() => {
 }
 
 :deep(.doc-export-dialog .el-dialog__header) {
-  margin-right: 0;
   padding: 24px 24px 0;
+  margin-right: 0;
 }
 
 :deep(.doc-export-dialog .el-dialog__title) {
@@ -3486,10 +3483,10 @@ onBeforeUnmount(() => {
 
 .export-format-card:hover,
 .export-format-card:focus-visible {
-  transform: translateY(-2px);
+  outline: none;
   border-color: rgb(var(--el-color-primary-rgb) / 42%);
   box-shadow: 0 18px 36px rgb(15 23 42 / 10%);
-  outline: none;
+  transform: translateY(-2px);
 }
 
 .export-format-card.is-active {
@@ -3563,9 +3560,9 @@ onBeforeUnmount(() => {
 
 .export-dialog-footer {
   display: flex;
+  gap: 12px;
   align-items: center;
   justify-content: flex-end;
-  gap: 12px;
 }
 
 .scope-tree-panel {
@@ -3647,9 +3644,9 @@ onBeforeUnmount(() => {
 @supports (content-visibility: auto) {
   .doc-preview-html:deep(.doc-preview-virtual-block) {
     display: block;
+    contain-intrinsic-size: auto 1200px;
     contain: content;
     content-visibility: auto;
-    contain-intrinsic-size: auto 1200px;
   }
 }
 
