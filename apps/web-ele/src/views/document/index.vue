@@ -150,11 +150,13 @@ const debugReady = computed(() =>
 
 <style scoped lang="scss">
 .document-page {
-  --doc-radius-xl: calc(var(--radius) * 4);
-  --doc-radius-lg: calc(var(--radius) * 3);
-  --doc-radius-md: calc(var(--radius) * 2.25);
-  --doc-radius-sm: calc(var(--radius) * 1.75);
+  --doc-radius-xl: calc(var(--radius) * 1.42);
+  --doc-radius-lg: calc(var(--radius) * 1.18);
+  --doc-radius-md: calc(var(--radius) * 0.94);
+  --doc-radius-sm: calc(var(--radius) * 0.72);
   --doc-page-bg: var(--el-bg-color);
+  --el-border-radius-base: calc(var(--radius) * 0.75);
+  --el-border-radius-small: calc(var(--radius) * 0.62);
 
   padding: 20px;
   background: var(--doc-page-bg);
@@ -175,12 +177,14 @@ const debugReady = computed(() =>
     border: 1px solid
       color-mix(in srgb, var(--el-border-color) 92%, transparent);
     border-radius: var(--doc-radius-lg);
+    overflow: hidden;
     box-shadow: 0 8px 18px
       color-mix(in srgb, var(--el-text-color-primary) 4%, transparent);
   }
 
   :deep(.el-tabs__nav-wrap) {
     padding: 4px;
+    border-radius: var(--doc-radius-md);
   }
 
   :deep(.el-tabs__nav-wrap::after) {
