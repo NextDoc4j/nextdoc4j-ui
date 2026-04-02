@@ -11,12 +11,20 @@ import JsonNode from './json-node.vue';
 
 const props = withDefaults(
   defineProps<{
+    autoExpandDepth?: number;
     defaultExpanded?: boolean;
+    enableChunkedRender?: boolean;
+    initialRenderCount?: number;
+    renderChunkSize?: number;
     schema?: any;
     value?: unknown;
   }>(),
   {
+    autoExpandDepth: Number.POSITIVE_INFINITY,
     defaultExpanded: true,
+    enableChunkedRender: false,
+    initialRenderCount: 120,
+    renderChunkSize: 120,
     schema: undefined,
     value: undefined,
   },
@@ -83,7 +91,7 @@ defineExpose({
 
 <template>
   <div
-    class="overflow-auto rounded p-4 font-mono text-sm"
+    class="json-viewer-scroll-host overflow-auto rounded p-4 font-mono text-sm"
     :class="`theme-${resolvedThemeMode}`"
   >
     <div v-if="parseError" class="json-error">
@@ -100,6 +108,10 @@ defineExpose({
       :key-name="null"
       :depth="0"
       :default-expanded="defaultExpanded"
+      :auto-expand-depth="autoExpandDepth"
+      :enable-chunked-render="enableChunkedRender"
+      :initial-render-count="initialRenderCount"
+      :render-chunk-size="renderChunkSize"
       :schema="schema"
       :parent-schema="null"
     />
@@ -109,6 +121,7 @@ defineExpose({
 <style scoped>
 .theme-dark {
   border: 1px solid #36363a;
+  contain: layout paint style;
 }
 
 .theme-dark .json-error {
@@ -122,6 +135,7 @@ defineExpose({
 
 .theme-light {
   border: 1px solid #e4e4e7;
+  contain: layout paint style;
 }
 
 .theme-light .json-error {

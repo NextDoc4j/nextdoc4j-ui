@@ -34,6 +34,7 @@ const activeView = ref<'debug' | 'detail'>('detail');
 const method = ref('');
 const path = ref('');
 const parameters = ref<any[]>([]);
+const responses = ref<Record<string, any>>({});
 const requestBody = ref();
 const requestBodyType = ref('');
 const security = ref();
@@ -54,6 +55,7 @@ const syncDebugState = (payload?: ApiInfo) => {
   method.value = currentInfo.method;
   path.value = currentInfo.path;
   parameters.value = currentInfo.parameters ?? [];
+  responses.value = currentInfo.responses ?? {};
   requestBody.value = currentInfo.requestBody;
   security.value = currentInfo.security;
   requestBodyType.value = detailPayload?.requestBodyType ?? '';
@@ -124,6 +126,7 @@ const debugReady = computed(() =>
               :method="method"
               :path="path"
               :parameters="parameters"
+              :responses="responses"
               :request-body="requestBody"
               :security="security"
               :request-body-type="requestBodyType"

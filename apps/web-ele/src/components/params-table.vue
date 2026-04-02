@@ -76,19 +76,6 @@ const enableFlexibleColumns = computed(() => {
   return Boolean(props.showDescriptionColumn) && !props.showContentType;
 });
 
-const tableMinWidth = computed(() => {
-  if (props.showDescriptionColumn && props.showContentType) return 720;
-  if (props.showDescriptionColumn) return 640;
-  if (props.showContentType) return 580;
-  return 460;
-});
-
-const tableStyle = computed(() => {
-  return {
-    minWidth: `${tableMinWidth.value}px`,
-  };
-});
-
 function getTableElement() {
   return tableRef.value?.$el as HTMLElement | undefined;
 }
@@ -243,9 +230,8 @@ onBeforeUnmount(() => {
       class="params-table"
       :data="tableData"
       header-cell-class-name="p-2"
-      table-layout="auto"
+      table-layout="fixed"
       :allow-drag-last-column="false"
-      :style="tableStyle"
     >
       <ElTableColumn :width="48" align="center">
         <template #header>
@@ -258,7 +244,7 @@ onBeforeUnmount(() => {
       <ElTableColumn
         prop="name"
         label="参数名"
-        :min-width="enableFlexibleColumns ? 120 : 150"
+        :min-width="enableFlexibleColumns ? 108 : 148"
       >
         <template #default="{ row }">
           <ElInput v-model="row.name" placeholder="参数名" />
@@ -267,7 +253,7 @@ onBeforeUnmount(() => {
       <ElTableColumn
         prop="value"
         label="参数值"
-        :min-width="enableFlexibleColumns ? 180 : 220"
+        :min-width="enableFlexibleColumns ? 138 : 190"
       >
         <template #default="{ row, $index }">
           <div v-if="row.format === 'binary'" class="pl-2 pt-2">
@@ -339,7 +325,7 @@ onBeforeUnmount(() => {
         v-if="showDescriptionColumn"
         prop="description"
         label="描述"
-        :min-width="enableFlexibleColumns ? 180 : 220"
+        :min-width="enableFlexibleColumns ? 126 : 170"
         show-overflow-tooltip
       >
         <template #default="{ row, $index }">
@@ -424,12 +410,11 @@ onBeforeUnmount(() => {
 .params-table-wrap {
   min-width: 0;
   max-width: 100%;
-  overflow: auto hidden;
+  overflow: hidden;
 }
 
 :deep(.params-table.el-table) {
   width: 100%;
-  min-width: 100%;
 }
 
 :deep(.params-table .cell) {
@@ -446,19 +431,19 @@ onBeforeUnmount(() => {
 }
 
 .param-description-cell {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
-  justify-content: space-between;
   width: 100%;
   min-width: 0;
 }
 
 .param-description-main {
-  display: inline-flex;
-  flex: 1 1 auto;
+  display: flex;
   align-items: center;
   min-width: 0;
+  width: 100%;
 }
 
 .param-description-main :deep(.el-tooltip__trigger) {
@@ -513,10 +498,10 @@ onBeforeUnmount(() => {
   flex: none;
   align-items: center;
   justify-content: center;
+  justify-self: end;
   width: 24px;
   height: 24px;
   padding: 0;
-  margin-left: auto;
   color: var(--el-text-color-secondary);
   cursor: pointer;
   background: transparent;

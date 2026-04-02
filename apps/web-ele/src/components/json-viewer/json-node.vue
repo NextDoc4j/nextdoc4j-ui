@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 
 import { useClipboard } from '@vueuse/core';
 import { ElMessage } from 'element-plus';
@@ -7,18 +7,35 @@ import { ElMessage } from 'element-plus';
 import { $t } from '#/locales';
 import { parseExtendedEnum } from '#/utils/enumexpand';
 
-const props = defineProps<{
-  defaultExpanded: boolean;
-  depth: number;
-  isLastItem?: boolean;
-  keyName: null | number | string;
-  parentSchema?: any;
-  schema?: any;
-  value: unknown;
-}>();
+const props = withDefaults(
+  defineProps<{
+    autoExpandDepth?: number;
+    defaultExpanded: boolean;
+    depth: number;
+    enableChunkedRender?: boolean;
+    initialRenderCount?: number;
+    isLastItem?: boolean;
+    keyName: null | number | string;
+    parentSchema?: any;
+    renderChunkSize?: number;
+    schema?: any;
+    value: unknown;
+  }>(),
+  {
+    autoExpandDepth: Number.POSITIVE_INFINITY,
+    enableChunkedRender: false,
+    initialRenderCount: 120,
+    isLastItem: false,
+    parentSchema: undefined,
+    renderChunkSize: 120,
+    schema: undefined,
+  },
+);
 
 const childNodes = ref<any[]>([]);
-const isExpanded = ref(props.defaultExpanded);
+const isExpanded = ref(
+  props.defaultExpanded && props.depth <= props.autoExpandDepth,
+);
 const { copy, copied } = useClipboard({ legacy: true });
 
 const valueType = computed(() => {
@@ -230,12 +247,222 @@ const entryKeys = computed(() => {
   return [];
 });
 
+const renderedCount = ref(0);
+const loadMoreAnchor = ref<HTMLElement | null>(null);
+const nodeRootRef = ref<HTMLElement | null>(null);
+let loadMoreObserver: IntersectionObserver | null = null;
+let loadMoreRaf: null | number = null;
+let childrenVisibilityObserver: IntersectionObserver | null = null;
+
+const shouldLazyMountChildren = computed(() => {
+  return Boolean(
+    props.enableChunkedRender && props.depth > 0 && isComplex.value,
+  );
+});
+
+const childrenVisible = ref(!shouldLazyMountChildren.value);
+
+const chunkRenderEnabled = computed(() => {
+  return Boolean(
+    props.enableChunkedRender &&
+      entryKeys.value.length > props.initialRenderCount,
+  );
+});
+
+const visibleEntryKeys = computed(() => {
+  if (!chunkRenderEnabled.value || !isExpanded.value) {
+    return entryKeys.value;
+  }
+  return entryKeys.value.slice(0, renderedCount.value);
+});
+
+const hasMoreChildren = computed(() => {
+  return visibleEntryKeys.value.length < entryKeys.value.length;
+});
+
+const remainingChildrenCount = computed(() => {
+  return Math.max(entryKeys.value.length - visibleEntryKeys.value.length, 0);
+});
+
+const nextChunkCount = computed(() => {
+  return Math.min(
+    Math.max(props.renderChunkSize, 1),
+    remainingChildrenCount.value,
+  );
+});
+
+const resetRenderedCount = () => {
+  const safeInitialCount = Math.max(props.initialRenderCount, 1);
+  if (!chunkRenderEnabled.value) {
+    renderedCount.value = entryKeys.value.length;
+    return;
+  }
+  renderedCount.value = Math.min(entryKeys.value.length, safeInitialCount);
+};
+
+const loadMoreChildren = () => {
+  const safeChunkSize = Math.max(props.renderChunkSize, 1);
+  if (!hasMoreChildren.value) return;
+  renderedCount.value = Math.min(
+    entryKeys.value.length,
+    renderedCount.value + safeChunkSize,
+  );
+};
+
+const scheduleLoadMoreChildren = () => {
+  if (typeof window === 'undefined') {
+    loadMoreChildren();
+    return;
+  }
+  if (loadMoreRaf) {
+    return;
+  }
+  loadMoreRaf = window.requestAnimationFrame(() => {
+    loadMoreRaf = null;
+    loadMoreChildren();
+  });
+};
+
+const stopLoadMoreObserver = () => {
+  loadMoreObserver?.disconnect();
+  loadMoreObserver = null;
+};
+
+const stopChildrenVisibilityObserver = () => {
+  childrenVisibilityObserver?.disconnect();
+  childrenVisibilityObserver = null;
+};
+
+const syncChildrenVisibilityObserver = async () => {
+  stopChildrenVisibilityObserver();
+  if (
+    !shouldLazyMountChildren.value ||
+    !isExpanded.value ||
+    childrenVisible.value ||
+    typeof window === 'undefined' ||
+    typeof IntersectionObserver === 'undefined'
+  ) {
+    return;
+  }
+
+  await nextTick();
+  if (!nodeRootRef.value) {
+    return;
+  }
+
+  const scrollRoot = nodeRootRef.value.closest('.json-viewer-scroll-host');
+  childrenVisibilityObserver = new IntersectionObserver(
+    (entries) => {
+      if (entries.some((item) => item.isIntersecting)) {
+        childrenVisible.value = true;
+        stopChildrenVisibilityObserver();
+      }
+    },
+    {
+      root: scrollRoot instanceof HTMLElement ? scrollRoot : null,
+      rootMargin: '420px 0px 420px 0px',
+      threshold: 0,
+    },
+  );
+
+  childrenVisibilityObserver.observe(nodeRootRef.value);
+};
+
+const syncLoadMoreObserver = async () => {
+  stopLoadMoreObserver();
+  if (
+    !childrenVisible.value ||
+    !chunkRenderEnabled.value ||
+    !isExpanded.value ||
+    !hasMoreChildren.value ||
+    typeof window === 'undefined' ||
+    typeof IntersectionObserver === 'undefined'
+  ) {
+    return;
+  }
+
+  await nextTick();
+  if (!loadMoreAnchor.value) {
+    return;
+  }
+
+  const scrollRoot = loadMoreAnchor.value.closest('.json-viewer-scroll-host');
+  loadMoreObserver = new IntersectionObserver(
+    (entries) => {
+      if (entries.some((item) => item.isIntersecting)) {
+        scheduleLoadMoreChildren();
+      }
+    },
+    {
+      root: scrollRoot instanceof HTMLElement ? scrollRoot : null,
+      rootMargin: '260px 0px 260px 0px',
+      threshold: 0,
+    },
+  );
+
+  loadMoreObserver.observe(loadMoreAnchor.value);
+};
+
+watch(
+  () => shouldLazyMountChildren.value,
+  () => {
+    if (!shouldLazyMountChildren.value) {
+      childrenVisible.value = true;
+      stopChildrenVisibilityObserver();
+      return;
+    }
+    childrenVisible.value = false;
+    void syncChildrenVisibilityObserver();
+  },
+  { immediate: true },
+);
+
+watch(
+  () => isExpanded.value,
+  () => {
+    if (!isExpanded.value) {
+      stopChildrenVisibilityObserver();
+      return;
+    }
+    void syncChildrenVisibilityObserver();
+  },
+);
+
+watch(
+  [
+    () => isExpanded.value,
+    () => childrenVisible.value,
+    () => entryKeys.value.length,
+    () => chunkRenderEnabled.value,
+  ],
+  () => {
+    if (!isExpanded.value || !childrenVisible.value) {
+      renderedCount.value = 0;
+      stopLoadMoreObserver();
+      return;
+    }
+    resetRenderedCount();
+    void syncLoadMoreObserver();
+  },
+  { immediate: true },
+);
+
+watch(
+  () => hasMoreChildren.value,
+  () => {
+    void syncLoadMoreObserver();
+  },
+);
+
 const showCollapseButton = computed(() => {
   return isComplex.value && isExpanded.value && itemCount.value > 0;
 });
 
 function toggleExpand() {
   isExpanded.value = !isExpanded.value;
+  if (!isExpanded.value) {
+    stopLoadMoreObserver();
+  }
 }
 
 function expandAll() {
@@ -271,10 +498,23 @@ async function copyToClipboard() {
 }
 
 defineExpose({ expandAll, collapseAll });
+
+onBeforeUnmount(() => {
+  stopLoadMoreObserver();
+  stopChildrenVisibilityObserver();
+  if (loadMoreRaf && typeof window !== 'undefined') {
+    window.cancelAnimationFrame(loadMoreRaf);
+    loadMoreRaf = null;
+  }
+});
 </script>
 
 <template>
-  <div class="json-node" :class="{ 'has-collapse-btn': showCollapseButton }">
+  <div
+    ref="nodeRootRef"
+    class="json-node"
+    :class="{ 'has-collapse-btn': showCollapseButton }"
+  >
     <template v-if="isComplex">
       <div class="node-header">
         <div
@@ -367,22 +607,54 @@ defineExpose({ expandAll, collapseAll });
 
       <div v-if="isExpanded" class="node-content">
         <div class="vertical-line"></div>
-        <JsonNode
-          v-for="(key, index) in entryKeys"
-          :key="key"
-          ref="childNodes"
-          :value="
-            valueType === 'array'
-              ? (value as unknown[])[key as number]
-              : (value as Record<string, unknown>)[key]
-          "
-          :key-name="key"
-          :depth="depth + 1"
-          :default-expanded="defaultExpanded"
-          :is-last-item="index === entryKeys.length - 1"
-          :parent-schema="currentFieldSchema"
-          style="padding-left: 32px"
-        />
+        <template v-if="childrenVisible">
+          <JsonNode
+            v-for="(key, index) in visibleEntryKeys"
+            :key="key"
+            ref="childNodes"
+            :value="
+              valueType === 'array'
+                ? (value as unknown[])[key as number]
+                : (value as Record<string, unknown>)[key]
+            "
+            :key-name="key"
+            :depth="depth + 1"
+            :default-expanded="defaultExpanded"
+            :auto-expand-depth="autoExpandDepth"
+            :enable-chunked-render="enableChunkedRender"
+            :initial-render-count="initialRenderCount"
+            :render-chunk-size="renderChunkSize"
+            :is-last-item="
+              index === visibleEntryKeys.length - 1 && !hasMoreChildren
+            "
+            :parent-schema="currentFieldSchema"
+            style="padding-left: 32px"
+          />
+          <div
+            v-if="hasMoreChildren"
+            ref="loadMoreAnchor"
+            class="node-load-more"
+            style="padding-left: 32px"
+          >
+            <button
+              type="button"
+              class="node-load-more__button"
+              @click="loadMoreChildren"
+            >
+              继续加载 {{ nextChunkCount }} 项（剩余
+              {{ remainingChildrenCount }}）
+            </button>
+          </div>
+        </template>
+        <div v-else class="node-lazy-placeholder" style="padding-left: 32px">
+          <button
+            type="button"
+            class="node-lazy-placeholder__button"
+            @click="childrenVisible = true"
+          >
+            加载子节点
+          </button>
+        </div>
         <div class="node-footer">
           <span class="bracket">{{ closeBracket }}</span>
           <span v-if="!isLastItem && depth > 0" class="comma">,</span>
@@ -469,12 +741,82 @@ defineExpose({ expandAll, collapseAll });
   font-size: 11px;
 }
 
+.node-load-more {
+  display: flex;
+  align-items: center;
+  min-height: 26px;
+}
+
+.node-lazy-placeholder {
+  display: flex;
+  align-items: center;
+  min-height: 26px;
+}
+
+.node-load-more__button {
+  height: 22px;
+  padding: 0 10px;
+  font-size: 11px;
+  line-height: 22px;
+  cursor: pointer;
+  border-radius: 999px;
+}
+
+.node-lazy-placeholder__button {
+  height: 22px;
+  padding: 0 10px;
+  font-size: 11px;
+  line-height: 22px;
+  cursor: pointer;
+  border-radius: 999px;
+}
+
 .theme-dark .count-label {
   color: #99999980;
 }
 
+.theme-dark .node-load-more__button {
+  color: #9fb3d1;
+  background: rgb(87 114 157 / 16%);
+  border: 1px solid rgb(116 147 196 / 36%);
+}
+
+.theme-dark .node-lazy-placeholder__button {
+  color: #9fb3d1;
+  background: rgb(87 114 157 / 10%);
+  border: 1px dashed rgb(116 147 196 / 30%);
+}
+
+.theme-dark .node-load-more__button:hover {
+  background: rgb(87 114 157 / 24%);
+}
+
+.theme-dark .node-lazy-placeholder__button:hover {
+  background: rgb(87 114 157 / 18%);
+}
+
 .theme-light .count-label {
   color: #99999980;
+}
+
+.theme-light .node-load-more__button {
+  color: #2d4f87;
+  background: #edf3ff;
+  border: 1px solid #bfd1f3;
+}
+
+.theme-light .node-lazy-placeholder__button {
+  color: #2d4f87;
+  background: #f4f7ff;
+  border: 1px dashed #bfd1f3;
+}
+
+.theme-light .node-load-more__button:hover {
+  background: #e2ecff;
+}
+
+.theme-light .node-lazy-placeholder__button:hover {
+  background: #edf3ff;
 }
 
 .preview-container {

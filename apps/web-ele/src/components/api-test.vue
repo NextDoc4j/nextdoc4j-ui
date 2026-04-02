@@ -1,7 +1,12 @@
 <script lang="ts" setup>
 import type { ParamsType } from './body-params.vue';
 
-import type { ParameterObject, SecuritySchemeObject } from '#/typings/openApi';
+import type {
+  ParameterObject,
+  ResponseObject,
+  SchemaObject,
+  SecuritySchemeObject,
+} from '#/typings/openApi';
 
 import {
   computed,
@@ -45,6 +50,7 @@ import {
   useTokenStore,
 } from '#/store';
 import { useAggregationStore } from '#/store/aggregation';
+import { resolveSchema } from '#/utils/schema';
 
 import bodyParams from './body-params.vue';
 import paramsTable from './params-table.vue';
@@ -106,6 +112,7 @@ const props = defineProps<{
   path: string;
   requestBody: any;
   requestBodyType: string;
+  responses?: Record<string, ResponseObject>;
   security: any;
 }>();
 
@@ -386,6 +393,145 @@ const responseMimeType = ref('');
 const responseHeaders = ref<
   Array<{ enabled: boolean; name: string; value: string }>
 >([]);
+
+const hasRenderableSchema = (schema: any) => {
+  if (!schema) return false;
+  return Boolean(
+    schema.properties ||
+      schema.$ref ||
+      schema.items ||
+      (Array.isArray(schema.oneOf) && schema.oneOf.length > 0) ||
+      (Array.isArray(schema.anyOf) && schema.anyOf.length > 0) ||
+      (Array.isArray(schema.allOf) && schema.allOf.length > 0),
+  );
+};
+
+const pickContentSchema = (
+  content?: Record<string, { schema?: SchemaObject }>,
+) => {
+  if (!content) return null;
+
+  return (
+    content['application/json']?.schema ||
+    content['*/*']?.schema ||
+    Object.values(content).find((item) => Boolean(item?.schema))?.schema ||
+    null
+  );
+};
+
+const prepareResponseSchema = (schema: any): any => {
+  if (!schema) return null;
+
+  const resolved = schema.$ref ? resolveSchema(schema) : schema;
+  if (!resolved) {
+    return null;
+  }
+
+  if (Array.isArray(resolved.oneOf) && resolved.oneOf.length > 0) {
+    return {
+      ...resolved,
+      oneOf: resolved.oneOf
+        .map((item: SchemaObject) => prepareResponseSchema(item))
+        .filter(Boolean),
+    };
+  }
+
+  if (Array.isArray(resolved.allOf) && resolved.allOf.length > 0) {
+    const mergedProperties = { ...resolved.properties };
+    const required = new Set<string>(resolved.required || []);
+
+    resolved.allOf.forEach((item: SchemaObject) => {
+      const current = prepareResponseSchema(item);
+      if (current?.properties) {
+        Object.assign(mergedProperties, current.properties);
+      }
+      (current?.required || []).forEach((field: string) => required.add(field));
+    });
+
+    return prepareResponseSchema({
+      ...resolved,
+      allOf: undefined,
+      properties: mergedProperties,
+      required: [...required],
+      type: resolved.type || 'object',
+    });
+  }
+
+  if (
+    (resolved.type === 'object' || resolved.properties) &&
+    resolved.properties
+  ) {
+    return {
+      ...resolved,
+      properties: Object.fromEntries(
+        Object.entries(resolved.properties).map(([key, value]) => [
+          key,
+          prepareResponseSchema(value),
+        ]),
+      ),
+      required: resolved.required || [],
+      type: 'object',
+    };
+  }
+
+  if (resolved.type === 'array' && resolved.items) {
+    return {
+      ...resolved,
+      items: prepareResponseSchema(resolved.items),
+    };
+  }
+
+  return resolved;
+};
+
+const findMatchedResponse = (statusCode: number) => {
+  const responseMap = props.responses || {};
+  const entries = Object.entries(responseMap);
+  if (entries.length === 0) {
+    return null;
+  }
+
+  const statusText = String(statusCode || '').trim();
+  const familyKey = /^\d{3}$/.test(statusText) ? `${statusText[0]}xx` : '';
+  const candidates = [
+    statusText,
+    familyKey.toUpperCase(),
+    familyKey,
+    'default',
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    const exact = responseMap[candidate];
+    if (exact) {
+      return exact;
+    }
+
+    const fuzzy = entries.find(
+      ([code]) => code.trim().toLowerCase() === candidate.trim().toLowerCase(),
+    );
+    if (fuzzy?.[1]) {
+      return fuzzy[1];
+    }
+  }
+
+  if (statusCode >= 200 && statusCode < 300 && responseMap['200']) {
+    return responseMap['200'];
+  }
+  return entries[0]?.[1] || null;
+};
+
+const responseSchemaForViewer = computed(() => {
+  if (responseStatus.value.type === 'default') {
+    return null;
+  }
+  const matchedResponse = findMatchedResponse(responseStatus.value.code);
+  const schema =
+    pickContentSchema(matchedResponse?.content) || matchedResponse?.schema;
+  if (!hasRenderableSchema(schema)) {
+    return null;
+  }
+  return prepareResponseSchema(schema);
+});
 
 const activeGlobalQueryCount = computed(() => {
   return docManageStore
@@ -2240,7 +2386,11 @@ onBeforeUnmount(() => {
                       <JsonViewer
                         v-if="responseTab === 'RealtimeResponse'"
                         :value="responseData"
-                        :default-expanded="false"
+                        :schema="responseSchemaForViewer"
+                        :default-expanded="true"
+                        :enable-chunked-render="true"
+                        :initial-render-count="120"
+                        :render-chunk-size="120"
                         class="response-body app-json-schema-viewer"
                       />
                     </template>
@@ -2932,7 +3082,7 @@ onBeforeUnmount(() => {
 .params-table-block {
   min-width: 0;
   padding: 0;
-  overflow: auto hidden;
+  overflow: hidden;
 }
 
 .path-param-description {
@@ -3075,7 +3225,6 @@ onBeforeUnmount(() => {
   width: 100%;
   margin-top: 4px;
   margin-bottom: 8px;
-  overflow: hidden;
   border-radius: var(--debug-radius-xs);
 
   .el-table__header-wrapper th {
