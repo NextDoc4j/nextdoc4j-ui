@@ -1788,6 +1788,29 @@ onBeforeUnmount(() => {
     var(--el-text-color-primary) 26%,
     transparent
   );
+  --debug-request-shell-bg: color-mix(
+    in srgb,
+    var(--debug-surface) 88%,
+    var(--el-fill-color-light) 12%
+  );
+  --debug-request-shell-top-line: color-mix(in srgb, #8d97a7 34%, transparent);
+  --debug-request-shell-bottom-line: color-mix(
+    in srgb,
+    #8d97a7 20%,
+    transparent
+  );
+  --debug-request-shell-shadow:
+    inset 0 1px 0 var(--debug-request-shell-top-line),
+    inset 0 -1px 0 var(--debug-request-shell-bottom-line),
+    0 0 0 1px color-mix(in srgb, #9aa3b2 20%, transparent),
+    0 9px 18px -15px color-mix(in srgb, #7f8899 42%, transparent),
+    0 -9px 18px -15px color-mix(in srgb, #8e97a6 44%, transparent);
+  --debug-request-shell-shadow-hover:
+    inset 0 1px 0 color-mix(in srgb, #8692a5 42%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, #8692a5 24%, transparent),
+    0 0 0 1px color-mix(in srgb, #8d97a7 24%, transparent),
+    0 11px 22px -15px color-mix(in srgb, #738093 48%, transparent),
+    0 -11px 22px -15px color-mix(in srgb, #8d97a7 50%, transparent);
   --debug-shadow: 0 6px 14px
     color-mix(in srgb, var(--el-text-color-primary) 3%, transparent);
 
@@ -1801,18 +1824,28 @@ onBeforeUnmount(() => {
   display: grid;
   flex: none;
   gap: 9px;
-  padding: 10px;
+  padding: 0;
   margin-bottom: 10px;
-  background: var(--debug-surface);
-  border: 1px solid var(--debug-border);
-  border-radius: var(--debug-radius-lg);
-  box-shadow: var(--debug-shadow);
+  background: transparent;
+  border: none;
+  box-shadow: none;
 }
 
 .debug-console__request-row {
   display: flex;
   gap: 10px;
   align-items: center;
+  margin: 0 2px;
+  padding: 7px 10px;
+  background: var(--debug-request-shell-bg);
+  border-radius: var(--debug-radius-md);
+  box-shadow: var(--debug-request-shell-shadow);
+  transition: box-shadow 0.16s ease;
+}
+
+.debug-console__request-row:hover,
+.debug-console__request-row:focus-within {
+  box-shadow: var(--debug-request-shell-shadow-hover);
 }
 
 .debug-console__hint {
@@ -1820,6 +1853,7 @@ onBeforeUnmount(() => {
   align-items: center;
   min-height: 22px;
   padding: 0 10px;
+  margin: 0 2px;
   font-size: 11px;
   font-weight: 500;
   color: var(--el-text-color-secondary);
@@ -2041,25 +2075,31 @@ onBeforeUnmount(() => {
 
 .debug-request-input {
   flex: 1;
+  --el-input-border-color: transparent;
+  --el-input-focus-border-color: transparent;
+  --el-input-hover-border-color: transparent;
 }
 
 :deep(.debug-request-input .el-input__wrapper) {
   min-height: 38px;
-  background: var(--debug-surface);
+  background: transparent;
   border-radius: var(--debug-radius-sm);
-  box-shadow: inset 0 0 0 1px var(--debug-border-strong);
+  border: none !important;
+  outline: none;
+  box-shadow: none !important;
+}
+
+:deep(.debug-request-input .el-input__wrapper::before),
+:deep(.debug-request-input .el-input__wrapper::after) {
+  display: none !important;
 }
 
 :deep(.debug-request-input .el-input__wrapper:hover) {
-  box-shadow: inset 0 0 0 1px
-    color-mix(in srgb, var(--el-color-primary) 30%, transparent);
+  box-shadow: none !important;
 }
 
 :deep(.debug-request-input .el-input__wrapper.is-focus) {
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--el-color-primary) 44%, transparent),
-    0 0 0 3px
-      color-mix(in srgb, var(--el-color-primary-light-9) 78%, transparent);
+  box-shadow: none !important;
 }
 
 .method-pill {
@@ -2324,6 +2364,33 @@ onBeforeUnmount(() => {
 :deep(.debug-response-wrap .el-empty__description p) {
   font-size: 12px;
   color: var(--el-text-color-secondary);
+}
+
+:deep(.document-page--dark .debug-console),
+:deep(html.dark .debug-console) {
+  --debug-surface: #1c1e23;
+  --debug-soft-bg: #1c1e23;
+  --debug-soft-bg-strong: #23272e;
+  --debug-border: color-mix(in srgb, #ffffff 6%, transparent);
+  --debug-border-strong: color-mix(in srgb, #ffffff 9%, transparent);
+  --debug-request-shell-bg: #20242b;
+  --debug-request-shell-top-line: color-mix(in srgb, #ffffff 18%, transparent);
+  --debug-request-shell-bottom-line: color-mix(
+    in srgb,
+    #ffffff 10%,
+    transparent
+  );
+  --debug-request-shell-shadow:
+    inset 0 1px 0 var(--debug-request-shell-top-line),
+    inset 0 -1px 0 var(--debug-request-shell-bottom-line),
+    0 8px 18px -14px color-mix(in srgb, #000000 58%, transparent),
+    0 -8px 18px -14px color-mix(in srgb, #ffffff 12%, transparent);
+  --debug-request-shell-shadow-hover:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 24%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, #ffffff 14%, transparent),
+    0 10px 22px -14px color-mix(in srgb, #000000 62%, transparent),
+    0 -10px 22px -14px color-mix(in srgb, #ffffff 16%, transparent);
+  --debug-shadow: 0 8px 20px color-mix(in srgb, #000000 45%, transparent);
 }
 
 @media (max-width: 1024px) {
