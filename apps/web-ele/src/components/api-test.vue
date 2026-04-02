@@ -110,8 +110,8 @@ const baseUrl = ref();
 const activeTab = ref(props.requestBody ? 'Body' : 'Params');
 const bodyTabRef = ref();
 const responseTab = ref('RealtimeResponse');
-const paneLayout = ref<'horizontal' | 'vertical'>('vertical');
-const paneRatio = ref(0.56);
+const paneLayout = ref<'horizontal' | 'vertical'>('horizontal');
+const paneRatio = ref(0.52);
 const debugLayoutRef = ref<HTMLElement>();
 const isPaneResizing = ref(false);
 const actualRequestSnapshot = ref<DebugActualRequestSnapshot | null>(null);
@@ -439,13 +439,13 @@ const responseStatusTone = computed(() => {
 const layoutGridStyle = computed(() => {
   if (isStackedLayout.value) {
     return {
-      gridTemplateRows: `minmax(220px, ${paneRatio.value}fr) 10px minmax(220px, ${
+      gridTemplateRows: `minmax(0, ${paneRatio.value}fr) 10px minmax(0, ${
         1 - paneRatio.value
       }fr)`,
     };
   }
   return {
-    gridTemplateColumns: `minmax(320px, ${paneRatio.value}fr) 10px minmax(320px, ${
+    gridTemplateColumns: `minmax(0, ${paneRatio.value}fr) 10px minmax(0, ${
       1 - paneRatio.value
     }fr)`,
   };
@@ -453,7 +453,7 @@ const layoutGridStyle = computed(() => {
 
 const normalizeResizeRatio = (value: number) => {
   if (Number.isNaN(value)) return paneRatio.value;
-  return Math.min(0.78, Math.max(0.22, value));
+  return Math.min(0.85, Math.max(0.15, value));
 };
 
 const clearPaneResizeListeners = () => {
@@ -1835,8 +1835,8 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 10px;
   align-items: center;
-  margin: 0 2px;
   padding: 7px 10px;
+  margin: 0 2px;
   background: var(--debug-request-shell-bg);
   border-radius: var(--debug-radius-md);
   box-shadow: var(--debug-request-shell-shadow);
@@ -2074,18 +2074,19 @@ onBeforeUnmount(() => {
 }
 
 .debug-request-input {
-  flex: 1;
   --el-input-border-color: transparent;
   --el-input-focus-border-color: transparent;
   --el-input-hover-border-color: transparent;
+
+  flex: 1;
 }
 
 :deep(.debug-request-input .el-input__wrapper) {
   min-height: 38px;
-  background: transparent;
-  border-radius: var(--debug-radius-sm);
-  border: none !important;
   outline: none;
+  background: transparent;
+  border: none !important;
+  border-radius: var(--debug-radius-sm);
   box-shadow: none !important;
 }
 
@@ -2211,10 +2212,13 @@ onBeforeUnmount(() => {
 .actual-request {
   display: grid;
   gap: 10px;
+  min-width: 0;
 }
 
 .actual-request__block {
+  min-width: 0;
   padding: 10px;
+  overflow-x: auto;
   background: var(--debug-surface);
   border: 1px solid var(--debug-border);
   border-radius: var(--debug-radius-xs);
@@ -2234,6 +2238,16 @@ onBeforeUnmount(() => {
   color: var(--el-text-color-regular);
   word-break: break-all;
   white-space: pre-wrap;
+}
+
+:deep(.actual-request__block .el-table) {
+  width: 100% !important;
+  min-width: 0;
+}
+
+:deep(.actual-request__block .el-table .cell) {
+  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 
 .loading-text {
@@ -2371,26 +2385,22 @@ onBeforeUnmount(() => {
   --debug-surface: #1c1e23;
   --debug-soft-bg: #1c1e23;
   --debug-soft-bg-strong: #23272e;
-  --debug-border: color-mix(in srgb, #ffffff 6%, transparent);
-  --debug-border-strong: color-mix(in srgb, #ffffff 9%, transparent);
+  --debug-border: color-mix(in srgb, #fff 6%, transparent);
+  --debug-border-strong: color-mix(in srgb, #fff 9%, transparent);
   --debug-request-shell-bg: #20242b;
-  --debug-request-shell-top-line: color-mix(in srgb, #ffffff 18%, transparent);
-  --debug-request-shell-bottom-line: color-mix(
-    in srgb,
-    #ffffff 10%,
-    transparent
-  );
+  --debug-request-shell-top-line: color-mix(in srgb, #fff 18%, transparent);
+  --debug-request-shell-bottom-line: color-mix(in srgb, #fff 10%, transparent);
   --debug-request-shell-shadow:
     inset 0 1px 0 var(--debug-request-shell-top-line),
     inset 0 -1px 0 var(--debug-request-shell-bottom-line),
-    0 8px 18px -14px color-mix(in srgb, #000000 58%, transparent),
-    0 -8px 18px -14px color-mix(in srgb, #ffffff 12%, transparent);
+    0 8px 18px -14px color-mix(in srgb, #000 58%, transparent),
+    0 -8px 18px -14px color-mix(in srgb, #fff 12%, transparent);
   --debug-request-shell-shadow-hover:
-    inset 0 1px 0 color-mix(in srgb, #ffffff 24%, transparent),
-    inset 0 -1px 0 color-mix(in srgb, #ffffff 14%, transparent),
-    0 10px 22px -14px color-mix(in srgb, #000000 62%, transparent),
-    0 -10px 22px -14px color-mix(in srgb, #ffffff 16%, transparent);
-  --debug-shadow: 0 8px 20px color-mix(in srgb, #000000 45%, transparent);
+    inset 0 1px 0 color-mix(in srgb, #fff 24%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, #fff 14%, transparent),
+    0 10px 22px -14px color-mix(in srgb, #000 62%, transparent),
+    0 -10px 22px -14px color-mix(in srgb, #fff 16%, transparent);
+  --debug-shadow: 0 8px 20px color-mix(in srgb, #000 45%, transparent);
 }
 
 @media (max-width: 1024px) {
