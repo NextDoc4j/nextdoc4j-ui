@@ -349,8 +349,8 @@ const formatValue = (value: unknown) => {
 .enum-pill__description {
   display: inline-flex;
   flex: 1 1 auto;
-  align-items: center;
   gap: 3px;
+  align-items: center;
   min-width: 0;
   font-size: 10.5px;
   line-height: 1.2;

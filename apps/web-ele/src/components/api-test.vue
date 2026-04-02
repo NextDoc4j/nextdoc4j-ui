@@ -2582,6 +2582,7 @@ onBeforeUnmount(() => {
     transform: translateY(0);
   }
 }
+
 .debug-console {
   --debug-chip-radius: calc(var(--radius) * 0.62);
   --debug-radius-xs: calc(var(--radius) * 0.56);
