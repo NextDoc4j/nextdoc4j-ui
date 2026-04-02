@@ -442,8 +442,8 @@ onBeforeUnmount(() => {
 .param-description-main {
   display: flex;
   align-items: center;
-  min-width: 0;
   width: 100%;
+  min-width: 0;
 }
 
 .param-description-main :deep(.el-tooltip__trigger) {

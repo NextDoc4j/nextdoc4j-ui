@@ -120,8 +120,8 @@ defineExpose({
 
 <style scoped>
 .theme-dark {
-  border: 1px solid #36363a;
   contain: layout paint style;
+  border: 1px solid #36363a;
 }
 
 .theme-dark .json-error {
@@ -134,8 +134,8 @@ defineExpose({
 }
 
 .theme-light {
-  border: 1px solid #e4e4e7;
   contain: layout paint style;
+  border: 1px solid #e4e4e7;
 }
 
 .theme-light .json-error {
