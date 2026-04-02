@@ -308,13 +308,15 @@ function normalizeSchemaForExample(schema: any): any {
     var(--el-text-color-primary) 12%,
     transparent
   );
+  --doc-page-bg: var(--el-bg-color);
 
   display: flex;
   flex-direction: column;
   gap: 10px;
   height: 100%;
-  padding: 2px;
+  padding: 20px;
   overflow-y: auto;
+  background: var(--doc-page-bg);
 
   &::-webkit-scrollbar {
     width: 6px;
@@ -479,6 +481,10 @@ function normalizeSchemaForExample(schema: any): any {
 }
 
 @media (max-width: 767px) {
+  .entity-detail {
+    padding: 12px;
+  }
+
   .entity-hero,
   .entity-panel {
     padding: 12px;
