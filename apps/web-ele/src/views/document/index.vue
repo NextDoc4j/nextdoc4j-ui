@@ -173,11 +173,11 @@ const debugReady = computed(() =>
 .document-tabs {
   :deep(.el-tabs__header) {
     margin: 0 0 12px;
+    overflow: hidden;
     background: var(--doc-page-bg);
     border: 1px solid
       color-mix(in srgb, var(--el-border-color) 92%, transparent);
     border-radius: var(--doc-radius-lg);
-    overflow: hidden;
     box-shadow: 0 8px 18px
       color-mix(in srgb, var(--el-text-color-primary) 4%, transparent);
   }
