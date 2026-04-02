@@ -50,6 +50,7 @@ interface TableParamsObject {
   enabled: boolean;
   format?: string;
   fromGlobal?: boolean;
+  fromSecurity?: boolean;
   name: string;
   required?: boolean;
   value: any;
@@ -120,6 +121,7 @@ const aggregationStore = useAggregationStore();
 const docManageStore = useDocManageStore();
 const apiTestCacheStore = useApiTestCacheStore();
 const apiStore = useApiStore();
+const tokenStore = useTokenStore();
 
 // 组件状态
 const loading = ref(false);
@@ -155,6 +157,7 @@ const cloneTableParams = (
     enabled: item.enabled ?? true,
     format: item.format,
     fromGlobal: item.fromGlobal,
+    fromSecurity: item.fromSecurity,
     name: item.name || '',
     required: item.required,
     type: item.type,
@@ -229,6 +232,7 @@ const applySnapshot = async (
   }
 
   if (options.syncGlobal) {
+    syncSecurityParamsToDebugTable();
     syncGlobalParamsToDebugTable();
   }
 
@@ -334,6 +338,7 @@ watch(
       }
     });
 
+    syncSecurityParamsToDebugTable();
     syncGlobalParamsToDebugTable();
   },
   { immediate: true },
@@ -342,9 +347,28 @@ watch(
 watch(
   () => [docManageStore.scopedParams, aggregationStore.currentService?.url],
   () => {
+    syncSecurityParamsToDebugTable();
     syncGlobalParamsToDebugTable();
   },
   { deep: true, immediate: true },
+);
+
+watch(
+  () => props.security,
+  () => {
+    syncSecurityParamsToDebugTable();
+    syncGlobalParamsToDebugTable();
+  },
+  { deep: true },
+);
+
+watch(
+  () => tokenStore.token,
+  () => {
+    syncSecurityParamsToDebugTable();
+    syncGlobalParamsToDebugTable();
+  },
+  { deep: true },
 );
 
 // 响应状态
@@ -497,6 +521,274 @@ const startPaneResize = (event: PointerEvent) => {
     window.removeEventListener('pointerup', onPointerUp);
   };
 };
+
+function normalizeSecurityIn(value?: string) {
+  const normalized = (value || '').trim().toLowerCase();
+  if (
+    normalized === 'cookie' ||
+    normalized === 'header' ||
+    normalized === 'query'
+  ) {
+    return normalized as 'cookie' | 'header' | 'query';
+  }
+  return '';
+}
+
+function syncSecurityParamsToDebugTable() {
+  const securityList: any[] = Array.isArray(props.security)
+    ? props.security
+    : [];
+  if (securityList.length === 0) {
+    queryParams.value = queryParams.value.filter(
+      (item) => !item.fromGlobal && !item.fromSecurity,
+    );
+    headers.value = headers.value.filter(
+      (item) => !item.fromGlobal && !item.fromSecurity,
+    );
+    cookies.value = cookies.value.filter(
+      (item) => !item.fromGlobal && !item.fromSecurity,
+    );
+    return;
+  }
+
+  const securitySchemes = apiStore.openApi?.components?.securitySchemes ?? {};
+  const gatewayGlobalSecuritySchemes =
+    aggregationStore.mainConfigCache.config?.['x-nextdoc4j-gateway']
+      ?.globalSecuritySchemes ?? {};
+  const gatewaySecuritySchemes =
+    aggregationStore.mainConfigCache.openApi?.components?.securitySchemes ?? {};
+
+  const resolveSecurityScheme = (
+    key: string,
+  ): SecuritySchemeObject | undefined => {
+    return (
+      securitySchemes?.[key] ||
+      gatewayGlobalSecuritySchemes?.[key] ||
+      gatewaySecuritySchemes?.[key]
+    );
+  };
+
+  const securityKeys = new Set<string>();
+  securityList.forEach((securityItem) => {
+    Object.keys(securityItem || {}).forEach((key) => securityKeys.add(key));
+  });
+
+  const securityQueryNames = new Set<string>();
+  const securityHeaderNames = new Set<string>();
+  const securityCookieNames = new Set<string>();
+  const securityRows: Array<{
+    description: string;
+    in: 'cookie' | 'header' | 'query';
+    name: string;
+    tokenValue: string;
+    type?: string;
+  }> = [];
+
+  securityKeys.forEach((key) => {
+    const securityScheme = resolveSecurityScheme(key);
+    const rawSecurityIn = securityScheme?.in;
+    const securityIn =
+      normalizeSecurityIn(rawSecurityIn) ||
+      (String(securityScheme?.type || '')
+        .trim()
+        .toLowerCase() === 'http'
+        ? 'header'
+        : 'header');
+    const tokenCandidates = [
+      `${key}_${securityIn}`,
+      `${key}_${securityIn.toLowerCase()}`,
+      `${key}_${securityIn.toUpperCase()}`,
+      ...(rawSecurityIn
+        ? [
+            `${key}_${rawSecurityIn}`,
+            `${key}_${rawSecurityIn.toLowerCase()}`,
+            `${key}_${rawSecurityIn.toUpperCase()}`,
+          ]
+        : []),
+    ];
+    const tokenValue =
+      tokenCandidates
+        .map((candidate) => tokenStore?.token?.[candidate])
+        .find((value) => value !== undefined && value !== null) ?? '';
+
+    let name = '';
+    switch (securityIn) {
+      case 'cookie': {
+        name = normalizeParamName(securityScheme?.name ?? key);
+        if (!name) {
+          break;
+        }
+        securityCookieNames.add(name);
+        securityRows.push({
+          in: 'cookie',
+          name,
+          tokenValue,
+          description: securityScheme?.description ?? '',
+          type: securityScheme?.type,
+        });
+        break;
+      }
+      case 'header': {
+        name = normalizeParamName(
+          securityScheme?.name ?? key ?? 'Authorization',
+        );
+        if (!name) {
+          break;
+        }
+        securityHeaderNames.add(normalizeHeaderName(name));
+        securityRows.push({
+          in: 'header',
+          name,
+          tokenValue,
+          description: securityScheme?.description ?? '',
+          type: securityScheme?.type,
+        });
+        break;
+      }
+      case 'query': {
+        name = normalizeParamName(securityScheme?.name ?? key);
+        if (!name) {
+          break;
+        }
+        securityQueryNames.add(name);
+        securityRows.push({
+          in: 'query',
+          name,
+          tokenValue,
+          description: securityScheme?.description ?? '',
+          type: securityScheme?.type,
+        });
+        break;
+      }
+      // No default
+    }
+  });
+
+  const hasSecurityMarkerInState = [
+    ...queryParams.value,
+    ...headers.value,
+    ...cookies.value,
+  ].some((item) => item.fromSecurity !== undefined);
+
+  // 兼容历史缓存：旧数据没有 fromSecurity 标记，导致无法被实时同步接管
+  if (!hasSecurityMarkerInState) {
+    queryParams.value = queryParams.value.map((item) => {
+      const name = normalizeParamName(item.name || '');
+      if (!item.fromGlobal && name && securityQueryNames.has(name)) {
+        return {
+          ...item,
+          fromSecurity: true,
+        };
+      }
+      return item;
+    });
+    headers.value = headers.value.map((item) => {
+      const name = normalizeHeaderName(item.name || '');
+      if (!item.fromGlobal && name && securityHeaderNames.has(name)) {
+        return {
+          ...item,
+          fromSecurity: true,
+        };
+      }
+      return item;
+    });
+    cookies.value = cookies.value.map((item) => {
+      const name = normalizeParamName(item.name || '');
+      if (!item.fromGlobal && name && securityCookieNames.has(name)) {
+        return {
+          ...item,
+          fromSecurity: true,
+        };
+      }
+      return item;
+    });
+  }
+
+  const localQueryRows = queryParams.value.filter(
+    (item) => !item.fromGlobal && !item.fromSecurity,
+  );
+  const localHeaderRows = headers.value.filter(
+    (item) => !item.fromGlobal && !item.fromSecurity,
+  );
+  const localCookieRows = cookies.value.filter(
+    (item) => !item.fromGlobal && !item.fromSecurity,
+  );
+
+  const localQueryNames = new Set(
+    localQueryRows
+      .map((item) => normalizeParamName(item.name || ''))
+      .filter(Boolean),
+  );
+  const localHeaderNames = new Set(
+    localHeaderRows
+      .map((item) => normalizeHeaderName(item.name || ''))
+      .filter(Boolean),
+  );
+  const localCookieNames = new Set(
+    localCookieRows
+      .map((item) => normalizeParamName(item.name || ''))
+      .filter(Boolean),
+  );
+
+  const securityQueryRows: TableParamsObject[] = [];
+  const securityHeaderRows: TableParamsObject[] = [];
+  const securityCookieRows: TableParamsObject[] = [];
+
+  securityRows.forEach((item) => {
+    switch (item.in) {
+      case 'cookie': {
+        if (localCookieNames.has(item.name)) {
+          return;
+        }
+        localCookieNames.add(item.name);
+        securityCookieRows.push({
+          name: item.name,
+          enabled: true,
+          fromSecurity: true,
+          value: item.tokenValue,
+          description: item.description,
+          type: item.type,
+        });
+        return;
+      }
+      case 'header': {
+        const normalizedName = normalizeHeaderName(item.name);
+        if (localHeaderNames.has(normalizedName)) {
+          return;
+        }
+        localHeaderNames.add(normalizedName);
+        securityHeaderRows.push({
+          enabled: true,
+          fromSecurity: true,
+          name: item.name,
+          value: item.tokenValue,
+          description: item.description,
+          type: item.type,
+        });
+        return;
+      }
+      case 'query': {
+        if (localQueryNames.has(item.name)) {
+          return;
+        }
+        localQueryNames.add(item.name);
+        securityQueryRows.push({
+          name: item.name,
+          enabled: true,
+          fromSecurity: true,
+          value: item.tokenValue,
+          description: item.description,
+          type: item.type,
+        });
+      }
+      // No default
+    }
+  });
+
+  queryParams.value = [...localQueryRows, ...securityQueryRows];
+  headers.value = [...localHeaderRows, ...securityHeaderRows];
+  cookies.value = [...localCookieRows, ...securityCookieRows];
+}
 
 function syncGlobalParamsToDebugTable() {
   const localQueryRows = queryParams.value.filter((item) => !item.fromGlobal);
@@ -1210,111 +1502,10 @@ const formDataParams = ref<Array<ParamsType>>([]);
 // URL Encoded 参数相关
 const urlEncodedParams = ref<Array<ParamsType>>([]);
 
-const normalizeSecurityIn = (value?: string) => {
-  const normalized = (value || '').trim().toLowerCase();
-  if (
-    normalized === 'cookie' ||
-    normalized === 'header' ||
-    normalized === 'query'
-  ) {
-    return normalized as 'cookie' | 'header' | 'query';
-  }
-  return '';
-};
-
 onMounted(async () => {
   const openApi = apiStore.openApi;
-  const securityList: any[] = Array.isArray(props.security)
-    ? props.security
-    : [];
-  const tokenStore = useTokenStore();
-  const securitySchemes = openApi?.components?.securitySchemes ?? {};
-  const gatewayGlobalSecuritySchemes =
-    aggregationStore.mainConfigCache.config?.['x-nextdoc4j-gateway']
-      ?.globalSecuritySchemes ?? {};
-  const gatewaySecuritySchemes =
-    aggregationStore.mainConfigCache.openApi?.components?.securitySchemes ?? {};
   baseUrl.value = openApi?.servers?.[0]?.url;
-
-  const resolveSecurityScheme = (
-    key: string,
-  ): SecuritySchemeObject | undefined => {
-    return (
-      securitySchemes?.[key] ||
-      gatewayGlobalSecuritySchemes?.[key] ||
-      gatewaySecuritySchemes?.[key]
-    );
-  };
-
-  const securityKeys = new Set<string>();
-  securityList.forEach((securityItem) => {
-    Object.keys(securityItem || {}).forEach((key) => securityKeys.add(key));
-  });
-
-  securityKeys.forEach((key) => {
-    const securityScheme = resolveSecurityScheme(key);
-    const rawSecurityIn = securityScheme?.in;
-    const securityIn =
-      normalizeSecurityIn(rawSecurityIn) ||
-      (String(securityScheme?.type || '')
-        .trim()
-        .toLowerCase() === 'http'
-        ? 'header'
-        : 'header');
-    const tokenCandidates = [
-      `${key}_${securityIn}`,
-      `${key}_${securityIn.toLowerCase()}`,
-      `${key}_${securityIn.toUpperCase()}`,
-      ...(rawSecurityIn
-        ? [
-            `${key}_${rawSecurityIn}`,
-            `${key}_${rawSecurityIn.toLowerCase()}`,
-            `${key}_${rawSecurityIn.toUpperCase()}`,
-          ]
-        : []),
-    ];
-    const tokenValue =
-      tokenCandidates
-        .map((candidate) => tokenStore?.token?.[candidate])
-        .find((value) => value !== undefined && value !== null) ?? '';
-
-    switch (securityIn) {
-      case 'cookie': {
-        cookies.value.push({
-          name: securityScheme?.name ?? key,
-          enabled: true,
-          value: tokenValue,
-          description: securityScheme?.description ?? '',
-          type: securityScheme?.type,
-        });
-
-        break;
-      }
-      case 'header': {
-        headers.value.push({
-          enabled: true,
-          name: securityScheme?.name ?? key ?? 'Authorization',
-          value: tokenValue,
-          description: securityScheme?.description ?? '',
-        });
-
-        break;
-      }
-      case 'query': {
-        queryParams.value.push({
-          name: securityScheme?.name ?? key,
-          enabled: true,
-          value: tokenValue,
-          description: securityScheme?.description ?? '',
-          type: securityScheme?.type,
-        });
-
-        break;
-      }
-      // No default
-    }
-  });
-
+  syncSecurityParamsToDebugTable();
   syncGlobalParamsToDebugTable();
   await captureDefaultRequestState();
 
