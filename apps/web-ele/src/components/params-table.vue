@@ -475,7 +475,7 @@ onBeforeUnmount(() => {
   cursor: pointer;
   background: transparent;
   border: none;
-  border-radius: calc(var(--radius) * 1.2);
+  border-radius: calc(var(--radius) * 0.62);
 }
 
 .param-inline-delete:hover {
@@ -506,7 +506,7 @@ onBeforeUnmount(() => {
   cursor: pointer;
   background: transparent;
   border: none;
-  border-radius: calc(var(--radius) * 1.2);
+  border-radius: calc(var(--radius) * 0.62);
 }
 
 .param-delete-button:hover {

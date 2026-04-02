@@ -719,11 +719,13 @@ defineExpose({
 
 <style scoped lang="scss">
 .document-detail {
-  --doc-chip-radius: calc(var(--radius) * 1.25);
-  --doc-radius-xs: calc(var(--radius) * 1.5);
-  --doc-radius-sm: calc(var(--radius) * 2);
-  --doc-radius-md: calc(var(--radius) * 2.75);
-  --doc-radius-lg: calc(var(--radius) * 3.5);
+  --doc-chip-radius: calc(var(--radius) * 0.62);
+  --doc-radius-xs: calc(var(--radius) * 0.56);
+  --doc-radius-sm: calc(var(--radius) * 0.72);
+  --doc-radius-md: calc(var(--radius) * 0.94);
+  --doc-radius-lg: calc(var(--radius) * 1.18);
+  --el-border-radius-base: calc(var(--radius) * 0.75);
+  --el-border-radius-small: calc(var(--radius) * 0.62);
   --doc-panel-bg: var(--el-bg-color);
   --doc-soft-bg: color-mix(
     in srgb,

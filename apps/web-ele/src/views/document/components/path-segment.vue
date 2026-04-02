@@ -55,6 +55,6 @@ const pathSegments = computed(() => {
 
 <style scoped>
 .path-segment-item {
-  border-radius: calc(var(--radius) * 1.25);
+  border-radius: calc(var(--radius) * 0.62);
 }
 </style>

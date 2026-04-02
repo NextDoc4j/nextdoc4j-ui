@@ -2582,15 +2582,16 @@ onBeforeUnmount(() => {
     transform: translateY(0);
   }
 }
-
 .debug-console {
-  --debug-chip-radius: calc(var(--radius) * 1.25);
-  --debug-radius-xs: calc(var(--radius) * 1.15);
-  --debug-radius-sm: calc(var(--radius) * 1.45);
-  --debug-radius-md: calc(var(--radius) * 1.8);
-  --debug-radius-lg: calc(var(--radius) * 2.2);
-  --debug-count-radius: calc(var(--radius) * 1.2);
-  --debug-menu-radius: calc(var(--radius) * 1.8);
+  --debug-chip-radius: calc(var(--radius) * 0.62);
+  --debug-radius-xs: calc(var(--radius) * 0.56);
+  --debug-radius-sm: calc(var(--radius) * 0.72);
+  --debug-radius-md: calc(var(--radius) * 0.94);
+  --debug-radius-lg: calc(var(--radius) * 1.18);
+  --debug-count-radius: calc(var(--radius) * 0.44);
+  --debug-menu-radius: calc(var(--radius) * 0.96);
+  --el-border-radius-base: calc(var(--radius) * 0.75);
+  --el-border-radius-small: calc(var(--radius) * 0.62);
   --debug-surface: var(--el-bg-color);
   --debug-soft-bg: color-mix(
     in srgb,
@@ -2825,13 +2826,13 @@ onBeforeUnmount(() => {
 .debug-inline-tab {
   display: inline-flex;
   flex: none;
-  gap: 4px;
+  gap: 3px;
   align-items: center;
   justify-content: center;
   max-width: 146px;
-  min-height: 24px;
-  padding: 0 8px;
-  font-size: 12px;
+  min-height: 23px;
+  padding: 0 7px;
+  font-size: 11.5px;
   font-weight: 600;
   color: var(--el-text-color-secondary);
   cursor: pointer;
@@ -2868,10 +2869,10 @@ onBeforeUnmount(() => {
   flex: none;
   align-items: center;
   justify-content: center;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
-  font-size: 10px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  font-size: 9.5px;
   font-weight: 700;
   color: #fff;
   background: var(--el-color-primary);
@@ -3042,10 +3043,10 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 62px;
-  height: 24px;
-  padding: 0 10px;
-  font-size: 12px;
+  min-width: 58px;
+  height: 23px;
+  padding: 0 9px;
+  font-size: 11.5px;
   font-weight: 700;
   letter-spacing: 0.01em;
   border-radius: var(--debug-chip-radius);
@@ -3135,9 +3136,9 @@ onBeforeUnmount(() => {
 .debug-status-chip {
   display: inline-flex;
   align-items: center;
-  min-height: 23px;
-  padding: 0 10px;
-  font-size: 11px;
+  min-height: 22px;
+  padding: 0 8px;
+  font-size: 10.5px;
   font-weight: 600;
   color: var(--el-text-color-secondary);
   white-space: nowrap;
@@ -3317,7 +3318,7 @@ onBeforeUnmount(() => {
 
   .el-tabs__active-bar {
     height: 2px;
-    border-radius: 2px 2px 0 0;
+    border-radius: var(--debug-radius-xs) var(--debug-radius-xs) 0 0;
   }
 
   .el-tabs__content {

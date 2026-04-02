@@ -239,20 +239,23 @@ const formatValue = (value: unknown) => {
 </template>
 
 <style scoped>
-.schema-root-pill {
-  --doc-chip-radius: calc(var(--radius) * 1.25);
-  --doc-radius-sm: calc(var(--radius) * 1.25);
+.schema-root-pill,
+.schema-stack {
+  --doc-chip-radius: calc(var(--radius) * 0.62);
+  --doc-radius-sm: calc(var(--radius) * 0.72);
+}
 
+.schema-root-pill {
   display: inline-flex;
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
-  min-height: 40px;
-  padding: 0 14px;
+  min-height: 34px;
+  padding: 0 11px;
   color: #175cd3;
   background: #e8f1ff;
   border: 1px solid #b7cdfb;
-  border-radius: calc(var(--radius) * 2.5);
+  border-radius: var(--doc-radius-sm);
 }
 
 .schema-root-pill__title {
@@ -320,7 +323,7 @@ const formatValue = (value: unknown) => {
 .schema-item__headline {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 10px;
+  gap: 6px 8px;
   align-items: center;
 }
 
@@ -328,22 +331,22 @@ const formatValue = (value: unknown) => {
 .schema-item__enum-values {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
   align-items: center;
 }
 
 .schema-item__enum {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
   align-items: center;
   min-width: 0;
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
 .schema-item__enum-label {
   flex: none;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--el-text-color-secondary);
 }
@@ -375,11 +378,12 @@ const formatValue = (value: unknown) => {
 .meta-pill {
   display: inline-flex;
   flex-wrap: wrap;
-  gap: 5px;
+  gap: 4px;
   align-items: center;
-  min-height: 24px;
-  padding: 0 8px;
-  font-size: 11px;
+  min-height: 22px;
+  padding: 0 7px;
+  font-size: 10.5px;
+  line-height: 1.2;
   color: #334155;
   background: #f8fafc;
   border: 1px solid #cfd8e3;
@@ -425,12 +429,12 @@ const formatValue = (value: unknown) => {
 .enum-pill {
   display: inline-flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
   align-items: center;
   min-width: 0;
   max-width: 100%;
-  min-height: 26px;
-  padding: 3px 10px;
+  min-height: 22px;
+  padding: 2px 8px;
   color: #1f4ba8;
   background: #eff4ff;
   border: 1px solid #c7d5ef;
@@ -442,13 +446,13 @@ const formatValue = (value: unknown) => {
   flex: 0 1 auto;
   align-items: center;
   justify-content: center;
-  min-width: 20px;
+  min-width: 14px;
   max-width: 100%;
-  padding: 0 6px;
+  padding: 0 2px;
   font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 700;
-  line-height: 1.45;
+  line-height: 1.2;
   color: #1e3f8a;
   text-align: center;
   word-break: normal;
@@ -460,14 +464,22 @@ const formatValue = (value: unknown) => {
   display: inline-flex;
   flex: 1 1 auto;
   align-items: center;
+  gap: 3px;
   min-width: 0;
-  font-size: 11px;
-  line-height: 1.45;
+  font-size: 10.5px;
+  line-height: 1.2;
   color: var(--el-text-color-secondary);
-  text-align: center;
+  text-align: left;
   word-break: normal;
   overflow-wrap: anywhere;
   white-space: normal;
+}
+
+.enum-pill__description::before {
+  flex: none;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--el-text-color-secondary) 82%, transparent);
+  content: '-';
 }
 
 :deep(.document-page--dark .schema-root-pill),
