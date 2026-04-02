@@ -10,6 +10,9 @@ const SvgDocExportMarkdownIcon = createIconifyIcon('svg:doc-export-markdown');
 const SvgDocExportOpenapiIcon = createIconifyIcon('svg:doc-export-openapi');
 const SvgDocExportPdfIcon = createIconifyIcon('svg:doc-export-pdf');
 const SvgDocExportWordIcon = createIconifyIcon('svg:doc-export-word');
+const SvgDocumentDocTrashBinIcon = createIconifyIcon(
+  'svg:document-doc-trash-bin',
+);
 const SvgDocumentLayoutIcon = createIconifyIcon('svg:document-layout');
 const SvgDocumentOmittedIcon = createIconifyIcon('svg:document-omitted');
 const SvgDocumentResetIcon = createIconifyIcon('svg:document-reset');
@@ -38,6 +41,7 @@ export {
   SvgDocExportOpenapiIcon,
   SvgDocExportPdfIcon,
   SvgDocExportWordIcon,
+  SvgDocumentDocTrashBinIcon,
   SvgDocumentLayoutIcon,
   SvgDocumentOmittedIcon,
   SvgDocumentResetIcon,

@@ -1949,18 +1949,51 @@ onBeforeUnmount(() => {
                     <div class="params-table">
                       <ElTable
                         border
-                        class="params-table"
+                        class="params-table params-table--path"
                         :data="pathParams"
                         header-cell-class-name="p-2"
+                        table-layout="fixed"
                       >
-                        <ElTableColumn prop="name" label="参数名">
+                        <ElTableColumn
+                          prop="name"
+                          label="参数名"
+                          class-name="path-col path-col--name"
+                          label-class-name="path-col path-col--name"
+                          min-width="0"
+                        >
                           <template #default="{ row }">
                             <ElInput v-model="row.name" />
                           </template>
                         </ElTableColumn>
-                        <ElTableColumn prop="value" label="参数值">
+                        <ElTableColumn
+                          prop="value"
+                          label="参数值"
+                          class-name="path-col path-col--value"
+                          label-class-name="path-col path-col--value"
+                          min-width="0"
+                        >
                           <template #default="{ row }">
                             <ElInput v-model="row.value" />
+                          </template>
+                        </ElTableColumn>
+                        <ElTableColumn
+                          prop="description"
+                          label="描述"
+                          class-name="path-col path-col--description"
+                          label-class-name="path-col path-col--description"
+                          min-width="0"
+                        >
+                          <template #default="{ row }">
+                            <ElTooltip
+                              v-if="row.description?.trim()"
+                              :content="row.description.trim()"
+                              placement="top"
+                            >
+                              <span class="path-param-description">{{
+                                row.description.trim()
+                              }}</span>
+                            </ElTooltip>
+                            <span v-else class="path-param-description">-</span>
                           </template>
                         </ElTableColumn>
                       </ElTable>
@@ -1969,7 +2002,11 @@ onBeforeUnmount(() => {
 
                   <div>
                     <h3 class="debug-section-title">Query 参数</h3>
-                    <params-table :table-data="queryParams" />
+                    <params-table
+                      :table-data="queryParams"
+                      show-description-column
+                      show-delete-in-description
+                    />
                   </div>
                 </ElTabPane>
 
@@ -1983,7 +2020,11 @@ onBeforeUnmount(() => {
                 />
 
                 <ElTabPane name="Headers" label="Headers">
-                  <params-table :table-data="headers" />
+                  <params-table
+                    :table-data="headers"
+                    show-description-column
+                    show-delete-in-description
+                  />
                 </ElTabPane>
                 <ElTabPane name="Cookies" label="Cookies">
                   <params-table :table-data="cookies" />
@@ -2802,6 +2843,14 @@ onBeforeUnmount(() => {
   color: var(--el-text-color-secondary);
 }
 
+.path-param-description {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .debug-status-list {
   display: flex;
   flex-wrap: wrap;
@@ -2920,10 +2969,16 @@ onBeforeUnmount(() => {
 }
 
 :deep(.params-table.el-table) {
+  width: 100%;
   margin-top: 4px;
   margin-bottom: 8px;
   overflow: hidden;
   border-radius: var(--debug-radius-xs);
+
+  .el-table__header-wrapper,
+  .el-table__body-wrapper {
+    overflow-x: hidden !important;
+  }
 
   .el-table__header-wrapper th {
     background: var(--debug-soft-bg-strong);
@@ -2934,19 +2989,41 @@ onBeforeUnmount(() => {
   }
 
   .cell {
+    min-width: 0;
     padding: 0;
 
     .el-input__wrapper {
+      width: 100%;
+      min-width: 0;
       background-color: transparent;
       border: none;
       border-radius: 0;
       box-shadow: none;
+    }
+
+    .el-input,
+    .el-select,
+    .el-select__wrapper {
+      width: 100%;
+      min-width: 0;
     }
   }
 
   .el-table__header .cell {
     padding: 4px 8px;
   }
+}
+
+:deep(.params-table--path colgroup col:nth-child(1)) {
+  width: 36% !important;
+}
+
+:deep(.params-table--path colgroup col:nth-child(2)) {
+  width: 46% !important;
+}
+
+:deep(.params-table--path colgroup col:nth-child(3)) {
+  width: 18% !important;
 }
 
 :deep(.debug-tabs.el-tabs),
