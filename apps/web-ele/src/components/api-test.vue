@@ -13,22 +13,23 @@ import {
 } from 'vue';
 
 import { useAppConfig } from '@vben/hooks';
-import { SvgApiPrefixIcon, SvgCloseIcon } from '@vben/icons';
+import {
+  SvgApiPrefixIcon,
+  SvgDocumentLayoutIcon,
+  SvgDocumentResetIcon,
+} from '@vben/icons';
 
 import {
   ElButton,
   ElEmpty,
-  ElIcon,
   ElInput,
   ElMessage,
-  ElSpace,
   ElTable,
   ElTableColumn,
   ElTabPane,
   ElTabs,
   ElTooltip,
 } from 'element-plus';
-import { Pane, Splitpanes } from 'splitpanes';
 
 import JsonView from '#/components/json-view.vue';
 import { methodType } from '#/constants/methods';
@@ -77,6 +78,22 @@ interface DebugRequestStateSnapshot {
   urlEncodedParams: TableParamsObject[];
 }
 
+interface DebugActualRequestSnapshot {
+  bodyText: string;
+  bodyType: string;
+  headers: Array<{ name: string; value: string }>;
+  method: string;
+  pathParams: Array<{ name: string; value: string }>;
+  queryParams: Array<{ name: string; value: string }>;
+  url: string;
+}
+
+interface DebugInlineTab {
+  count?: number;
+  key: string;
+  label: string;
+}
+
 const props = defineProps<{
   method: string;
   parameters: ParameterObject[];
@@ -86,14 +103,19 @@ const props = defineProps<{
   security: any;
 }>();
 
-// 添加 emit 定义
-const emit = defineEmits(['cancel']);
+defineEmits(['cancel']);
 
 const { apiURL } = useAppConfig(import.meta.env, import.meta.env.PROD);
 const baseUrl = ref();
 const activeTab = ref(props.requestBody ? 'Body' : 'Params');
 const bodyTabRef = ref();
-const responseTab = ref('Body');
+const responseTab = ref('RealtimeResponse');
+const paneLayout = ref<'horizontal' | 'vertical'>('vertical');
+const paneRatio = ref(0.56);
+const debugLayoutRef = ref<HTMLElement>();
+const isPaneResizing = ref(false);
+const actualRequestSnapshot = ref<DebugActualRequestSnapshot | null>(null);
+let removePaneResizeListeners: (() => void) | null = null;
 const aggregationStore = useAggregationStore();
 const docManageStore = useDocManageStore();
 const apiTestCacheStore = useApiTestCacheStore();
@@ -153,6 +175,7 @@ const resetResponseState = () => {
   responseMimeType.value = '';
   responseLanguage.value = 'json';
   responseHeaders.value = [];
+  actualRequestSnapshot.value = null;
 };
 
 const resolveBodyContent = () => {
@@ -348,6 +371,133 @@ const activeGlobalHeaderCount = computed(() => {
     .filter((item) => item.enabled && item.name).length;
 });
 
+const requestBodyCount = computed(() => {
+  const bodyType = bodyTabRef.value?.bodyType as DebugBodyType | undefined;
+  if (bodyType === 'form-data') {
+    return formDataParams.value.filter((item) => item.enabled && item.name)
+      .length;
+  }
+  if (bodyType === 'x-www-form-urlencoded') {
+    return urlEncodedParams.value.filter((item) => item.enabled && item.name)
+      .length;
+  }
+  return 0;
+});
+
+const requestInlineTabs = computed<DebugInlineTab[]>(() => {
+  return [
+    {
+      key: 'Params',
+      label: 'Params',
+      count: pathParams.value.length + queryParams.value.length,
+    },
+    {
+      key: 'Body',
+      label: 'Body',
+      count: requestBodyCount.value,
+    },
+    {
+      key: 'Headers',
+      label: 'Headers',
+      count: headers.value.length,
+    },
+    {
+      key: 'Cookies',
+      label: 'Cookies',
+      count: cookies.value.length,
+    },
+  ];
+});
+
+const responseInlineTabs = computed<DebugInlineTab[]>(() => {
+  return [
+    {
+      key: 'RealtimeResponse',
+      label: '实时响应',
+    },
+    {
+      key: 'ResponseHeaders',
+      label: '响应头',
+      count: responseHeaders.value.length,
+    },
+    {
+      key: 'ActualRequest',
+      label: '实际请求',
+    },
+  ];
+});
+
+const isStackedLayout = computed(() => paneLayout.value === 'vertical');
+const layoutTooltipText = computed(() => {
+  return isStackedLayout.value ? '切换为左右布局' : '切换为上下布局';
+});
+const responseStatusTone = computed(() => {
+  if (responseStatus.value.type === 'success') return 'success';
+  if (responseStatus.value.type === 'error') return 'error';
+  return 'default';
+});
+const layoutGridStyle = computed(() => {
+  if (isStackedLayout.value) {
+    return {
+      gridTemplateRows: `minmax(220px, ${paneRatio.value}fr) 10px minmax(220px, ${
+        1 - paneRatio.value
+      }fr)`,
+    };
+  }
+  return {
+    gridTemplateColumns: `minmax(320px, ${paneRatio.value}fr) 10px minmax(320px, ${
+      1 - paneRatio.value
+    }fr)`,
+  };
+});
+
+const normalizeResizeRatio = (value: number) => {
+  if (Number.isNaN(value)) return paneRatio.value;
+  return Math.min(0.78, Math.max(0.22, value));
+};
+
+const clearPaneResizeListeners = () => {
+  if (removePaneResizeListeners) {
+    removePaneResizeListeners();
+    removePaneResizeListeners = null;
+  }
+};
+
+const startPaneResize = (event: PointerEvent) => {
+  if (!debugLayoutRef.value) return;
+
+  event.preventDefault();
+  const layoutRect = debugLayoutRef.value.getBoundingClientRect();
+  const containerSize = isStackedLayout.value
+    ? layoutRect.height
+    : layoutRect.width;
+  if (!containerSize) return;
+
+  const startPointer = isStackedLayout.value ? event.clientY : event.clientX;
+  const startRatio = paneRatio.value;
+  isPaneResizing.value = true;
+
+  const onPointerMove = (moveEvent: PointerEvent) => {
+    const currentPointer = isStackedLayout.value
+      ? moveEvent.clientY
+      : moveEvent.clientX;
+    const delta = currentPointer - startPointer;
+    paneRatio.value = normalizeResizeRatio(startRatio + delta / containerSize);
+  };
+
+  const onPointerUp = () => {
+    isPaneResizing.value = false;
+    clearPaneResizeListeners();
+  };
+
+  window.addEventListener('pointermove', onPointerMove);
+  window.addEventListener('pointerup', onPointerUp);
+  removePaneResizeListeners = () => {
+    window.removeEventListener('pointermove', onPointerMove);
+    window.removeEventListener('pointerup', onPointerUp);
+  };
+};
+
 function syncGlobalParamsToDebugTable() {
   const localQueryRows = queryParams.value.filter((item) => !item.fromGlobal);
   const localQueryNames = new Set(
@@ -392,12 +542,6 @@ function syncGlobalParamsToDebugTable() {
   headers.value = [...localHeaderRows, ...globalHeaderRows];
 }
 
-// 添加关闭处理函数
-const handleClose = (e: any) => {
-  e.stopPropagation();
-  emit('cancel');
-};
-
 const handleRestoreDefault = async () => {
   if (!defaultRequestState.value) {
     ElMessage.warning('默认请求数据尚未初始化');
@@ -405,6 +549,10 @@ const handleRestoreDefault = async () => {
   }
   await restoreDefaultRequestState();
   ElMessage.success('已恢复默认请求数据');
+};
+
+const togglePaneLayout = () => {
+  paneLayout.value = isStackedLayout.value ? 'horizontal' : 'vertical';
 };
 
 const normalizeContentType = (contentType: null | string) => {
@@ -551,6 +699,91 @@ const parseUrlEncodedBody = (text: string) => {
     result[key] = [current, value];
   });
   return result;
+};
+
+const toPrettyJson = (value: any) => {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value ?? '');
+  }
+};
+
+const resolveActualRequestBody = (
+  bodyType: DebugBodyType | undefined,
+  bodyData: string,
+) => {
+  switch (bodyType) {
+    case 'binary': {
+      const binaryFile = bodyTabRef.value?.fileList?.[0];
+      return {
+        bodyText: binaryFile?.name ? `file: ${binaryFile.name}` : '',
+        bodyType: 'binary',
+      };
+    }
+    case 'form-data': {
+      const enabledItems = formDataParams.value
+        .filter((item) => item.enabled && item.name)
+        .map((item) => ({
+          contentType: item.contentType || '',
+          name: item.name,
+          value: item.value ?? '',
+        }));
+      return {
+        bodyText: enabledItems.length > 0 ? toPrettyJson(enabledItems) : '',
+        bodyType: 'form-data',
+      };
+    }
+    case 'json': {
+      if (!bodyData) {
+        return {
+          bodyText: '',
+          bodyType: 'json',
+        };
+      }
+      try {
+        return {
+          bodyText: JSON.stringify(JSON.parse(bodyData), null, 2),
+          bodyType: 'json',
+        };
+      } catch {
+        return {
+          bodyText: bodyData,
+          bodyType: 'json',
+        };
+      }
+    }
+    case 'raw': {
+      return {
+        bodyText: bodyData || '',
+        bodyType: 'raw',
+      };
+    }
+    case 'x-www-form-urlencoded': {
+      const enabledItems = urlEncodedParams.value
+        .filter((item) => item.enabled && item.name)
+        .map((item) => ({
+          name: item.name,
+          value: item.value ?? '',
+        }));
+      return {
+        bodyText: enabledItems.length > 0 ? toPrettyJson(enabledItems) : '',
+        bodyType: 'x-www-form-urlencoded',
+      };
+    }
+    case 'xml': {
+      return {
+        bodyText: bodyData || '',
+        bodyType: 'xml',
+      };
+    }
+    default: {
+      return {
+        bodyText: '',
+        bodyType: 'none',
+      };
+    }
+  }
 };
 
 const resolveResponseLanguage = (contentType: string) => {
@@ -819,16 +1052,42 @@ async function sendRequest() {
         requestHeaders.append('Content-Type', 'application/json');
       }
     }
+    const bodyType = bodyTabRef.value?.bodyType as DebugBodyType | undefined;
+    const actualRequestBody = resolveActualRequestBody(bodyType, bodyData);
+    actualRequestSnapshot.value = {
+      bodyText: actualRequestBody.bodyText,
+      bodyType: actualRequestBody.bodyType,
+      headers: [...requestHeaders.entries()].map(([name, value]) => ({
+        name,
+        value,
+      })),
+      method: props.method.toUpperCase(),
+      pathParams: pathParams.value
+        .filter((item) => normalizeParamName(item.name || ''))
+        .map((item) => ({
+          name: normalizeParamName(item.name || ''),
+          value: item.value ?? '',
+        })),
+      queryParams: [...finalUrl.searchParams.entries()].map(
+        ([name, value]) => ({
+          name,
+          value,
+        }),
+      ),
+      url: finalUrl.toString(),
+    };
+    responseTab.value = 'RealtimeResponse';
+
     // 发送请求
     const response = await fetch(finalUrl, {
       method: props.method.toUpperCase(),
       headers: requestHeaders,
       body:
         props.method.toLowerCase() !== 'get' &&
-        ['binary', 'form-data'].includes(bodyTabRef.value.bodyType)
+        ['binary', 'form-data'].includes(bodyType || '')
           ? formData
           : // eslint-disable-next-line unicorn/no-nested-ternary
-            bodyTabRef.value.bodyType === 'x-www-form-urlencoded'
+            bodyType === 'x-www-form-urlencoded'
             ? searchParams
             : bodyData || undefined,
     });
@@ -1103,6 +1362,7 @@ watch(
 );
 
 onBeforeUnmount(() => {
+  clearPaneResizeListeners();
   if (persistTimer) {
     window.clearTimeout(persistTimer);
     persistTimer = null;
@@ -1111,228 +1371,376 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <Splitpanes class="default-theme max-h-[88vh]" horizontal>
-    <Pane :size="70" class="flex flex-col">
-      <div class="mb-4 flex items-center justify-between px-4 pt-5 font-medium">
-        <ElSpace>
-          <ElIcon @click="handleClose" class="cursor-pointer">
-            <SvgCloseIcon />
-          </ElIcon>
-          <span class="font-medium">在线运行</span>
-        </ElSpace>
-        <ElButton text @click="handleRestoreDefault">恢复默认</ElButton>
-      </div>
-      <div class="mb-4 px-4">
-        <ElSpace direction="vertical" :size="12" class="w-full" fill>
-          <div class="flex">
-            <ElInput
-              v-model="requestUrl"
-              placeholder="请输入正确的URL"
-              class="flex-1"
+  <div class="debug-console">
+    <div class="debug-console__top">
+      <div class="debug-console__request-row">
+        <ElInput
+          v-model="requestUrl"
+          placeholder="请输入正确的URL"
+          class="debug-request-input"
+        >
+          <template #prefix>
+            <span
+              class="method-pill"
+              :style="{ ...methodType[method?.toUpperCase()] }"
             >
-              <template #prefix>
-                <span
-                  class="round font-600 inline-flex h-[24px] max-h-[90px] items-center !rounded px-1.5 py-[2px] text-sm"
-                  :style="{ ...methodType[method?.toUpperCase()] }"
-                >
-                  {{ method?.toUpperCase() }}
-                </span>
-                <ElTooltip placement="top" :content="baseUrl" v-if="baseUrl">
-                  <ElButton size="small" class="ml-2 p-0">
-                    <SvgApiPrefixIcon class="size-4" />
-                  </ElButton>
-                </ElTooltip>
-              </template>
-            </ElInput>
-            <ElButton
-              type="primary"
-              class="ml-2"
-              :loading="loading"
-              @click="sendRequest"
-            >
-              发送
-            </ElButton>
-          </div>
-          <div
-            v-if="activeGlobalQueryCount > 0 || activeGlobalHeaderCount > 0"
-            class="text-xs text-[var(--el-text-color-secondary)]"
-          >
-            已注入全局参数：Query {{ activeGlobalQueryCount }} 项，Header
-            {{ activeGlobalHeaderCount }} 项
-          </div>
-        </ElSpace>
-      </div>
-
-      <div class="flex-1 overflow-hidden">
-        <ElTabs v-model="activeTab">
-          <ElTabPane name="Params" label="Params">
-            <template #label>
-              <span class="px-2 font-normal">Params </span>
-              <span
-                class="highlight"
-                v-if="pathParams.length + queryParams.length"
-              >
-                {{ pathParams.length + queryParams.length }}
-              </span>
-            </template>
-            <div v-if="pathParams.length > 0">
-              <h3 class="text-sm">Path 参数</h3>
-              <div class="params-table">
-                <ElTable
-                  border
-                  class="params-table"
-                  :data="pathParams"
-                  header-cell-class-name="p-2"
-                >
-                  <ElTableColumn prop="name" label="参数名">
-                    <template #default="{ row }">
-                      <ElInput v-model="row.name" />
-                    </template>
-                  </ElTableColumn>
-                  <ElTableColumn prop="value" label="参数值">
-                    <template #default="{ row }">
-                      <ElInput v-model="row.value" />
-                    </template>
-                  </ElTableColumn>
-                </ElTable>
-              </div>
-            </div>
-
-            <div>
-              <h3 class="text-sm">Query 参数</h3>
-              <params-table :table-data="queryParams" />
-            </div>
-          </ElTabPane>
-
-          <body-params
-            ref="bodyTabRef"
-            :request-body="requestBody"
-            :form-data-params="formDataParams"
-            :url-encoded-params="urlEncodedParams"
-            :request-body-type="requestBodyType"
-            @body-change="schedulePersistCache"
-          />
-
-          <ElTabPane name="Headers" label="Headers">
-            <template #label>
-              <span class="px-2 font-normal">Headers </span>
-              <span class="highlight" v-if="headers.length > 0">
-                {{ headers.length }}
-              </span>
-            </template>
-            <params-table :table-data="headers" />
-          </ElTabPane>
-          <ElTabPane name="Cookies" label="Cookies">
-            <template #label>
-              <span class="px-2 font-normal">Cookies </span>
-            </template>
-            <params-table :table-data="cookies" />
-          </ElTabPane>
-        </ElTabs>
-      </div>
-    </Pane>
-    <Pane :size="30" :min-size="10" :max-size="60">
-      <div class="flex h-full w-full flex-col">
-        <div class="mb-4 flex justify-between px-4 pt-2">
-          <span class="font-medium">返回结果</span>
-          <ElSpace
-            v-if="responseStatus.type !== 'default' && !responseLoading"
-            class="text-xs text-[--el-color-success]"
-          >
-            <!-- 正常状态 -->
-            <ElTooltip
-              :content="`HTTP 状态码: ${responseStatus.type}`"
-              placement="top"
-            >
-              <span>{{ responseStatus.text }}</span>
+              {{ method?.toUpperCase() }}
+            </span>
+            <ElTooltip v-if="baseUrl" placement="top" :content="baseUrl">
+              <ElButton text class="debug-prefix-button">
+                <SvgApiPrefixIcon class="size-4" />
+              </ElButton>
             </ElTooltip>
-            <ElTooltip content="耗时" placement="top">
-              <span>{{ responseTime }}ms</span>
-            </ElTooltip>
-            <ElTooltip content="大小" placement="top">
-              <span>{{ responseSize }}</span>
-            </ElTooltip>
-            <ElTooltip content="响应类型" placement="top">
-              <span>{{ responseMimeType }}</span>
-            </ElTooltip>
-          </ElSpace>
-          <!-- responseLoading 时右上角不显示任何内容，由中间区域的大Loading覆盖 -->
-        </div>
-        <div class="w-full flex-1 overflow-hidden">
-          <!-- 请求Loading状态 -->
-          <div
-            v-if="responseLoading"
-            class="flex h-full items-center justify-center"
-          >
-            <div class="flex flex-col items-center gap-3">
-              <div class="loading-spinner">
-                <svg
-                  class="animate-spin"
-                  width="40"
-                  height="40"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    fill="#409EFF"
-                    d="M12,4V2A10,10 0 0,0 2,12H4A8,8 0 0,1 12,4Z"
-                  />
-                </svg>
-              </div>
-              <div class="loading-text">
-                <span class="text-base text-gray-600">正在获取响应数据</span>
-                <span class="loading-dots">
-                  <span class="dot">.</span>
-                  <span class="dot">.</span>
-                  <span class="dot">.</span>
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <!-- 响应结果 -->
-          <template v-else>
-            <ElTabs
-              v-model="responseTab"
-              v-if="responseStatus.type !== 'default'"
-            >
-              <ElTabPane name="Body" label="Body">
-                <template #label>
-                  <span class="px-2 font-normal">Body </span>
-                </template>
-                <JsonView
-                  :data="responseData"
-                  :descriptions="responseDescriptions"
-                  :image-render="true"
-                  :language="responseLanguage"
-                  class="response-body"
-                  :loading="responseLoading"
-                />
-              </ElTabPane>
-              <ElTabPane name="Headers" label="Headers">
-                <template #label>
-                  <span class="px-2 font-normal">Headers </span>
-                  <span v-if="responseHeaders.length > 0" class="highlight">
-                    {{ responseHeaders.length }}
-                  </span>
-                </template>
-                <div class="response-headers">
-                  <ElTable border :data="responseHeaders">
-                    <ElTableColumn label="参数名" prop="name" />
-                    <ElTableColumn label="参数值" prop="value" />
-                  </ElTable>
-                </div>
-              </ElTabPane>
-            </ElTabs>
-            <ElEmpty v-else :image-size="80">
-              <template #description>
-                <span class="text-sm">点击"发送"按钮获取返回结果</span>
-              </template>
-            </ElEmpty>
           </template>
+        </ElInput>
+        <div class="debug-console__request-actions">
+          <ElButton
+            type="primary"
+            class="debug-send-button"
+            :loading="loading"
+            @click="sendRequest"
+          >
+            发送
+          </ElButton>
+          <ElTooltip content="恢复默认" placement="top">
+            <ElButton
+              text
+              class="debug-icon-button"
+              @click="handleRestoreDefault"
+            >
+              <SvgDocumentResetIcon class="size-4" />
+            </ElButton>
+          </ElTooltip>
+          <ElTooltip :content="layoutTooltipText" placement="top">
+            <ElButton
+              text
+              class="debug-icon-button"
+              :class="{ 'debug-icon-button--active': !isStackedLayout }"
+              @click="togglePaneLayout"
+            >
+              <SvgDocumentLayoutIcon
+                class="size-4 transition-transform"
+                :class="{ 'rotate-90': !isStackedLayout }"
+              />
+            </ElButton>
+          </ElTooltip>
         </div>
       </div>
-    </Pane>
-  </Splitpanes>
+      <div
+        v-if="activeGlobalQueryCount > 0 || activeGlobalHeaderCount > 0"
+        class="debug-console__hint"
+      >
+        已注入全局参数：Query {{ activeGlobalQueryCount }} 项，Header
+        {{ activeGlobalHeaderCount }} 项
+      </div>
+    </div>
+
+    <div class="debug-console__body">
+      <div
+        ref="debugLayoutRef"
+        class="debug-layout"
+        :class="{
+          'debug-layout--horizontal': !isStackedLayout,
+          'debug-layout--resizing': isPaneResizing,
+        }"
+        :style="layoutGridStyle"
+      >
+        <section class="debug-pane debug-pane--request">
+          <div class="debug-pane-shell">
+            <div class="debug-pane__header debug-pane__header--inline-tabs">
+              <div class="debug-pane__header-main">
+                <span class="debug-pane__title">请求参数</span>
+                <div class="debug-inline-tabs">
+                  <button
+                    v-for="tabItem in requestInlineTabs"
+                    :key="tabItem.key"
+                    type="button"
+                    class="debug-inline-tab"
+                    :class="{
+                      'debug-inline-tab--active': activeTab === tabItem.key,
+                    }"
+                    @click="activeTab = tabItem.key"
+                  >
+                    <span>{{ tabItem.label }}</span>
+                    <span v-if="tabItem.count" class="debug-inline-tab__count">
+                      {{ tabItem.count }}
+                    </span>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="debug-tabs-wrap">
+              <ElTabs v-model="activeTab" class="debug-tabs debug-tabs--inline">
+                <ElTabPane name="Params" label="Params">
+                  <div v-if="pathParams.length > 0">
+                    <h3 class="debug-section-title">Path 参数</h3>
+                    <div class="params-table">
+                      <ElTable
+                        border
+                        class="params-table"
+                        :data="pathParams"
+                        header-cell-class-name="p-2"
+                      >
+                        <ElTableColumn prop="name" label="参数名">
+                          <template #default="{ row }">
+                            <ElInput v-model="row.name" />
+                          </template>
+                        </ElTableColumn>
+                        <ElTableColumn prop="value" label="参数值">
+                          <template #default="{ row }">
+                            <ElInput v-model="row.value" />
+                          </template>
+                        </ElTableColumn>
+                      </ElTable>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h3 class="debug-section-title">Query 参数</h3>
+                    <params-table :table-data="queryParams" />
+                  </div>
+                </ElTabPane>
+
+                <body-params
+                  ref="bodyTabRef"
+                  :request-body="requestBody"
+                  :form-data-params="formDataParams"
+                  :url-encoded-params="urlEncodedParams"
+                  :request-body-type="requestBodyType"
+                  @body-change="schedulePersistCache"
+                />
+
+                <ElTabPane name="Headers" label="Headers">
+                  <params-table :table-data="headers" />
+                </ElTabPane>
+                <ElTabPane name="Cookies" label="Cookies">
+                  <params-table :table-data="cookies" />
+                </ElTabPane>
+              </ElTabs>
+            </div>
+          </div>
+        </section>
+
+        <div
+          class="debug-resizer"
+          :class="{ 'debug-resizer--horizontal': !isStackedLayout }"
+          @pointerdown="startPaneResize"
+        >
+          <span class="debug-resizer__thumb"></span>
+        </div>
+
+        <section class="debug-pane debug-pane--response">
+          <div class="debug-pane-shell">
+            <div class="debug-pane__header debug-pane__header--inline-tabs">
+              <div class="debug-pane__header-main">
+                <span class="debug-pane__title">响应结果</span>
+                <div class="debug-inline-tabs">
+                  <button
+                    v-for="tabItem in responseInlineTabs"
+                    :key="tabItem.key"
+                    type="button"
+                    class="debug-inline-tab"
+                    :class="{
+                      'debug-inline-tab--active': responseTab === tabItem.key,
+                    }"
+                    @click="responseTab = tabItem.key"
+                  >
+                    <span>{{ tabItem.label }}</span>
+                    <span v-if="tabItem.count" class="debug-inline-tab__count">
+                      {{ tabItem.count }}
+                    </span>
+                  </button>
+                </div>
+              </div>
+              <div
+                v-if="responseStatus.type !== 'default' && !responseLoading"
+                class="debug-status-list"
+              >
+                <ElTooltip
+                  :content="`HTTP 状态: ${responseStatus.type}`"
+                  placement="top"
+                >
+                  <span
+                    class="debug-status-chip"
+                    :class="`debug-status-chip--${responseStatusTone}`"
+                  >
+                    {{ responseStatus.text }}
+                  </span>
+                </ElTooltip>
+                <ElTooltip content="耗时" placement="top">
+                  <span class="debug-status-chip debug-status-chip--metric">
+                    {{ responseTime }} ms
+                  </span>
+                </ElTooltip>
+                <ElTooltip content="大小" placement="top">
+                  <span class="debug-status-chip debug-status-chip--metric">
+                    {{ responseSize }}
+                  </span>
+                </ElTooltip>
+                <ElTooltip content="响应类型" placement="top">
+                  <span class="debug-status-chip debug-status-chip--metric">
+                    {{ responseMimeType }}
+                  </span>
+                </ElTooltip>
+              </div>
+              <span v-else-if="!responseLoading" class="debug-pane__meta">
+                等待发送请求
+              </span>
+            </div>
+
+            <div class="debug-response-wrap">
+              <div
+                v-if="responseLoading"
+                class="flex h-full items-center justify-center"
+              >
+                <div class="flex flex-col items-center gap-3">
+                  <div class="loading-spinner">
+                    <svg
+                      class="animate-spin"
+                      width="40"
+                      height="40"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        fill="#409EFF"
+                        d="M12,4V2A10,10 0 0,0 2,12H4A8,8 0 0,1 12,4Z"
+                      />
+                    </svg>
+                  </div>
+                  <div class="loading-text">
+                    <span>正在获取响应数据</span>
+                    <span class="loading-dots">
+                      <span class="dot">.</span>
+                      <span class="dot">.</span>
+                      <span class="dot">.</span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <template v-else>
+                <ElTabs
+                  v-if="
+                    responseStatus.type !== 'default' || actualRequestSnapshot
+                  "
+                  v-model="responseTab"
+                  class="debug-response-tabs debug-response-tabs--inline"
+                >
+                  <ElTabPane name="RealtimeResponse" label="实时响应">
+                    <template v-if="responseStatus.type !== 'default'">
+                      <JsonView
+                        :data="responseData"
+                        :descriptions="responseDescriptions"
+                        :image-render="true"
+                        :language="responseLanguage"
+                        class="response-body"
+                        :loading="responseLoading"
+                      />
+                    </template>
+                    <ElEmpty v-else :image-size="68">
+                      <template #description>
+                        <span class="text-sm">发送请求后展示实时响应结果</span>
+                      </template>
+                    </ElEmpty>
+                  </ElTabPane>
+                  <ElTabPane name="ResponseHeaders" label="响应头">
+                    <div
+                      v-if="responseHeaders.length > 0"
+                      class="response-headers"
+                    >
+                      <ElTable border :data="responseHeaders">
+                        <ElTableColumn label="参数名" prop="name" />
+                        <ElTableColumn label="参数值" prop="value" />
+                      </ElTable>
+                    </div>
+                    <ElEmpty v-else :image-size="68">
+                      <template #description>
+                        <span class="text-sm">暂无响应头信息</span>
+                      </template>
+                    </ElEmpty>
+                  </ElTabPane>
+                  <ElTabPane name="ActualRequest" label="实际请求">
+                    <div v-if="actualRequestSnapshot" class="actual-request">
+                      <div class="actual-request__block">
+                        <div class="actual-request__title">请求 URL</div>
+                        <pre
+                          class="actual-request__code"
+                          v-text="
+                            `${actualRequestSnapshot.method} ${actualRequestSnapshot.url}`
+                          "
+                        ></pre>
+                      </div>
+
+                      <div
+                        v-if="actualRequestSnapshot.headers.length > 0"
+                        class="actual-request__block"
+                      >
+                        <div class="actual-request__title">请求头</div>
+                        <ElTable border :data="actualRequestSnapshot.headers">
+                          <ElTableColumn label="参数名" prop="name" />
+                          <ElTableColumn label="参数值" prop="value" />
+                        </ElTable>
+                      </div>
+
+                      <div
+                        v-if="actualRequestSnapshot.queryParams.length > 0"
+                        class="actual-request__block"
+                      >
+                        <div class="actual-request__title">Query 参数</div>
+                        <ElTable
+                          border
+                          :data="actualRequestSnapshot.queryParams"
+                        >
+                          <ElTableColumn label="参数名" prop="name" />
+                          <ElTableColumn label="参数值" prop="value" />
+                        </ElTable>
+                      </div>
+
+                      <div
+                        v-if="actualRequestSnapshot.pathParams.length > 0"
+                        class="actual-request__block"
+                      >
+                        <div class="actual-request__title">Path 参数</div>
+                        <ElTable
+                          border
+                          :data="actualRequestSnapshot.pathParams"
+                        >
+                          <ElTableColumn label="参数名" prop="name" />
+                          <ElTableColumn label="参数值" prop="value" />
+                        </ElTable>
+                      </div>
+
+                      <div
+                        v-if="actualRequestSnapshot.bodyText"
+                        class="actual-request__block"
+                      >
+                        <div class="actual-request__title">
+                          请求体 ({{ actualRequestSnapshot.bodyType }})
+                        </div>
+                        <pre class="actual-request__code">{{
+                          actualRequestSnapshot.bodyText
+                        }}</pre>
+                      </div>
+                    </div>
+                    <ElEmpty v-else :image-size="68">
+                      <template #description>
+                        <span class="text-sm">发送请求后展示实际请求内容</span>
+                      </template>
+                    </ElEmpty>
+                  </ElTabPane>
+                </ElTabs>
+                <ElEmpty v-else :image-size="80">
+                  <template #description>
+                    <span class="text-sm">点击“发送”按钮获取返回结果</span>
+                  </template>
+                </ElEmpty>
+              </template>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
 </template>
 
 <style lang="scss" scoped>
@@ -1353,85 +1761,447 @@ onBeforeUnmount(() => {
   }
 }
 
-.api-tester {
+.debug-console {
+  --debug-chip-radius: calc(var(--radius) * 999);
+  --debug-radius-xs: 8px;
+  --debug-radius-sm: 10px;
+  --debug-radius-md: 12px;
+  --debug-radius-lg: 14px;
+  --debug-surface: var(--el-bg-color);
+  --debug-soft-bg: color-mix(
+    in srgb,
+    var(--el-bg-color) 92%,
+    var(--el-fill-color-light) 8%
+  );
+  --debug-soft-bg-strong: color-mix(
+    in srgb,
+    var(--el-bg-color) 86%,
+    var(--el-fill-color-light) 14%
+  );
+  --debug-border: color-mix(
+    in srgb,
+    var(--el-text-color-primary) 18%,
+    transparent
+  );
+  --debug-border-strong: color-mix(
+    in srgb,
+    var(--el-text-color-primary) 26%,
+    transparent
+  );
+  --debug-shadow: 0 6px 14px
+    color-mix(in srgb, var(--el-text-color-primary) 3%, transparent);
+
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: #fff;
+  min-height: 0;
 }
 
-.response-header {
-  .response-status,
-  .response-time,
-  .response-size {
-    @apply mb-2;
-
-    .label {
-      @apply inline-block w-[80px] text-sm;
-    }
-  }
+.debug-console__top {
+  display: grid;
+  flex: none;
+  gap: 9px;
+  padding: 10px;
+  margin-bottom: 10px;
+  background: var(--debug-surface);
+  border: 1px solid var(--debug-border);
+  border-radius: var(--debug-radius-lg);
+  box-shadow: var(--debug-shadow);
 }
 
-:deep(.params-table.el-table) {
-  @apply mb-4 mt-2;
-
-  .el-table__cell {
-    padding: 0;
-  }
-
-  .cell {
-    padding: 0;
-
-    .el-input__wrapper {
-      background-color: transparent;
-      border: none;
-      border-radius: 0;
-      box-shadow: none;
-    }
-  }
-
-  .el-table__header {
-    .cell {
-      padding: 4px 8px;
-    }
-  }
+.debug-console__request-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
 }
 
-:deep(.el-tabs) {
-  width: 100%;
+.debug-console__hint {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 10px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--el-text-color-secondary);
+  background: var(--debug-soft-bg-strong);
+  border: 1px solid var(--debug-border);
+  border-radius: var(--debug-chip-radius);
+}
+
+.debug-console__request-actions {
+  display: inline-flex;
+  flex: none;
+  gap: 8px;
+  align-items: center;
+  padding-left: 8px;
+}
+
+.debug-console__request-actions::before {
+  width: 1px;
+  height: 18px;
+  content: '';
+  background: var(--debug-border);
+}
+
+.debug-console__body {
+  flex: 1;
+  min-height: 0;
+}
+
+.debug-layout {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) 10px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   height: 100%;
-  overflow: hidden;
-
-  .el-tabs__nav-wrap {
-    padding: 0 10px;
-  }
-
-  .el-tabs__item {
-    padding: 0 4px;
-
-    .highlight {
-      @apply h-4 w-4 rounded-full text-center text-white;
-
-      background-color: var(--el-color-primary);
-    }
-  }
-
-  .el-tabs__content {
-    .el-tab-pane {
-      @apply px-4 pb-4;
-
-      width: 100%;
-      height: 100%;
-      overflow-y: auto;
-    }
-  }
+  min-height: 0;
 }
 
-/* Loading 动画样式 */
+.debug-layout--horizontal {
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 10px minmax(0, 1fr);
+}
+
+.debug-layout--resizing {
+  user-select: none;
+}
+
+.debug-pane {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.debug-resizer {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+  cursor: row-resize;
+}
+
+.debug-resizer__thumb {
+  width: 42px;
+  height: 4px;
+  background: color-mix(in srgb, var(--el-text-color-primary) 20%, transparent);
+  border-radius: var(--debug-chip-radius);
+  transition: background-color 0.16s ease;
+}
+
+.debug-resizer:hover .debug-resizer__thumb {
+  background: color-mix(in srgb, var(--el-color-primary) 42%, transparent);
+}
+
+.debug-resizer--horizontal {
+  cursor: col-resize;
+}
+
+.debug-resizer--horizontal .debug-resizer__thumb {
+  width: 4px;
+  height: 42px;
+}
+
+.debug-pane-shell {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  width: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--debug-surface);
+  border: 1px solid var(--debug-border);
+  border-radius: var(--debug-radius-lg);
+  box-shadow: var(--debug-shadow);
+}
+
+.debug-pane__header {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 42px;
+  padding: 0 14px;
+  background: var(--debug-soft-bg);
+  border-bottom: 1px solid var(--debug-border);
+}
+
+.debug-pane__header--inline-tabs {
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
+}
+
+.debug-pane__header-main {
+  display: inline-flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  align-items: center;
+  min-width: 0;
+}
+
+.debug-pane__title {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--el-text-color-primary);
+}
+
+.debug-pane__meta {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--el-text-color-secondary);
+}
+
+.debug-inline-tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  min-width: 0;
+}
+
+.debug-inline-tab {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--debug-radius-xs);
+  transition: all 0.14s ease;
+}
+
+.debug-inline-tab:hover {
+  color: var(--el-text-color-primary);
+  background: var(--debug-soft-bg-strong);
+  border-color: var(--debug-border);
+}
+
+.debug-inline-tab--active {
+  color: var(--el-color-primary);
+  background: color-mix(
+    in srgb,
+    var(--el-color-primary-light-9) 70%,
+    var(--debug-surface) 30%
+  );
+  border-color: color-mix(in srgb, var(--el-color-primary) 28%, transparent);
+}
+
+.debug-inline-tab__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--el-color-primary);
+  border-radius: var(--debug-chip-radius);
+}
+
+.debug-icon-button {
+  width: 30px;
+  height: 30px;
+  color: var(--el-text-color-secondary);
+  background: var(--debug-soft-bg);
+  border: 1px solid var(--debug-border-strong);
+  border-radius: var(--debug-chip-radius);
+  transition: all 0.18s ease;
+}
+
+.debug-icon-button:hover {
+  color: var(--el-color-primary);
+  background: color-mix(
+    in srgb,
+    var(--el-color-primary-light-9) 70%,
+    var(--debug-soft-bg) 30%
+  );
+  border-color: color-mix(in srgb, var(--el-color-primary) 38%, transparent);
+  transform: translateY(-1px);
+}
+
+.debug-icon-button--active {
+  color: var(--el-color-primary);
+  background: color-mix(
+    in srgb,
+    var(--el-color-primary-light-9) 74%,
+    var(--debug-surface) 26%
+  );
+  border-color: color-mix(in srgb, var(--el-color-primary) 40%, transparent);
+}
+
+.debug-request-input {
+  flex: 1;
+}
+
+:deep(.debug-request-input .el-input__wrapper) {
+  min-height: 38px;
+  background: var(--debug-surface);
+  border-radius: var(--debug-radius-sm);
+  box-shadow: inset 0 0 0 1px var(--debug-border-strong);
+}
+
+:deep(.debug-request-input .el-input__wrapper:hover) {
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--el-color-primary) 30%, transparent);
+}
+
+:deep(.debug-request-input .el-input__wrapper.is-focus) {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--el-color-primary) 44%, transparent),
+    0 0 0 3px
+      color-mix(in srgb, var(--el-color-primary-light-9) 78%, transparent);
+}
+
+.method-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 62px;
+  height: 24px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  border-radius: var(--debug-chip-radius);
+}
+
+.debug-prefix-button {
+  width: 26px;
+  height: 26px;
+  margin-left: 8px;
+  color: var(--el-text-color-secondary);
+  border-radius: var(--debug-chip-radius);
+  transition: all 0.16s ease;
+}
+
+.debug-prefix-button:hover {
+  color: var(--el-color-primary);
+  background: color-mix(
+    in srgb,
+    var(--el-color-primary-light-9) 65%,
+    transparent
+  );
+}
+
+.debug-send-button {
+  min-width: 84px;
+  height: 38px;
+  font-weight: 700;
+  border-radius: var(--debug-radius-sm);
+  box-shadow: 0 4px 10px
+    color-mix(in srgb, var(--el-color-primary) 20%, transparent);
+  transition: transform 0.16s ease;
+}
+
+.debug-send-button:hover {
+  transform: translateY(-1px);
+}
+
+.debug-tabs-wrap,
+.debug-response-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--debug-soft-bg);
+}
+
+.debug-section-title {
+  margin-top: 2px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--el-text-color-secondary);
+}
+
+.debug-status-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.debug-status-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 23px;
+  padding: 0 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+  background: var(--debug-soft-bg-strong);
+  border: 1px solid var(--debug-border);
+  border-radius: var(--debug-chip-radius);
+}
+
+.debug-status-chip--success {
+  color: var(--el-color-success-dark-2);
+  background: var(--el-color-success-light-9);
+  border-color: var(--el-color-success-light-7);
+}
+
+.debug-status-chip--error {
+  color: var(--el-color-danger-dark-2);
+  background: var(--el-color-danger-light-9);
+  border-color: var(--el-color-danger-light-7);
+}
+
+.debug-status-chip--default {
+  color: var(--el-text-color-secondary);
+}
+
+.debug-status-chip--metric {
+  color: var(--el-text-color-primary);
+}
+
+.response-headers {
+  padding: 0 2px 10px 1px;
+}
+
+.actual-request {
+  display: grid;
+  gap: 10px;
+}
+
+.actual-request__block {
+  padding: 10px;
+  background: var(--debug-surface);
+  border: 1px solid var(--debug-border);
+  border-radius: var(--debug-radius-xs);
+}
+
+.actual-request__title {
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+}
+
+.actual-request__code {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--el-text-color-regular);
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
 .loading-text {
   display: flex;
   gap: 2px;
   align-items: center;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
 }
 
 .loading-dots {
@@ -1455,5 +2225,128 @@ onBeforeUnmount(() => {
 
 .loading-dots .dot:nth-child(3) {
   animation-delay: 0.4s;
+}
+
+:deep(.params-table.el-table) {
+  margin-top: 4px;
+  margin-bottom: 8px;
+  overflow: hidden;
+  border-radius: var(--debug-radius-xs);
+
+  .el-table__header-wrapper th {
+    background: var(--debug-soft-bg-strong);
+  }
+
+  .el-table__cell {
+    padding: 0;
+  }
+
+  .cell {
+    padding: 0;
+
+    .el-input__wrapper {
+      background-color: transparent;
+      border: none;
+      border-radius: 0;
+      box-shadow: none;
+    }
+  }
+
+  .el-table__header .cell {
+    padding: 4px 8px;
+  }
+}
+
+:deep(.debug-tabs.el-tabs),
+:deep(.debug-response-tabs.el-tabs) {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+
+  .el-tabs__header {
+    margin: 0;
+    background: var(--debug-surface);
+    border-bottom: 1px solid var(--debug-border);
+  }
+
+  .el-tabs__nav-wrap::after {
+    display: none;
+  }
+
+  .el-tabs__nav-wrap {
+    padding: 0 10px;
+  }
+
+  .el-tabs__item {
+    height: 36px;
+    padding: 0 6px;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 36px;
+  }
+
+  .el-tabs__item.is-active {
+    font-weight: 700;
+    color: var(--el-color-primary);
+  }
+
+  .el-tabs__active-bar {
+    height: 2px;
+    border-radius: 2px 2px 0 0;
+  }
+
+  .el-tabs__content {
+    height: calc(100% - 37px);
+  }
+
+  .el-tab-pane {
+    width: 100%;
+    height: 100%;
+    padding: 10px 12px 12px;
+    overflow-y: auto;
+  }
+}
+
+:deep(.debug-tabs--inline.el-tabs .el-tabs__header),
+:deep(.debug-response-tabs--inline.el-tabs .el-tabs__header) {
+  display: none;
+}
+
+:deep(.debug-tabs--inline.el-tabs .el-tabs__content),
+:deep(.debug-response-tabs--inline.el-tabs .el-tabs__content) {
+  height: 100%;
+}
+
+:deep(.debug-response-wrap .el-empty) {
+  height: 100%;
+}
+
+:deep(.debug-response-wrap .el-empty__description p) {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+@media (max-width: 1024px) {
+  .debug-console__request-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .debug-console__request-actions {
+    justify-content: flex-end;
+    padding-left: 0;
+  }
+
+  .debug-console__request-actions::before {
+    display: none;
+  }
+
+  .debug-send-button {
+    min-width: 92px;
+  }
+
+  .debug-status-list {
+    justify-content: flex-start;
+  }
 }
 </style>

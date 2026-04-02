@@ -10,6 +10,8 @@ const SvgDocExportMarkdownIcon = createIconifyIcon('svg:doc-export-markdown');
 const SvgDocExportOpenapiIcon = createIconifyIcon('svg:doc-export-openapi');
 const SvgDocExportPdfIcon = createIconifyIcon('svg:doc-export-pdf');
 const SvgDocExportWordIcon = createIconifyIcon('svg:doc-export-word');
+const SvgDocumentLayoutIcon = createIconifyIcon('svg:document-layout');
+const SvgDocumentResetIcon = createIconifyIcon('svg:document-reset');
 const SvgDoubleArrowDownIcon = createIconifyIcon(
   'svg:double-alt-arrow-down-svgrepo-com',
 );
@@ -35,6 +37,8 @@ export {
   SvgDocExportOpenapiIcon,
   SvgDocExportPdfIcon,
   SvgDocExportWordIcon,
+  SvgDocumentLayoutIcon,
+  SvgDocumentResetIcon,
   SvgDoubleArrowDownIcon,
   SvgDoubleArrowUpIcon,
   SvgFormatLeftIcon,
