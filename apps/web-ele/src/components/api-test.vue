@@ -9,6 +9,7 @@ import {
   onBeforeUnmount,
   onMounted,
   ref,
+  shallowRef,
   watch,
 } from 'vue';
 
@@ -35,7 +36,7 @@ import {
   ElTooltip,
 } from 'element-plus';
 
-import JsonView from '#/components/json-view.vue';
+import JsonViewer from '#/components/json-viewer/index.vue';
 import { methodType } from '#/constants/methods';
 import {
   useApiStore,
@@ -182,7 +183,6 @@ const resetResponseState = () => {
   responseSize.value = '0 B';
   responseData.value = null;
   responseMimeType.value = '';
-  responseLanguage.value = 'json';
   responseHeaders.value = [];
   actualRequestSnapshot.value = null;
 };
@@ -381,13 +381,11 @@ watch(
 const responseStatus = ref({ code: 0, text: '-', type: 'default' });
 const responseTime = ref(0);
 const responseSize = ref('0 B');
-const responseData = ref<any>(null);
+const responseData = shallowRef<any>(null);
 const responseMimeType = ref('');
-const responseLanguage = ref('json');
 const responseHeaders = ref<
   Array<{ enabled: boolean; name: string; value: string }>
 >([]);
-const responseDescriptions = ref({});
 
 const activeGlobalQueryCount = computed(() => {
   return docManageStore
@@ -1677,7 +1675,6 @@ async function sendRequest() {
     };
     responseData.value = parsedResponse.data;
     responseMimeType.value = parsedResponse.contentType || '-';
-    responseLanguage.value = parsedResponse.language || 'plaintext';
 
     const header = Object.fromEntries(response.headers.entries());
     responseHeaders.value = [];
@@ -1703,7 +1700,6 @@ async function sendRequest() {
     };
     responseData.value = null;
     responseMimeType.value = '-';
-    responseLanguage.value = 'plaintext';
   } finally {
     loading.value = false;
     responseLoading.value = false;
@@ -2007,16 +2003,14 @@ onBeforeUnmount(() => {
                         class="params-table params-table--path"
                         :data="pathParams"
                         header-cell-class-name="p-2"
-                        table-layout="fixed"
+                        table-layout="auto"
                         :allow-drag-last-column="false"
+                        :style="{ minWidth: '560px' }"
                       >
                         <ElTableColumn
                           prop="name"
                           label="参数名"
-                          class-name="path-col path-col--name"
-                          label-class-name="path-col path-col--name"
-                          min-width="120"
-                          resizable
+                          min-width="140"
                         >
                           <template #default="{ row }">
                             <ElInput v-model="row.name" />
@@ -2025,10 +2019,7 @@ onBeforeUnmount(() => {
                         <ElTableColumn
                           prop="value"
                           label="参数值"
-                          class-name="path-col path-col--value"
-                          label-class-name="path-col path-col--value"
-                          min-width="140"
-                          resizable
+                          min-width="220"
                         >
                           <template #default="{ row }">
                             <ElInput v-model="row.value" />
@@ -2037,10 +2028,8 @@ onBeforeUnmount(() => {
                         <ElTableColumn
                           prop="description"
                           label="描述"
-                          class-name="path-col path-col--description"
-                          label-class-name="path-col path-col--description"
-                          min-width="88"
-                          resizable
+                          min-width="200"
+                          show-overflow-tooltip
                         >
                           <template #default="{ row }">
                             <ElTooltip
@@ -2246,15 +2235,13 @@ onBeforeUnmount(() => {
                   v-model="responseTab"
                   class="debug-response-tabs debug-response-tabs--inline"
                 >
-                  <ElTabPane name="RealtimeResponse" label="实时响应">
+                  <ElTabPane name="RealtimeResponse" label="实时响应" lazy>
                     <template v-if="responseStatus.type !== 'default'">
-                      <JsonView
-                        :data="responseData"
-                        :descriptions="responseDescriptions"
-                        :image-render="true"
-                        :language="responseLanguage"
-                        class="response-body"
-                        :loading="responseLoading"
+                      <JsonViewer
+                        v-if="responseTab === 'RealtimeResponse'"
+                        :value="responseData"
+                        :default-expanded="false"
+                        class="response-body app-json-schema-viewer"
                       />
                     </template>
                     <ElEmpty v-else :image-size="68">
@@ -2263,7 +2250,7 @@ onBeforeUnmount(() => {
                       </template>
                     </ElEmpty>
                   </ElTabPane>
-                  <ElTabPane name="ResponseHeaders" label="响应头">
+                  <ElTabPane name="ResponseHeaders" label="响应头" lazy>
                     <div
                       v-if="responseHeaders.length > 0"
                       class="response-headers"
@@ -2279,7 +2266,7 @@ onBeforeUnmount(() => {
                       </template>
                     </ElEmpty>
                   </ElTabPane>
-                  <ElTabPane name="ActualRequest" label="实际请求">
+                  <ElTabPane name="ActualRequest" label="实际请求" lazy>
                     <div v-if="actualRequestSnapshot" class="actual-request">
                       <div class="actual-request__block">
                         <div class="actual-request__title">请求 URL</div>
@@ -2945,6 +2932,7 @@ onBeforeUnmount(() => {
 .params-table-block {
   min-width: 0;
   padding: 0;
+  overflow: auto hidden;
 }
 
 .path-param-description {
@@ -2953,6 +2941,17 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.response-body {
+  height: 100%;
+  min-height: 0;
+}
+
+:deep(.response-body.theme-light),
+:deep(.response-body.theme-dark) {
+  height: 100%;
+  min-height: 0;
 }
 
 .debug-status-list {

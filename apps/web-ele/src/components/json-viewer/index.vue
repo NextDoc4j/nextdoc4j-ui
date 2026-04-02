@@ -12,10 +12,13 @@ import JsonNode from './json-node.vue';
 const props = withDefaults(
   defineProps<{
     defaultExpanded?: boolean;
-    schema: any;
+    schema?: any;
+    value?: unknown;
   }>(),
   {
     defaultExpanded: true,
+    schema: undefined,
+    value: undefined,
   },
 );
 
@@ -29,23 +32,39 @@ const resolvedThemeMode = computed(() => {
   return preferences.theme.mode;
 });
 
-const parsedData = computed(() => {
-  if (!props.schema) {
-    return null;
+const parsedResult = computed<{ data: unknown; error: null | string }>(() => {
+  if (props.value !== undefined) {
+    return {
+      data: props.value,
+      error: null,
+    };
   }
+
+  if (!props.schema) {
+    return {
+      data: null,
+      error: null,
+    };
+  }
+
   try {
-    return generateExample(props.schema);
+    return {
+      data: generateExample(props.schema),
+      error: null,
+    };
   } catch (error) {
     console.error('Failed to generate example from schema:', error);
-    return null;
+    return {
+      data: null,
+      error: 'Invalid schema format',
+    };
   }
 });
 
-const parseError = computed(() => {
-  if (parsedData.value === null && props.schema) {
-    return 'Invalid schema format';
-  }
-  return null;
+const parsedData = computed(() => parsedResult.value.data);
+const parseError = computed(() => parsedResult.value.error);
+const isEmptyData = computed(() => {
+  return parsedData.value === null || parsedData.value === undefined;
 });
 
 function expandAll() {
@@ -71,7 +90,7 @@ defineExpose({
       <span class="text-sm">⚠️</span>
       <span>{{ parseError }}</span>
     </div>
-    <div v-else-if="!parsedData" class="json-empty">
+    <div v-else-if="isEmptyData" class="json-empty">
       <span>暂无数据</span>
     </div>
     <JsonNode

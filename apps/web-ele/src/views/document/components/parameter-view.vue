@@ -66,6 +66,10 @@ const enumItems = computed(() => {
   return getEnumItems(schemaSource);
 });
 
+const enumValueList = computed(() => {
+  return enumItems.value.map((item) => String(item.value)).join(', ');
+});
+
 const typeLabel = computed(() => {
   const target = schema.value;
   if (!target) return '-';
@@ -117,7 +121,9 @@ const formatValue = (value: unknown) => {
           >
             {{ parameter.required ? '必填' : '可选' }}
           </span>
-          <span class="meta-pill meta-pill--type">{{ typeLabel }}</span>
+          <span class="meta-pill meta-pill--type">
+            {{ typeLabel }}
+          </span>
           <ElTooltip
             v-if="exampleValue !== undefined && exampleValue !== null"
             :content="formatValue(exampleValue)"
@@ -132,7 +138,7 @@ const formatValue = (value: unknown) => {
             :content="formatValue(defaultValue)"
             placement="top"
           >
-            <span class="meta-pill">
+            <span class="meta-pill meta-pill--default">
               默认 {{ formatValue(defaultValue) }}
             </span>
           </ElTooltip>
@@ -171,6 +177,9 @@ const formatValue = (value: unknown) => {
           </span>
         </span>
       </div>
+      <span v-if="enumValueList" class="parameter-item__enum-available">
+        可用值: {{ enumValueList }}
+      </span>
     </div>
   </div>
 </template>
@@ -251,46 +260,52 @@ const formatValue = (value: unknown) => {
   min-height: 24px;
   padding: 0 8px;
   font-size: 11px;
-  color: var(--el-text-color-regular);
-  background: var(--el-fill-color-light);
-  border: 1px solid var(--el-border-color-lighter);
+  color: #334155;
+  background: #f8fafc;
+  border: 1px solid #cfd8e3;
   border-radius: var(--doc-chip-radius);
 }
 
 .meta-pill--type {
-  color: var(--el-color-primary);
-  background: var(--el-color-primary-light-9);
-  border-color: var(--el-color-primary-light-7);
+  color: #1f4ba8;
+  background: #ecf2ff;
+  border-color: #b8c9eb;
+}
+
+.meta-pill--default {
+  color: #475569;
+  background: #f5f7fa;
+  border-color: #d5dde8;
 }
 
 .meta-pill--required {
-  color: var(--el-color-danger);
-  background: var(--el-color-danger-light-9);
-  border-color: var(--el-color-danger-light-7);
+  color: #b42318;
+  background: #feeceb;
+  border-color: #f6b4ad;
 }
 
 .meta-pill--optional {
-  color: var(--el-color-success);
-  background: var(--el-color-success-light-9);
-  border-color: var(--el-color-success-light-7);
+  color: #0f7a43;
+  background: #e9f8ee;
+  border-color: #9fd9b7;
 }
 
 .meta-pill--example {
-  color: var(--el-color-primary);
-  background: var(--el-color-primary-light-9);
-  border-color: var(--el-color-primary-light-7);
+  color: #8b5a1e;
+  background: #fff5e6;
+  border-color: #ebc48c;
 }
 
 .meta-pill--pattern {
-  color: var(--el-color-warning-dark-2);
-  background: var(--el-color-warning-light-9);
-  border-color: var(--el-color-warning-light-7);
+  color: #5b3fa3;
+  background: #f3efff;
+  border-color: #cdc0ef;
 }
 
 .meta-pill--constraint {
-  color: var(--el-color-success);
-  background: var(--el-color-success-light-9);
-  border-color: var(--el-color-success-light-7);
+  color: #11605b;
+  background: #e9fbf8;
+  border-color: #9fd7cf;
 }
 
 .enum-pill {
@@ -299,20 +314,101 @@ const formatValue = (value: unknown) => {
   align-items: center;
   min-height: 26px;
   padding: 0 10px;
-  background: var(--el-color-primary-light-9);
-  border: 1px solid var(--el-color-primary-light-7);
+  color: #1f4ba8;
+  background: #eff4ff;
+  border: 1px solid #c7d5ef;
   border-radius: var(--doc-radius-sm);
 }
 
 .enum-pill__value {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  min-width: 18px;
   font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
   font-size: 11px;
   font-weight: 700;
-  color: var(--el-color-primary);
+  color: #1e3f8a;
+  text-align: center;
 }
 
 .enum-pill__description {
   font-size: 11px;
   color: var(--el-text-color-secondary);
+}
+
+.parameter-item__enum-available {
+  flex: none;
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+}
+
+:deep(.document-page--dark .parameter-item .meta-pill),
+:deep(html.dark .parameter-item .meta-pill) {
+  color: #bfcad9;
+  background: #232a36;
+  border-color: #3f4d61;
+}
+
+:deep(.document-page--dark .parameter-item .meta-pill--type),
+:deep(html.dark .parameter-item .meta-pill--type) {
+  color: #a9c0eb;
+  background: #1e2838;
+  border-color: #3b4d67;
+}
+
+:deep(.document-page--dark .parameter-item .meta-pill--default),
+:deep(html.dark .parameter-item .meta-pill--default) {
+  color: #c3cfde;
+  background: #252d3a;
+  border-color: #435368;
+}
+
+:deep(.document-page--dark .parameter-item .meta-pill--required),
+:deep(html.dark .parameter-item .meta-pill--required) {
+  color: #f0b2ad;
+  background: #372228;
+  border-color: #5c3840;
+}
+
+:deep(.document-page--dark .parameter-item .meta-pill--optional),
+:deep(html.dark .parameter-item .meta-pill--optional) {
+  color: #aad8be;
+  background: #1d3127;
+  border-color: #385a49;
+}
+
+:deep(.document-page--dark .parameter-item .meta-pill--example),
+:deep(html.dark .parameter-item .meta-pill--example) {
+  color: #e3c199;
+  background: #372d22;
+  border-color: #5a4a35;
+}
+
+:deep(.document-page--dark .parameter-item .meta-pill--pattern),
+:deep(html.dark .parameter-item .meta-pill--pattern) {
+  color: #c8b8e6;
+  background: #2d2539;
+  border-color: #4c4061;
+}
+
+:deep(.document-page--dark .parameter-item .meta-pill--constraint),
+:deep(html.dark .parameter-item .meta-pill--constraint) {
+  color: #9fcec9;
+  background: #1d3131;
+  border-color: #385956;
+}
+
+:deep(.document-page--dark .parameter-item .enum-pill),
+:deep(html.dark .parameter-item .enum-pill) {
+  color: #a9c0eb;
+  background: #1e2d42;
+  border-color: #3a4f6e;
+}
+
+:deep(.document-page--dark .parameter-item .enum-pill__value),
+:deep(html.dark .parameter-item .enum-pill__value) {
+  color: #d4e1f5;
 }
 </style>

@@ -21,7 +21,6 @@ import { SvgCloseIcon } from '@vben/icons';
 import {
   ElButton,
   ElCheckbox,
-  ElIcon,
   ElInput,
   ElOption,
   ElSelect,
@@ -75,6 +74,19 @@ let tableResizeObserver: null | ResizeObserver = null;
 
 const enableFlexibleColumns = computed(() => {
   return Boolean(props.showDescriptionColumn) && !props.showContentType;
+});
+
+const tableMinWidth = computed(() => {
+  if (props.showDescriptionColumn && props.showContentType) return 720;
+  if (props.showDescriptionColumn) return 640;
+  if (props.showContentType) return 580;
+  return 460;
+});
+
+const tableStyle = computed(() => {
+  return {
+    minWidth: `${tableMinWidth.value}px`,
+  };
 });
 
 function getTableElement() {
@@ -231,8 +243,9 @@ onBeforeUnmount(() => {
       class="params-table"
       :data="tableData"
       header-cell-class-name="p-2"
-      table-layout="fixed"
+      table-layout="auto"
       :allow-drag-last-column="false"
+      :style="tableStyle"
     >
       <ElTableColumn :width="48" align="center">
         <template #header>
@@ -245,10 +258,7 @@ onBeforeUnmount(() => {
       <ElTableColumn
         prop="name"
         label="参数名"
-        class-name="params-col params-col--name"
-        label-class-name="params-col params-col--name"
-        :min-width="enableFlexibleColumns ? 120 : 200"
-        :resizable="enableFlexibleColumns"
+        :min-width="enableFlexibleColumns ? 120 : 150"
       >
         <template #default="{ row }">
           <ElInput v-model="row.name" placeholder="参数名" />
@@ -257,10 +267,7 @@ onBeforeUnmount(() => {
       <ElTableColumn
         prop="value"
         label="参数值"
-        class-name="params-col params-col--value"
-        label-class-name="params-col params-col--value"
-        :min-width="enableFlexibleColumns ? 140 : 260"
-        :resizable="enableFlexibleColumns"
+        :min-width="enableFlexibleColumns ? 180 : 220"
       >
         <template #default="{ row, $index }">
           <div v-if="row.format === 'binary'" class="pl-2 pt-2">
@@ -304,25 +311,27 @@ onBeforeUnmount(() => {
                 </span>
               </ElOption>
             </ElSelect>
-            <ElIcon
+            <button
               v-if="!showDeleteInDescription"
+              type="button"
+              class="param-inline-delete"
               @click="remove($index)"
-              class="ml-2 cursor-pointer"
             >
-              <SvgCloseIcon class="size-3" />
-            </ElIcon>
+              <SvgCloseIcon class="param-inline-delete__icon" />
+            </button>
           </div>
 
           <!-- 普通输入框 -->
           <div v-else class="flex items-center">
             <ElInput v-model="row.value" :placeholder="getPlaceholder(row)" />
-            <ElIcon
+            <button
               v-if="!showDeleteInDescription"
+              type="button"
+              class="param-inline-delete"
               @click="remove($index)"
-              class="cursor-pointer"
             >
-              <SvgCloseIcon class="ml-[-12px] size-3" />
-            </ElIcon>
+              <SvgCloseIcon class="param-inline-delete__icon" />
+            </button>
           </div>
         </template>
       </ElTableColumn>
@@ -330,23 +339,23 @@ onBeforeUnmount(() => {
         v-if="showDescriptionColumn"
         prop="description"
         label="描述"
-        class-name="params-col params-col--description"
-        label-class-name="params-col params-col--description"
-        :min-width="enableFlexibleColumns ? 88 : 120"
-        :resizable="enableFlexibleColumns"
+        :min-width="enableFlexibleColumns ? 180 : 220"
+        show-overflow-tooltip
       >
         <template #default="{ row, $index }">
           <div class="param-description-cell">
-            <ElTooltip
-              v-if="getDescription(row)"
-              :content="getDescription(row)"
-              placement="top"
-            >
-              <span class="param-description-text">{{
-                getDescription(row)
-              }}</span>
-            </ElTooltip>
-            <span v-else class="param-description-text">-</span>
+            <span class="param-description-main">
+              <ElTooltip
+                v-if="getDescription(row)"
+                :content="getDescription(row)"
+                placement="top"
+              >
+                <span class="param-description-text">{{
+                  getDescription(row)
+                }}</span>
+              </ElTooltip>
+              <span v-else class="param-description-text">-</span>
+            </span>
             <button
               v-if="showDeleteInDescription"
               type="button"
@@ -415,13 +424,16 @@ onBeforeUnmount(() => {
 .params-table-wrap {
   min-width: 0;
   max-width: 100%;
+  overflow: auto hidden;
 }
 
 :deep(.params-table.el-table) {
   width: 100%;
+  min-width: 100%;
 }
 
 :deep(.params-table .cell) {
+  width: 100%;
   min-width: 0;
 }
 
@@ -437,14 +449,63 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 8px;
   align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-width: 0;
+}
+
+.param-description-main {
+  display: inline-flex;
+  flex: 1 1 auto;
+  align-items: center;
+  min-width: 0;
+}
+
+.param-description-main :deep(.el-tooltip__trigger) {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .param-description-text {
-  flex: 1;
+  display: inline-block;
+  flex: 1 1 auto;
+  width: 100%;
   min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.param-inline-delete {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  margin-left: 6px;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  border-radius: calc(var(--radius) * 1.2);
+}
+
+.param-inline-delete:hover {
+  color: var(--el-color-danger);
+  background: color-mix(
+    in srgb,
+    var(--el-color-danger-light-9) 70%,
+    transparent
+  );
+}
+
+.param-inline-delete__icon {
+  width: 14px;
+  height: 14px;
+  color: currentcolor;
 }
 
 .param-delete-button {
@@ -455,6 +516,7 @@ onBeforeUnmount(() => {
   width: 24px;
   height: 24px;
   padding: 0;
+  margin-left: auto;
   color: var(--el-text-color-secondary);
   cursor: pointer;
   background: transparent;
