@@ -303,7 +303,7 @@ const formatOrTypeLabel = (orType?: string) => {
 
 <style scoped>
 .security-view {
-  --doc-chip-radius: calc(var(--radius) * 999);
+  --doc-chip-radius: calc(var(--radius) * 1.25);
   --doc-radius-sm: calc(var(--radius) * 2);
 
   display: grid;

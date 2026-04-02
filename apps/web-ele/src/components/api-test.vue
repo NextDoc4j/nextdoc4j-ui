@@ -2584,13 +2584,13 @@ onBeforeUnmount(() => {
 }
 
 .debug-console {
-  --debug-chip-radius: calc(var(--radius) * 999);
-  --debug-radius-xs: 8px;
-  --debug-radius-sm: 10px;
-  --debug-radius-md: 12px;
-  --debug-radius-lg: 14px;
-  --debug-count-radius: calc(var(--radius) * 1.8);
-  --debug-menu-radius: calc(var(--radius) * 2.2);
+  --debug-chip-radius: calc(var(--radius) * 1.25);
+  --debug-radius-xs: calc(var(--radius) * 1.15);
+  --debug-radius-sm: calc(var(--radius) * 1.45);
+  --debug-radius-md: calc(var(--radius) * 1.8);
+  --debug-radius-lg: calc(var(--radius) * 2.2);
+  --debug-count-radius: calc(var(--radius) * 1.2);
+  --debug-menu-radius: calc(var(--radius) * 1.8);
   --debug-surface: var(--el-bg-color);
   --debug-soft-bg: color-mix(
     in srgb,
@@ -2920,11 +2920,11 @@ onBeforeUnmount(() => {
 
 :global(.debug-tab-overflow-menu) {
   padding: 4px;
-  border-radius: calc(var(--radius) * 2.2);
+  border-radius: var(--debug-menu-radius);
 }
 
 :global(.debug-tab-overflow-menu .el-dropdown-menu__item) {
-  border-radius: calc(var(--radius) * 1.2);
+  border-radius: var(--debug-radius-xs);
 }
 
 :global(
@@ -2958,7 +2958,7 @@ onBeforeUnmount(() => {
   font-weight: 700;
   color: #fff;
   background: var(--el-color-primary);
-  border-radius: calc(var(--radius) * 1.8);
+  border-radius: var(--debug-count-radius);
 }
 
 .debug-icon-button {

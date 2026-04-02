@@ -186,7 +186,7 @@ const formatValue = (value: unknown) => {
 
 <style scoped>
 .parameter-item {
-  --doc-chip-radius: calc(var(--radius) * 999);
+  --doc-chip-radius: calc(var(--radius) * 1.25);
   --doc-radius-sm: calc(var(--radius) * 1.25);
 
   padding: 10px 0;
@@ -235,6 +235,7 @@ const formatValue = (value: unknown) => {
   flex-wrap: wrap;
   gap: 6px;
   align-items: center;
+  min-width: 0;
   margin-top: 8px;
 }
 
@@ -247,9 +248,11 @@ const formatValue = (value: unknown) => {
 
 .parameter-item__enum-values {
   display: flex;
+  flex: 1 1 auto;
   flex-wrap: wrap;
   gap: 6px;
   align-items: center;
+  min-width: 0;
 }
 
 .meta-pill {
@@ -310,10 +313,13 @@ const formatValue = (value: unknown) => {
 
 .enum-pill {
   display: inline-flex;
+  flex-wrap: wrap;
   gap: 6px;
   align-items: center;
+  min-width: 0;
+  max-width: 100%;
   min-height: 26px;
-  padding: 0 10px;
+  padding: 3px 10px;
   color: #1f4ba8;
   background: #eff4ff;
   border: 1px solid #c7d5ef;
@@ -322,26 +328,45 @@ const formatValue = (value: unknown) => {
 
 .enum-pill__value {
   display: inline-flex;
+  flex: 0 1 auto;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  min-width: 18px;
+  min-width: 20px;
+  max-width: 100%;
+  padding: 0 6px;
   font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
   font-size: 11px;
   font-weight: 700;
+  line-height: 1.45;
   color: #1e3f8a;
   text-align: center;
+  word-break: normal;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .enum-pill__description {
+  display: inline-flex;
+  flex: 1 1 auto;
+  align-items: center;
+  min-width: 0;
   font-size: 11px;
+  line-height: 1.45;
   color: var(--el-text-color-secondary);
+  text-align: center;
+  word-break: normal;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .parameter-item__enum-available {
-  flex: none;
+  flex: 1 1 100%;
+  min-width: 0;
   font-size: 11px;
   color: var(--el-text-color-secondary);
+  word-break: normal;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 :deep(.document-page--dark .parameter-item .meta-pill),

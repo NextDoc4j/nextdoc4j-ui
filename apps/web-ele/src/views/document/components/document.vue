@@ -719,7 +719,7 @@ defineExpose({
 
 <style scoped lang="scss">
 .document-detail {
-  --doc-chip-radius: calc(var(--radius) * 999);
+  --doc-chip-radius: calc(var(--radius) * 1.25);
   --doc-radius-xs: calc(var(--radius) * 1.5);
   --doc-radius-sm: calc(var(--radius) * 2);
   --doc-radius-md: calc(var(--radius) * 2.75);
