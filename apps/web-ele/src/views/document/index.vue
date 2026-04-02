@@ -151,14 +151,18 @@ const debugReady = computed(() =>
   --doc-radius-lg: calc(var(--radius) * 3);
   --doc-radius-md: calc(var(--radius) * 2.25);
   --doc-radius-sm: calc(var(--radius) * 1.75);
-  --doc-page-bg: #fff;
+  --doc-page-bg: var(--el-bg-color);
 
   padding: 20px;
   background: var(--doc-page-bg);
 }
 
 .document-page--dark {
-  --doc-page-bg: #000;
+  --doc-page-bg: color-mix(
+    in srgb,
+    var(--el-bg-color) 90%,
+    var(--el-fill-color-light) 10%
+  );
 }
 
 .document-tabs {

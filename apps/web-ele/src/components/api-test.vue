@@ -2721,16 +2721,32 @@ onBeforeUnmount(() => {
 }
 
 .debug-inline-tab--more {
-  width: 24px;
-  min-width: 24px;
+  width: 22px;
+  min-width: 22px;
   padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
 }
 
 .debug-inline-tab__more-icon {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   line-height: 1;
   color: currentcolor;
+  transition: transform 0.18s ease;
+}
+
+.debug-inline-tab--more:hover,
+.debug-inline-tab--more:focus-visible {
+  color: var(--el-color-primary);
+  background: transparent;
+  border-color: transparent;
+}
+
+.debug-inline-tab--more:hover .debug-inline-tab__more-icon,
+.debug-inline-tab--more:focus-visible .debug-inline-tab__more-icon {
+  transform: scale(1.15);
 }
 
 .debug-tab-measure {
@@ -2788,34 +2804,50 @@ onBeforeUnmount(() => {
 }
 
 .debug-icon-button {
-  width: 30px;
-  height: 30px;
+  --el-button-bg-color: transparent;
+  --el-button-border-color: transparent;
+  --el-button-hover-bg-color: transparent;
+  --el-button-hover-border-color: transparent;
+  --el-button-active-bg-color: transparent;
+  --el-button-active-border-color: transparent;
+  --el-button-text-color: var(--el-text-color-secondary);
+  --el-button-hover-text-color: var(--el-color-primary);
+
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0;
   color: var(--el-text-color-secondary);
-  background: var(--debug-soft-bg);
-  border: 1px solid var(--debug-border-strong);
-  border-radius: var(--debug-chip-radius);
-  transition: all 0.18s ease;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  transition:
+    color 0.18s ease,
+    transform 0.18s ease;
 }
 
 .debug-icon-button:hover {
   color: var(--el-color-primary);
-  background: color-mix(
-    in srgb,
-    var(--el-color-primary-light-9) 70%,
-    var(--debug-soft-bg) 30%
-  );
-  border-color: color-mix(in srgb, var(--el-color-primary) 38%, transparent);
-  transform: translateY(-1px);
+  background: transparent;
+  transform: scale(1.15);
+}
+
+.debug-icon-button:focus-visible {
+  color: var(--el-color-primary);
+  background: transparent;
+  transform: scale(1.15);
 }
 
 .debug-icon-button--active {
   color: var(--el-color-primary);
-  background: color-mix(
-    in srgb,
-    var(--el-color-primary-light-9) 74%,
-    var(--debug-surface) 26%
-  );
-  border-color: color-mix(in srgb, var(--el-color-primary) 40%, transparent);
+  background: transparent;
+  border: none;
+}
+
+.debug-icon-button :deep(svg) {
+  width: 16px;
+  height: 16px;
 }
 
 .debug-request-input {

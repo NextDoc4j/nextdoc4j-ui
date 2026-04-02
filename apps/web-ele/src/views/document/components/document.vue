@@ -724,7 +724,7 @@ defineExpose({
   --doc-radius-sm: calc(var(--radius) * 2);
   --doc-radius-md: calc(var(--radius) * 2.75);
   --doc-radius-lg: calc(var(--radius) * 3.5);
-  --doc-panel-bg: #fff;
+  --doc-panel-bg: var(--el-bg-color);
   --doc-soft-bg: color-mix(
     in srgb,
     var(--el-bg-color) 86%,
@@ -770,10 +770,26 @@ defineExpose({
 }
 
 .document-detail--dark {
-  --doc-panel-bg: #000;
-  --doc-soft-bg: #0a0a0a;
-  --doc-soft-bg-alt: #111;
-  --doc-soft-bg-strong: #151515;
+  --doc-panel-bg: color-mix(
+    in srgb,
+    var(--el-bg-color) 90%,
+    var(--el-fill-color-light) 10%
+  );
+  --doc-soft-bg: color-mix(
+    in srgb,
+    var(--el-bg-color) 86%,
+    var(--el-fill-color-light) 14%
+  );
+  --doc-soft-bg-alt: color-mix(
+    in srgb,
+    var(--el-bg-color) 82%,
+    var(--el-fill-color-light) 18%
+  );
+  --doc-soft-bg-strong: color-mix(
+    in srgb,
+    var(--el-bg-color) 78%,
+    var(--el-fill-color-light) 22%
+  );
   --doc-panel-border: color-mix(
     in srgb,
     var(--el-text-color-primary) 22%,
