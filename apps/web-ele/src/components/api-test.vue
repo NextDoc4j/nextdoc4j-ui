@@ -118,9 +118,11 @@ const responseTab = ref('RealtimeResponse');
 const paneLayout = ref<'horizontal' | 'vertical'>('horizontal');
 const paneRatio = ref(0.52);
 const debugLayoutRef = ref<HTMLElement>();
+const pathTableRef = ref();
 const isPaneResizing = ref(false);
 const actualRequestSnapshot = ref<DebugActualRequestSnapshot | null>(null);
 let removePaneResizeListeners: (() => void) | null = null;
+let pathTableResizeObserver: null | ResizeObserver = null;
 const aggregationStore = useAggregationStore();
 const docManageStore = useDocManageStore();
 const apiTestCacheStore = useApiTestCacheStore();
@@ -680,6 +682,31 @@ watch([() => requestTabsHostRef.value, () => responseTabsHostRef.value], () => {
   scheduleTabOverflowUpdate();
 });
 
+watch(
+  () => pathParams.value.length,
+  async (length) => {
+    if (length <= 0) {
+      pathTableResizeObserver?.disconnect();
+      pathTableResizeObserver = null;
+      return;
+    }
+    await nextTick();
+    setupPathTableResizeObserver();
+  },
+  { immediate: true },
+);
+
+watch(
+  () => activeTab.value,
+  async (tab) => {
+    if (tab !== 'Params' || pathParams.value.length <= 0) {
+      return;
+    }
+    await nextTick();
+    setupPathTableResizeObserver();
+  },
+);
+
 const isStackedLayout = computed(() => paneLayout.value === 'vertical');
 const layoutTooltipText = computed(() => {
   return isStackedLayout.value ? '切换为左右布局' : '切换为上下布局';
@@ -749,6 +776,30 @@ const startPaneResize = (event: PointerEvent) => {
     window.removeEventListener('pointermove', onPointerMove);
     window.removeEventListener('pointerup', onPointerUp);
   };
+};
+
+const getPathTableElement = () => {
+  return pathTableRef.value?.$el as HTMLElement | undefined;
+};
+
+const setupPathTableResizeObserver = () => {
+  pathTableResizeObserver?.disconnect();
+  pathTableResizeObserver = null;
+
+  if (typeof ResizeObserver === 'undefined') {
+    return;
+  }
+
+  const tableElement = getPathTableElement();
+  if (!tableElement) {
+    return;
+  }
+
+  pathTableResizeObserver = new ResizeObserver(() => {
+    pathTableRef.value?.doLayout?.();
+  });
+  pathTableResizeObserver.observe(tableElement);
+  pathTableRef.value?.doLayout?.();
 };
 
 function normalizeSecurityIn(value?: string) {
@@ -1750,6 +1801,7 @@ onMounted(async () => {
   await nextTick();
   syncTabOverflowObserver();
   scheduleTabOverflowUpdate();
+  setupPathTableResizeObserver();
 });
 
 watch(
@@ -1793,6 +1845,8 @@ onBeforeUnmount(() => {
   }
   tabOverflowObserver?.disconnect();
   tabOverflowObserver = null;
+  pathTableResizeObserver?.disconnect();
+  pathTableResizeObserver = null;
   if (overflowRaf) {
     window.cancelAnimationFrame(overflowRaf);
     overflowRaf = null;
@@ -1946,20 +2000,23 @@ onBeforeUnmount(() => {
                 <ElTabPane name="Params" label="Params">
                   <div v-if="pathParams.length > 0">
                     <h3 class="debug-section-title">Path 参数</h3>
-                    <div class="params-table">
+                    <div class="actual-request__block params-table-block">
                       <ElTable
+                        ref="pathTableRef"
                         border
                         class="params-table params-table--path"
                         :data="pathParams"
                         header-cell-class-name="p-2"
                         table-layout="fixed"
+                        :allow-drag-last-column="false"
                       >
                         <ElTableColumn
                           prop="name"
                           label="参数名"
                           class-name="path-col path-col--name"
                           label-class-name="path-col path-col--name"
-                          min-width="0"
+                          min-width="120"
+                          resizable
                         >
                           <template #default="{ row }">
                             <ElInput v-model="row.name" />
@@ -1970,7 +2027,8 @@ onBeforeUnmount(() => {
                           label="参数值"
                           class-name="path-col path-col--value"
                           label-class-name="path-col path-col--value"
-                          min-width="0"
+                          min-width="140"
+                          resizable
                         >
                           <template #default="{ row }">
                             <ElInput v-model="row.value" />
@@ -1981,7 +2039,8 @@ onBeforeUnmount(() => {
                           label="描述"
                           class-name="path-col path-col--description"
                           label-class-name="path-col path-col--description"
-                          min-width="0"
+                          min-width="88"
+                          resizable
                         >
                           <template #default="{ row }">
                             <ElTooltip
@@ -2002,11 +2061,13 @@ onBeforeUnmount(() => {
 
                   <div>
                     <h3 class="debug-section-title">Query 参数</h3>
-                    <params-table
-                      :table-data="queryParams"
-                      show-description-column
-                      show-delete-in-description
-                    />
+                    <div class="actual-request__block params-table-block">
+                      <params-table
+                        :table-data="queryParams"
+                        show-description-column
+                        show-delete-in-description
+                      />
+                    </div>
                   </div>
                 </ElTabPane>
 
@@ -2020,14 +2081,18 @@ onBeforeUnmount(() => {
                 />
 
                 <ElTabPane name="Headers" label="Headers">
-                  <params-table
-                    :table-data="headers"
-                    show-description-column
-                    show-delete-in-description
-                  />
+                  <div class="actual-request__block params-table-block">
+                    <params-table
+                      :table-data="headers"
+                      show-description-column
+                      show-delete-in-description
+                    />
+                  </div>
                 </ElTabPane>
                 <ElTabPane name="Cookies" label="Cookies">
-                  <params-table :table-data="cookies" />
+                  <div class="actual-request__block params-table-block">
+                    <params-table :table-data="cookies" />
+                  </div>
                 </ElTabPane>
               </ElTabs>
             </div>
@@ -2541,6 +2606,7 @@ onBeforeUnmount(() => {
   flex: 1;
   flex-direction: column;
   width: 100%;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
   background: var(--debug-surface);
@@ -2830,6 +2896,7 @@ onBeforeUnmount(() => {
 .debug-tabs-wrap,
 .debug-response-wrap {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
   background: var(--debug-soft-bg);
@@ -2841,6 +2908,11 @@ onBeforeUnmount(() => {
   font-size: 12px;
   font-weight: 700;
   color: var(--el-text-color-secondary);
+}
+
+.params-table-block {
+  min-width: 0;
+  padding: 0;
 }
 
 .path-param-description {
@@ -2975,11 +3047,6 @@ onBeforeUnmount(() => {
   overflow: hidden;
   border-radius: var(--debug-radius-xs);
 
-  .el-table__header-wrapper,
-  .el-table__body-wrapper {
-    overflow-x: hidden !important;
-  }
-
   .el-table__header-wrapper th {
     background: var(--debug-soft-bg-strong);
   }
@@ -3012,18 +3079,6 @@ onBeforeUnmount(() => {
   .el-table__header .cell {
     padding: 4px 8px;
   }
-}
-
-:deep(.params-table--path colgroup col:nth-child(1)) {
-  width: 36% !important;
-}
-
-:deep(.params-table--path colgroup col:nth-child(2)) {
-  width: 46% !important;
-}
-
-:deep(.params-table--path colgroup col:nth-child(3)) {
-  width: 18% !important;
 }
 
 :deep(.debug-tabs.el-tabs),
@@ -3072,7 +3127,7 @@ onBeforeUnmount(() => {
     width: 100%;
     height: 100%;
     padding: 10px 12px 12px;
-    overflow-y: auto;
+    overflow: hidden auto;
   }
 }
 

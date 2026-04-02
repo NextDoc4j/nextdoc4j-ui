@@ -7,7 +7,14 @@ import type {
   UploadRawFile,
 } from 'element-plus';
 
-import { computed, ref } from 'vue';
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from 'vue';
 
 import { SvgCloseIcon } from '@vben/icons';
 
@@ -64,6 +71,35 @@ const contentTypeOptions = [
 ];
 
 const tableRef = ref();
+let tableResizeObserver: null | ResizeObserver = null;
+
+const enableFlexibleColumns = computed(() => {
+  return Boolean(props.showDescriptionColumn) && !props.showContentType;
+});
+
+function getTableElement() {
+  return tableRef.value?.$el as HTMLElement | undefined;
+}
+
+function setupTableResizeObserver() {
+  tableResizeObserver?.disconnect();
+  tableResizeObserver = null;
+
+  if (typeof ResizeObserver === 'undefined') {
+    return;
+  }
+
+  const tableElement = getTableElement();
+  if (!tableElement) {
+    return;
+  }
+
+  tableResizeObserver = new ResizeObserver(() => {
+    tableRef.value?.doLayout?.();
+  });
+  tableResizeObserver.observe(tableElement);
+  tableRef.value?.doLayout?.();
+}
 
 // 判断是否为枚举参数
 function isEnumParam(row: ParamItem) {
@@ -167,21 +203,36 @@ const handleExceed = (
   ];
   row.value = row.type === 'array' ? [file] : file;
 };
+
+onMounted(async () => {
+  await nextTick();
+  setupTableResizeObserver();
+});
+
+watch(
+  () => [props.showContentType, props.showDescriptionColumn],
+  async () => {
+    await nextTick();
+    setupTableResizeObserver();
+  },
+);
+
+onBeforeUnmount(() => {
+  tableResizeObserver?.disconnect();
+  tableResizeObserver = null;
+});
 </script>
 
 <template>
-  <div>
+  <div class="params-table-wrap">
     <ElTable
       ref="tableRef"
       border
       class="params-table"
-      :class="{
-        'params-table--description-layout':
-          showDescriptionColumn && !showContentType,
-      }"
       :data="tableData"
       header-cell-class-name="p-2"
       table-layout="fixed"
+      :allow-drag-last-column="false"
     >
       <ElTableColumn :width="48" align="center">
         <template #header>
@@ -196,7 +247,8 @@ const handleExceed = (
         label="参数名"
         class-name="params-col params-col--name"
         label-class-name="params-col params-col--name"
-        min-width="0"
+        :min-width="enableFlexibleColumns ? 120 : 200"
+        :resizable="enableFlexibleColumns"
       >
         <template #default="{ row }">
           <ElInput v-model="row.name" placeholder="参数名" />
@@ -207,7 +259,8 @@ const handleExceed = (
         label="参数值"
         class-name="params-col params-col--value"
         label-class-name="params-col params-col--value"
-        min-width="0"
+        :min-width="enableFlexibleColumns ? 140 : 260"
+        :resizable="enableFlexibleColumns"
       >
         <template #default="{ row, $index }">
           <div v-if="row.format === 'binary'" class="pl-2 pt-2">
@@ -279,7 +332,8 @@ const handleExceed = (
         label="描述"
         class-name="params-col params-col--description"
         label-class-name="params-col params-col--description"
-        min-width="0"
+        :min-width="enableFlexibleColumns ? 88 : 120"
+        :resizable="enableFlexibleColumns"
       >
         <template #default="{ row, $index }">
           <div class="param-description-cell">
@@ -358,29 +412,13 @@ const handleExceed = (
   </div>
 </template>
 <style lang="scss" scoped>
+.params-table-wrap {
+  min-width: 0;
+  max-width: 100%;
+}
+
 :deep(.params-table.el-table) {
   width: 100%;
-}
-
-:deep(.params-table--description-layout colgroup col:nth-child(1)) {
-  width: 48px !important;
-}
-
-:deep(.params-table--description-layout colgroup col:nth-child(2)) {
-  width: 36% !important;
-}
-
-:deep(.params-table--description-layout colgroup col:nth-child(3)) {
-  width: 46% !important;
-}
-
-:deep(.params-table--description-layout colgroup col:nth-child(4)) {
-  width: 18% !important;
-}
-
-:deep(.params-table .el-table__header-wrapper),
-:deep(.params-table .el-table__body-wrapper) {
-  overflow-x: hidden !important;
 }
 
 :deep(.params-table .cell) {
