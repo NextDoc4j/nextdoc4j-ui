@@ -31,6 +31,7 @@ const props = withDefaults(
 );
 
 const rootNode = ref<InstanceType<typeof JsonNode> | null>(null);
+const scrollHostRef = ref<HTMLElement | null>(null);
 const preferredDark = usePreferredDark();
 
 const resolvedThemeMode = computed(() => {
@@ -83,14 +84,28 @@ function collapseAll() {
   rootNode.value?.collapseAll();
 }
 
+function getScrollTop() {
+  return scrollHostRef.value?.scrollTop ?? 0;
+}
+
+function setScrollTop(value: number) {
+  if (!scrollHostRef.value) {
+    return;
+  }
+  scrollHostRef.value.scrollTop = Math.max(0, value);
+}
+
 defineExpose({
   expandAll,
   collapseAll,
+  getScrollTop,
+  setScrollTop,
 });
 </script>
 
 <template>
   <div
+    ref="scrollHostRef"
     class="json-viewer-scroll-host overflow-auto rounded p-4 font-mono text-sm"
     :class="`theme-${resolvedThemeMode}`"
   >
@@ -154,5 +169,10 @@ defineExpose({
   padding: 8px;
   font-weight: 700;
   border-radius: 6px;
+}
+
+.json-viewer-scroll-host :deep(*) {
+  animation: none !important;
+  transition: none !important;
 }
 </style>

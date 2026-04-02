@@ -123,6 +123,10 @@ const baseUrl = ref();
 const activeTab = ref(props.requestBody ? 'Body' : 'Params');
 const bodyTabRef = ref();
 const responseTab = ref('RealtimeResponse');
+const realtimeResponseJsonRef = ref<InstanceType<typeof JsonViewer> | null>(
+  null,
+);
+const realtimeResponseScrollTop = ref(0);
 const paneLayout = ref<'horizontal' | 'vertical'>('horizontal');
 const paneRatio = ref(0.52);
 const debugLayoutRef = ref<HTMLElement>();
@@ -819,6 +823,23 @@ watch(
     scheduleTabOverflowUpdate();
   },
   { deep: true },
+);
+
+watch(
+  () => responseTab.value,
+  async (tab, previousTab) => {
+    if (previousTab === 'RealtimeResponse') {
+      realtimeResponseScrollTop.value =
+        realtimeResponseJsonRef.value?.getScrollTop?.() ?? 0;
+    }
+    if (tab !== 'RealtimeResponse') {
+      return;
+    }
+    await nextTick();
+    realtimeResponseJsonRef.value?.setScrollTop?.(
+      realtimeResponseScrollTop.value,
+    );
+  },
 );
 
 watch([() => requestTabsHostRef.value, () => responseTabsHostRef.value], () => {
@@ -2384,13 +2405,13 @@ onBeforeUnmount(() => {
                   <ElTabPane name="RealtimeResponse" label="实时响应" lazy>
                     <template v-if="responseStatus.type !== 'default'">
                       <JsonViewer
-                        v-if="responseTab === 'RealtimeResponse'"
+                        ref="realtimeResponseJsonRef"
                         :value="responseData"
                         :schema="responseSchemaForViewer"
                         :default-expanded="true"
                         :enable-chunked-render="true"
-                        :initial-render-count="120"
-                        :render-chunk-size="120"
+                        :initial-render-count="60"
+                        :render-chunk-size="60"
                         class="response-body app-json-schema-viewer"
                       />
                     </template>

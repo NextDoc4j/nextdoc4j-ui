@@ -247,20 +247,26 @@ const entryKeys = computed(() => {
   return [];
 });
 
-const renderedCount = ref(0);
-const loadMoreAnchor = ref<HTMLElement | null>(null);
+const CHUNK_PREFETCH_COUNT = 1;
+const CHUNK_ROOT_MARGIN = '900px 0px';
+const DEFAULT_CHUNK_PLACEHOLDER_HEIGHT = 640;
+
 const nodeRootRef = ref<HTMLElement | null>(null);
-let loadMoreObserver: IntersectionObserver | null = null;
-let loadMoreRaf: null | number = null;
+const childrenVisible = ref(false);
+const chunkElements = ref<(HTMLElement | null)[]>([]);
+const chunkPlaceholderHeights = ref<number[]>([]);
+const loadedChunkIndexes = ref<Set<number>>(new Set());
+const visibleChunkIndexes = ref<Set<number>>(new Set());
+
 let childrenVisibilityObserver: IntersectionObserver | null = null;
+let chunkObserver: IntersectionObserver | null = null;
+let chunkMeasureRaf: null | number = null;
 
 const shouldLazyMountChildren = computed(() => {
   return Boolean(
     props.enableChunkedRender && props.depth > 0 && isComplex.value,
   );
 });
-
-const childrenVisible = ref(!shouldLazyMountChildren.value);
 
 const chunkRenderEnabled = computed(() => {
   return Boolean(
@@ -269,63 +275,190 @@ const chunkRenderEnabled = computed(() => {
   );
 });
 
-const visibleEntryKeys = computed(() => {
-  if (!chunkRenderEnabled.value || !isExpanded.value) {
-    return entryKeys.value;
-  }
-  return entryKeys.value.slice(0, renderedCount.value);
+const safeChunkSize = computed(() => {
+  return Math.max(props.renderChunkSize, 1);
 });
 
-const hasMoreChildren = computed(() => {
-  return visibleEntryKeys.value.length < entryKeys.value.length;
-});
-
-const remainingChildrenCount = computed(() => {
-  return Math.max(entryKeys.value.length - visibleEntryKeys.value.length, 0);
-});
-
-const nextChunkCount = computed(() => {
-  return Math.min(
-    Math.max(props.renderChunkSize, 1),
-    remainingChildrenCount.value,
-  );
-});
-
-const resetRenderedCount = () => {
-  const safeInitialCount = Math.max(props.initialRenderCount, 1);
+const entryKeyChunks = computed<Array<Array<number | string>>>(() => {
   if (!chunkRenderEnabled.value) {
-    renderedCount.value = entryKeys.value.length;
-    return;
+    return entryKeys.value.length > 0 ? [entryKeys.value] : [];
   }
-  renderedCount.value = Math.min(entryKeys.value.length, safeInitialCount);
+  const chunks: Array<Array<number | string>> = [];
+  for (
+    let index = 0;
+    index < entryKeys.value.length;
+    index += safeChunkSize.value
+  ) {
+    chunks.push(entryKeys.value.slice(index, index + safeChunkSize.value));
+  }
+  return chunks;
+});
+
+const totalChunkCount = computed(() => {
+  return entryKeyChunks.value.length;
+});
+
+const isChunkLoaded = (chunkIndex: number) => {
+  if (!chunkRenderEnabled.value) {
+    return true;
+  }
+  return loadedChunkIndexes.value.has(chunkIndex);
 };
 
-const loadMoreChildren = () => {
-  const safeChunkSize = Math.max(props.renderChunkSize, 1);
-  if (!hasMoreChildren.value) return;
-  renderedCount.value = Math.min(
-    entryKeys.value.length,
-    renderedCount.value + safeChunkSize,
+const getChunkPlaceholderStyle = (chunkIndex: number) => {
+  const height =
+    chunkPlaceholderHeights.value[chunkIndex] ||
+    DEFAULT_CHUNK_PLACEHOLDER_HEIGHT;
+  return {
+    minHeight: `${Math.max(height, 84)}px`,
+  };
+};
+
+const isLastItemInNode = (chunkIndex: number, itemIndex: number) => {
+  const globalIndex = chunkIndex * safeChunkSize.value + itemIndex;
+  return globalIndex === entryKeys.value.length - 1;
+};
+
+const createAllChunkIndexSet = (chunkCount: number) => {
+  const all = new Set<number>();
+  for (let index = 0; index < chunkCount; index += 1) {
+    all.add(index);
+  }
+  return all;
+};
+
+const isSameNumberSet = (a: Set<number>, b: Set<number>) => {
+  if (a.size !== b.size) {
+    return false;
+  }
+  for (const value of a) {
+    if (!b.has(value)) {
+      return false;
+    }
+  }
+  return true;
+};
+
+const initLoadedChunkIndexes = (chunkCount: number) => {
+  if (chunkCount <= 0) {
+    loadedChunkIndexes.value = new Set();
+    return;
+  }
+  if (!chunkRenderEnabled.value) {
+    loadedChunkIndexes.value = createAllChunkIndexSet(chunkCount);
+    return;
+  }
+  const initialItemCount = Math.max(props.initialRenderCount, 1);
+  const initialChunkCount = Math.max(
+    1,
+    Math.ceil(initialItemCount / safeChunkSize.value),
   );
+  const loaded = new Set<number>();
+  for (
+    let index = 0;
+    index < Math.min(chunkCount, initialChunkCount);
+    index += 1
+  ) {
+    loaded.add(index);
+  }
+  loadedChunkIndexes.value = loaded;
 };
 
-const scheduleLoadMoreChildren = () => {
+const updateLoadedChunkIndexesByVisible = () => {
+  const chunkCount = totalChunkCount.value;
+  if (chunkCount <= 0) {
+    loadedChunkIndexes.value = new Set();
+    return;
+  }
+  if (!chunkRenderEnabled.value) {
+    loadedChunkIndexes.value = createAllChunkIndexSet(chunkCount);
+    return;
+  }
+  if (visibleChunkIndexes.value.size <= 0) {
+    initLoadedChunkIndexes(chunkCount);
+    return;
+  }
+
+  const nextLoaded = new Set<number>();
+  visibleChunkIndexes.value.forEach((chunkIndex) => {
+    const startIndex = Math.max(0, chunkIndex - CHUNK_PREFETCH_COUNT);
+    const endIndex = Math.min(
+      chunkCount - 1,
+      chunkIndex + CHUNK_PREFETCH_COUNT,
+    );
+    for (let index = startIndex; index <= endIndex; index += 1) {
+      nextLoaded.add(index);
+    }
+  });
+
+  if (!isSameNumberSet(nextLoaded, loadedChunkIndexes.value)) {
+    loadedChunkIndexes.value = nextLoaded;
+  }
+};
+
+const syncChunkPlaceholderHeights = () => {
+  const nextHeights = [...chunkPlaceholderHeights.value];
+  let changed = false;
+  loadedChunkIndexes.value.forEach((chunkIndex) => {
+    const element = chunkElements.value[chunkIndex];
+    if (!element) {
+      return;
+    }
+    const height = Math.ceil(element.getBoundingClientRect().height);
+    if (height <= 0) {
+      return;
+    }
+    const currentHeight = nextHeights[chunkIndex] || 0;
+    if (Math.abs(currentHeight - height) > 12) {
+      nextHeights[chunkIndex] = height;
+      changed = true;
+    }
+  });
+  if (changed) {
+    chunkPlaceholderHeights.value = nextHeights;
+  }
+};
+
+const scheduleSyncChunkPlaceholderHeights = () => {
   if (typeof window === 'undefined') {
-    loadMoreChildren();
+    syncChunkPlaceholderHeights();
     return;
   }
-  if (loadMoreRaf) {
+  if (chunkMeasureRaf) {
     return;
   }
-  loadMoreRaf = window.requestAnimationFrame(() => {
-    loadMoreRaf = null;
-    loadMoreChildren();
+  chunkMeasureRaf = window.requestAnimationFrame(() => {
+    chunkMeasureRaf = null;
+    syncChunkPlaceholderHeights();
   });
 };
 
-const stopLoadMoreObserver = () => {
-  loadMoreObserver?.disconnect();
-  loadMoreObserver = null;
+const stopChunkObserver = () => {
+  chunkObserver?.disconnect();
+  chunkObserver = null;
+};
+
+const setChunkRef = (element: Element | null, index: number) => {
+  chunkElements.value[index] = (element as HTMLElement) || null;
+  if (chunkObserver && chunkElements.value[index]) {
+    chunkObserver.observe(chunkElements.value[index]!);
+  }
+};
+
+const forceLoadChunk = (chunkIndex: number) => {
+  if (!chunkRenderEnabled.value) {
+    return;
+  }
+  if (chunkIndex < 0 || chunkIndex >= totalChunkCount.value) {
+    return;
+  }
+  if (loadedChunkIndexes.value.has(chunkIndex)) {
+    return;
+  }
+  const nextLoaded = new Set(loadedChunkIndexes.value);
+  nextLoaded.add(chunkIndex);
+  loadedChunkIndexes.value = nextLoaded;
+  scheduleSyncChunkPlaceholderHeights();
 };
 
 const stopChildrenVisibilityObserver = () => {
@@ -338,10 +471,10 @@ const syncChildrenVisibilityObserver = async () => {
   if (
     !shouldLazyMountChildren.value ||
     !isExpanded.value ||
-    childrenVisible.value ||
     typeof window === 'undefined' ||
     typeof IntersectionObserver === 'undefined'
   ) {
+    childrenVisible.value = true;
     return;
   }
 
@@ -368,39 +501,73 @@ const syncChildrenVisibilityObserver = async () => {
   childrenVisibilityObserver.observe(nodeRootRef.value);
 };
 
-const syncLoadMoreObserver = async () => {
-  stopLoadMoreObserver();
+const syncChunkObserver = async () => {
+  stopChunkObserver();
   if (
     !childrenVisible.value ||
-    !chunkRenderEnabled.value ||
     !isExpanded.value ||
-    !hasMoreChildren.value ||
-    typeof window === 'undefined' ||
-    typeof IntersectionObserver === 'undefined'
+    totalChunkCount.value <= 0
   ) {
     return;
   }
 
-  await nextTick();
-  if (!loadMoreAnchor.value) {
+  if (
+    !chunkRenderEnabled.value ||
+    typeof window === 'undefined' ||
+    typeof IntersectionObserver === 'undefined'
+  ) {
+    loadedChunkIndexes.value = createAllChunkIndexSet(totalChunkCount.value);
     return;
   }
 
-  const scrollRoot = loadMoreAnchor.value.closest('.json-viewer-scroll-host');
-  loadMoreObserver = new IntersectionObserver(
+  await nextTick();
+  if (!nodeRootRef.value) {
+    return;
+  }
+
+  const scrollRoot = nodeRootRef.value.closest('.json-viewer-scroll-host');
+  chunkObserver = new IntersectionObserver(
     (entries) => {
-      if (entries.some((item) => item.isIntersecting)) {
-        scheduleLoadMoreChildren();
+      const nextVisible = new Set(visibleChunkIndexes.value);
+      let changed = false;
+      entries.forEach((entry) => {
+        const chunkIndex = Number.parseInt(
+          (entry.target as HTMLElement).dataset.nodeChunkIndex || '-1',
+          10,
+        );
+        if (chunkIndex < 0 || chunkIndex >= totalChunkCount.value) {
+          return;
+        }
+        if (entry.isIntersecting) {
+          if (!nextVisible.has(chunkIndex)) {
+            nextVisible.add(chunkIndex);
+            changed = true;
+          }
+        } else if (nextVisible.delete(chunkIndex)) {
+          changed = true;
+        }
+      });
+      if (!changed) {
+        return;
       }
+      visibleChunkIndexes.value = nextVisible;
+      updateLoadedChunkIndexesByVisible();
+      void nextTick().then(() => {
+        scheduleSyncChunkPlaceholderHeights();
+      });
     },
     {
       root: scrollRoot instanceof HTMLElement ? scrollRoot : null,
-      rootMargin: '260px 0px 260px 0px',
+      rootMargin: CHUNK_ROOT_MARGIN,
       threshold: 0,
     },
   );
 
-  loadMoreObserver.observe(loadMoreAnchor.value);
+  chunkElements.value.forEach((element) => {
+    if (element) {
+      chunkObserver?.observe(element);
+    }
+  });
 };
 
 watch(
@@ -422,6 +589,7 @@ watch(
   () => {
     if (!isExpanded.value) {
       stopChildrenVisibilityObserver();
+      stopChunkObserver();
       return;
     }
     void syncChildrenVisibilityObserver();
@@ -432,26 +600,55 @@ watch(
   [
     () => isExpanded.value,
     () => childrenVisible.value,
-    () => entryKeys.value.length,
+    () => totalChunkCount.value,
     () => chunkRenderEnabled.value,
   ],
   () => {
     if (!isExpanded.value || !childrenVisible.value) {
-      renderedCount.value = 0;
-      stopLoadMoreObserver();
+      visibleChunkIndexes.value = new Set();
+      loadedChunkIndexes.value = new Set();
+      stopChunkObserver();
       return;
     }
-    resetRenderedCount();
-    void syncLoadMoreObserver();
+    initLoadedChunkIndexes(totalChunkCount.value);
+    void syncChunkObserver();
+    void nextTick().then(() => {
+      scheduleSyncChunkPlaceholderHeights();
+    });
   },
   { immediate: true },
 );
 
 watch(
-  () => hasMoreChildren.value,
+  () => totalChunkCount.value,
   () => {
-    void syncLoadMoreObserver();
+    chunkElements.value = Array.from(
+      { length: totalChunkCount.value },
+      (_, index) => chunkElements.value[index] || null,
+    );
+    chunkPlaceholderHeights.value = Array.from(
+      { length: totalChunkCount.value },
+      (_, index) => chunkPlaceholderHeights.value[index] || 0,
+    );
+    const normalizedVisible = new Set(
+      [...visibleChunkIndexes.value].filter(
+        (index) => index >= 0 && index < totalChunkCount.value,
+      ),
+    );
+    if (!isSameNumberSet(normalizedVisible, visibleChunkIndexes.value)) {
+      visibleChunkIndexes.value = normalizedVisible;
+    }
+    const normalizedLoaded = new Set(
+      [...loadedChunkIndexes.value].filter(
+        (index) => index >= 0 && index < totalChunkCount.value,
+      ),
+    );
+    if (!isSameNumberSet(normalizedLoaded, loadedChunkIndexes.value)) {
+      loadedChunkIndexes.value = normalizedLoaded;
+    }
+    void syncChunkObserver();
   },
+  { immediate: true },
 );
 
 const showCollapseButton = computed(() => {
@@ -461,7 +658,7 @@ const showCollapseButton = computed(() => {
 function toggleExpand() {
   isExpanded.value = !isExpanded.value;
   if (!isExpanded.value) {
-    stopLoadMoreObserver();
+    stopChunkObserver();
   }
 }
 
@@ -500,11 +697,11 @@ async function copyToClipboard() {
 defineExpose({ expandAll, collapseAll });
 
 onBeforeUnmount(() => {
-  stopLoadMoreObserver();
+  stopChunkObserver();
   stopChildrenVisibilityObserver();
-  if (loadMoreRaf && typeof window !== 'undefined') {
-    window.cancelAnimationFrame(loadMoreRaf);
-    loadMoreRaf = null;
+  if (chunkMeasureRaf && typeof window !== 'undefined') {
+    window.cancelAnimationFrame(chunkMeasureRaf);
+    chunkMeasureRaf = null;
   }
 });
 </script>
@@ -608,43 +805,49 @@ onBeforeUnmount(() => {
       <div v-if="isExpanded" class="node-content">
         <div class="vertical-line"></div>
         <template v-if="childrenVisible">
-          <JsonNode
-            v-for="(key, index) in visibleEntryKeys"
-            :key="key"
-            ref="childNodes"
-            :value="
-              valueType === 'array'
-                ? (value as unknown[])[key as number]
-                : (value as Record<string, unknown>)[key]
-            "
-            :key-name="key"
-            :depth="depth + 1"
-            :default-expanded="defaultExpanded"
-            :auto-expand-depth="autoExpandDepth"
-            :enable-chunked-render="enableChunkedRender"
-            :initial-render-count="initialRenderCount"
-            :render-chunk-size="renderChunkSize"
-            :is-last-item="
-              index === visibleEntryKeys.length - 1 && !hasMoreChildren
-            "
-            :parent-schema="currentFieldSchema"
-            style="padding-left: 32px"
-          />
-          <div
-            v-if="hasMoreChildren"
-            ref="loadMoreAnchor"
-            class="node-load-more"
+          <section
+            v-for="(chunkKeys, chunkIndex) in entryKeyChunks"
+            :key="`chunk-${chunkIndex}`"
+            :ref="(el) => setChunkRef(el as Element | null, chunkIndex)"
+            :data-node-chunk-index="chunkIndex"
+            class="node-virtual-block"
             style="padding-left: 32px"
           >
-            <button
-              type="button"
-              class="node-load-more__button"
-              @click="loadMoreChildren"
+            <template v-if="isChunkLoaded(chunkIndex)">
+              <JsonNode
+                v-for="(key, index) in chunkKeys"
+                :key="key"
+                ref="childNodes"
+                :value="
+                  valueType === 'array'
+                    ? (value as unknown[])[key as number]
+                    : (value as Record<string, unknown>)[key]
+                "
+                :key-name="key"
+                :depth="depth + 1"
+                :default-expanded="defaultExpanded"
+                :auto-expand-depth="autoExpandDepth"
+                :enable-chunked-render="enableChunkedRender"
+                :initial-render-count="initialRenderCount"
+                :render-chunk-size="renderChunkSize"
+                :is-last-item="isLastItemInNode(chunkIndex, index)"
+                :parent-schema="currentFieldSchema"
+              />
+            </template>
+            <div
+              v-else
+              class="node-virtual-placeholder"
+              :style="getChunkPlaceholderStyle(chunkIndex)"
             >
-              继续加载 {{ nextChunkCount }} 项（剩余
-              {{ remainingChildrenCount }}）
-            </button>
-          </div>
+              <button
+                type="button"
+                class="node-virtual-placeholder__button"
+                @click="forceLoadChunk(chunkIndex)"
+              >
+                加载该区域
+              </button>
+            </div>
+          </section>
         </template>
         <div v-else class="node-lazy-placeholder" style="padding-left: 32px">
           <button
@@ -683,6 +886,14 @@ onBeforeUnmount(() => {
 .json-node {
   position: relative;
   margin: 2px 0;
+}
+
+@supports (content-visibility: auto) {
+  .json-node {
+    contain: content;
+    contain-intrinsic-size: auto 28px;
+    content-visibility: auto;
+  }
 }
 
 .json-node:not(.has-collapse-btn) .node-header:hover {
@@ -741,10 +952,18 @@ onBeforeUnmount(() => {
   font-size: 11px;
 }
 
-.node-load-more {
+.node-virtual-block {
+  position: relative;
+  min-width: 0;
+  contain: layout paint;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 560px;
+}
+
+.node-virtual-placeholder {
   display: flex;
   align-items: center;
-  min-height: 26px;
+  min-height: 48px;
 }
 
 .node-lazy-placeholder {
@@ -753,11 +972,11 @@ onBeforeUnmount(() => {
   min-height: 26px;
 }
 
-.node-load-more__button {
-  height: 22px;
+.node-virtual-placeholder__button {
+  height: 24px;
   padding: 0 10px;
   font-size: 11px;
-  line-height: 22px;
+  line-height: 24px;
   cursor: pointer;
   border-radius: 999px;
 }
@@ -775,7 +994,7 @@ onBeforeUnmount(() => {
   color: #99999980;
 }
 
-.theme-dark .node-load-more__button {
+.theme-dark .node-virtual-placeholder__button {
   color: #9fb3d1;
   background: rgb(87 114 157 / 16%);
   border: 1px solid rgb(116 147 196 / 36%);
@@ -787,7 +1006,7 @@ onBeforeUnmount(() => {
   border: 1px dashed rgb(116 147 196 / 30%);
 }
 
-.theme-dark .node-load-more__button:hover {
+.theme-dark .node-virtual-placeholder__button:hover {
   background: rgb(87 114 157 / 24%);
 }
 
@@ -799,7 +1018,7 @@ onBeforeUnmount(() => {
   color: #99999980;
 }
 
-.theme-light .node-load-more__button {
+.theme-light .node-virtual-placeholder__button {
   color: #2d4f87;
   background: #edf3ff;
   border: 1px solid #bfd1f3;
@@ -811,7 +1030,7 @@ onBeforeUnmount(() => {
   border: 1px dashed #bfd1f3;
 }
 
-.theme-light .node-load-more__button:hover {
+.theme-light .node-virtual-placeholder__button:hover {
   background: #e2ecff;
 }
 
