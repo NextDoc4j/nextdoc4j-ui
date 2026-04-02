@@ -172,7 +172,7 @@ defineExpose({
 }
 
 .json-viewer-scroll-host :deep(*) {
-  animation: none !important;
   transition: none !important;
+  animation: none !important;
 }
 </style>

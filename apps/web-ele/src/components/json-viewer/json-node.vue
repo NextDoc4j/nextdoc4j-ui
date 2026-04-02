@@ -890,8 +890,8 @@ onBeforeUnmount(() => {
 
 @supports (content-visibility: auto) {
   .json-node {
-    contain: content;
     contain-intrinsic-size: auto 28px;
+    contain: content;
     content-visibility: auto;
   }
 }
@@ -955,9 +955,9 @@ onBeforeUnmount(() => {
 .node-virtual-block {
   position: relative;
   min-width: 0;
+  contain-intrinsic-size: auto 560px;
   contain: layout paint;
   content-visibility: auto;
-  contain-intrinsic-size: auto 560px;
 }
 
 .node-virtual-placeholder {
