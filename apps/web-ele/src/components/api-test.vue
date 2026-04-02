@@ -16,11 +16,15 @@ import { useAppConfig } from '@vben/hooks';
 import {
   SvgApiPrefixIcon,
   SvgDocumentLayoutIcon,
+  SvgDocumentOmittedIcon,
   SvgDocumentResetIcon,
 } from '@vben/icons';
 
 import {
   ElButton,
+  ElDropdown,
+  ElDropdownItem,
+  ElDropdownMenu,
   ElEmpty,
   ElInput,
   ElMessage,
@@ -449,6 +453,231 @@ const responseInlineTabs = computed<DebugInlineTab[]>(() => {
       label: '实际请求',
     },
   ];
+});
+
+const requestTabsHostRef = ref<HTMLElement>();
+const responseTabsHostRef = ref<HTMLElement>();
+const requestMoreMeasureRef = ref<HTMLElement>();
+const responseMoreMeasureRef = ref<HTMLElement>();
+const requestVisibleTabKeys = ref<string[]>([]);
+const responseVisibleTabKeys = ref<string[]>([]);
+const requestTabMeasureRefs = new Map<string, HTMLElement>();
+const responseTabMeasureRefs = new Map<string, HTMLElement>();
+const TAB_OVERFLOW_GAP = 4;
+let tabOverflowObserver: null | ResizeObserver = null;
+let overflowRaf: null | number = null;
+
+const setRequestTabMeasureRef = (key: string, el: null | unknown) => {
+  if (el instanceof HTMLElement) {
+    requestTabMeasureRefs.set(key, el);
+  } else {
+    requestTabMeasureRefs.delete(key);
+  }
+};
+
+const setResponseTabMeasureRef = (key: string, el: null | unknown) => {
+  if (el instanceof HTMLElement) {
+    responseTabMeasureRefs.set(key, el);
+  } else {
+    responseTabMeasureRefs.delete(key);
+  }
+};
+
+const resolveOverflowVisibleKeys = (options: {
+  activeKey: string;
+  hostElement?: HTMLElement;
+  measureRefs: Map<string, HTMLElement>;
+  moreMeasureElement?: HTMLElement;
+  tabs: DebugInlineTab[];
+}) => {
+  const { activeKey, hostElement, measureRefs, moreMeasureElement, tabs } =
+    options;
+  const keys = tabs.map((tab) => tab.key);
+  if (keys.length === 0 || !hostElement) {
+    return keys;
+  }
+
+  const containerWidth = hostElement.clientWidth;
+  if (!containerWidth) {
+    return keys;
+  }
+
+  const getTabWidth = (key: string) => {
+    const width = measureRefs.get(key)?.getBoundingClientRect().width ?? 0;
+    return Math.max(54, Math.ceil(width) || 72);
+  };
+
+  const moreWidth = Math.max(
+    24,
+    Math.ceil(moreMeasureElement?.getBoundingClientRect().width ?? 0) || 28,
+  );
+
+  const totalTabsWidth =
+    keys.reduce((sum, key) => sum + getTabWidth(key), 0) +
+    TAB_OVERFLOW_GAP * Math.max(0, keys.length - 1);
+  if (totalTabsWidth <= containerWidth) {
+    return keys;
+  }
+
+  const canFitWithMoreButton = (candidateKeys: string[]) => {
+    const tabsWidth = candidateKeys.reduce(
+      (sum, key) => sum + getTabWidth(key),
+      0,
+    );
+    const tabsGap = TAB_OVERFLOW_GAP * Math.max(0, candidateKeys.length - 1);
+    const moreGap = candidateKeys.length > 0 ? TAB_OVERFLOW_GAP : 0;
+    return tabsWidth + tabsGap + moreGap + moreWidth <= containerWidth;
+  };
+
+  const visibleKeys: string[] = [];
+  keys.forEach((key) => {
+    const candidateKeys = [...visibleKeys, key];
+    if (canFitWithMoreButton(candidateKeys)) {
+      visibleKeys.push(key);
+    }
+  });
+
+  if (
+    activeKey &&
+    keys.includes(activeKey) &&
+    !visibleKeys.includes(activeKey)
+  ) {
+    const adjustedKeys = visibleKeys.filter((key) => key !== activeKey);
+    while (
+      adjustedKeys.length > 0 &&
+      !canFitWithMoreButton([...adjustedKeys, activeKey])
+    ) {
+      adjustedKeys.pop();
+    }
+    if (canFitWithMoreButton([...adjustedKeys, activeKey])) {
+      adjustedKeys.push(activeKey);
+    } else {
+      adjustedKeys.splice(0, adjustedKeys.length, activeKey);
+    }
+
+    const keyIndexMap = new Map(keys.map((key, index) => [key, index]));
+    adjustedKeys.sort((a, b) => {
+      return (keyIndexMap.get(a) ?? 0) - (keyIndexMap.get(b) ?? 0);
+    });
+    return adjustedKeys;
+  }
+
+  return visibleKeys;
+};
+
+const requestVisibleTabs = computed(() => {
+  const visibleKeySet = new Set(requestVisibleTabKeys.value);
+  const tabs = requestInlineTabs.value;
+  if (visibleKeySet.size === 0) {
+    return tabs;
+  }
+  return tabs.filter((tab) => visibleKeySet.has(tab.key));
+});
+
+const requestHiddenTabs = computed(() => {
+  const visibleKeySet = new Set(requestVisibleTabs.value.map((tab) => tab.key));
+  return requestInlineTabs.value.filter((tab) => !visibleKeySet.has(tab.key));
+});
+
+const responseVisibleTabs = computed(() => {
+  const visibleKeySet = new Set(responseVisibleTabKeys.value);
+  const tabs = responseInlineTabs.value;
+  if (visibleKeySet.size === 0) {
+    return tabs;
+  }
+  return tabs.filter((tab) => visibleKeySet.has(tab.key));
+});
+
+const responseHiddenTabs = computed(() => {
+  const visibleKeySet = new Set(
+    responseVisibleTabs.value.map((tab) => tab.key),
+  );
+  return responseInlineTabs.value.filter((tab) => !visibleKeySet.has(tab.key));
+});
+
+const updateRequestTabOverflow = () => {
+  requestVisibleTabKeys.value = resolveOverflowVisibleKeys({
+    activeKey: activeTab.value,
+    hostElement: requestTabsHostRef.value,
+    measureRefs: requestTabMeasureRefs,
+    moreMeasureElement: requestMoreMeasureRef.value,
+    tabs: requestInlineTabs.value,
+  });
+};
+
+const updateResponseTabOverflow = () => {
+  responseVisibleTabKeys.value = resolveOverflowVisibleKeys({
+    activeKey: responseTab.value,
+    hostElement: responseTabsHostRef.value,
+    measureRefs: responseTabMeasureRefs,
+    moreMeasureElement: responseMoreMeasureRef.value,
+    tabs: responseInlineTabs.value,
+  });
+};
+
+const updateAllTabOverflow = () => {
+  updateRequestTabOverflow();
+  updateResponseTabOverflow();
+};
+
+const scheduleTabOverflowUpdate = () => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  if (overflowRaf) {
+    window.cancelAnimationFrame(overflowRaf);
+  }
+  overflowRaf = window.requestAnimationFrame(() => {
+    overflowRaf = null;
+    updateAllTabOverflow();
+  });
+};
+
+const syncTabOverflowObserver = () => {
+  if (typeof ResizeObserver === 'undefined') {
+    return;
+  }
+  tabOverflowObserver?.disconnect();
+  tabOverflowObserver = new ResizeObserver(() => {
+    scheduleTabOverflowUpdate();
+  });
+  if (requestTabsHostRef.value) {
+    tabOverflowObserver.observe(requestTabsHostRef.value);
+  }
+  if (responseTabsHostRef.value) {
+    tabOverflowObserver.observe(responseTabsHostRef.value);
+  }
+};
+
+const handleRequestHiddenTabCommand = (command: number | string) => {
+  activeTab.value = `${command}`;
+  scheduleTabOverflowUpdate();
+};
+
+const handleResponseHiddenTabCommand = (command: number | string) => {
+  responseTab.value = `${command}`;
+  scheduleTabOverflowUpdate();
+};
+
+watch(
+  () => [requestInlineTabs.value, activeTab.value],
+  () => {
+    scheduleTabOverflowUpdate();
+  },
+  { deep: true },
+);
+
+watch(
+  () => [responseInlineTabs.value, responseTab.value],
+  () => {
+    scheduleTabOverflowUpdate();
+  },
+  { deep: true },
+);
+
+watch([() => requestTabsHostRef.value, () => responseTabsHostRef.value], () => {
+  syncTabOverflowObserver();
+  scheduleTabOverflowUpdate();
 });
 
 const isStackedLayout = computed(() => paneLayout.value === 'vertical');
@@ -1517,6 +1746,10 @@ onMounted(async () => {
       });
     }
   }
+
+  await nextTick();
+  syncTabOverflowObserver();
+  scheduleTabOverflowUpdate();
 });
 
 watch(
@@ -1557,6 +1790,12 @@ onBeforeUnmount(() => {
   if (persistTimer) {
     window.clearTimeout(persistTimer);
     persistTimer = null;
+  }
+  tabOverflowObserver?.disconnect();
+  tabOverflowObserver = null;
+  if (overflowRaf) {
+    window.cancelAnimationFrame(overflowRaf);
+    overflowRaf = null;
   }
 });
 </script>
@@ -1641,9 +1880,9 @@ onBeforeUnmount(() => {
             <div class="debug-pane__header debug-pane__header--inline-tabs">
               <div class="debug-pane__header-main">
                 <span class="debug-pane__title">请求参数</span>
-                <div class="debug-inline-tabs">
+                <div ref="requestTabsHostRef" class="debug-inline-tabs">
                   <button
-                    v-for="tabItem in requestInlineTabs"
+                    v-for="tabItem in requestVisibleTabs"
                     :key="tabItem.key"
                     type="button"
                     class="debug-inline-tab"
@@ -1652,11 +1891,53 @@ onBeforeUnmount(() => {
                     }"
                     @click="activeTab = tabItem.key"
                   >
-                    <span>{{ tabItem.label }}</span>
+                    <span class="debug-inline-tab__label">{{
+                      tabItem.label
+                    }}</span>
                     <span v-if="tabItem.count" class="debug-inline-tab__count">
                       {{ tabItem.count }}
                     </span>
                   </button>
+                  <ElDropdown
+                    v-if="requestHiddenTabs.length > 0"
+                    trigger="click"
+                    placement="bottom-end"
+                    popper-class="debug-tab-overflow-menu"
+                    @command="handleRequestHiddenTabCommand"
+                  >
+                    <button
+                      type="button"
+                      class="debug-inline-tab debug-inline-tab--more"
+                      aria-label="更多标签"
+                    >
+                      <SvgDocumentOmittedIcon
+                        class="debug-inline-tab__more-icon"
+                      />
+                    </button>
+                    <template #dropdown>
+                      <ElDropdownMenu>
+                        <ElDropdownItem
+                          v-for="tabItem in requestHiddenTabs"
+                          :key="tabItem.key"
+                          :command="tabItem.key"
+                          :class="{
+                            'debug-hidden-tab--active':
+                              activeTab === tabItem.key,
+                          }"
+                        >
+                          <span class="debug-hidden-tab__label">
+                            {{ tabItem.label }}
+                          </span>
+                          <span
+                            v-if="tabItem.count"
+                            class="debug-hidden-tab__count"
+                          >
+                            {{ tabItem.count }}
+                          </span>
+                        </ElDropdownItem>
+                      </ElDropdownMenu>
+                    </template>
+                  </ElDropdown>
                 </div>
               </div>
             </div>
@@ -1725,9 +2006,9 @@ onBeforeUnmount(() => {
             <div class="debug-pane__header debug-pane__header--inline-tabs">
               <div class="debug-pane__header-main">
                 <span class="debug-pane__title">响应结果</span>
-                <div class="debug-inline-tabs">
+                <div ref="responseTabsHostRef" class="debug-inline-tabs">
                   <button
-                    v-for="tabItem in responseInlineTabs"
+                    v-for="tabItem in responseVisibleTabs"
                     :key="tabItem.key"
                     type="button"
                     class="debug-inline-tab"
@@ -1736,11 +2017,53 @@ onBeforeUnmount(() => {
                     }"
                     @click="responseTab = tabItem.key"
                   >
-                    <span>{{ tabItem.label }}</span>
+                    <span class="debug-inline-tab__label">{{
+                      tabItem.label
+                    }}</span>
                     <span v-if="tabItem.count" class="debug-inline-tab__count">
                       {{ tabItem.count }}
                     </span>
                   </button>
+                  <ElDropdown
+                    v-if="responseHiddenTabs.length > 0"
+                    trigger="click"
+                    placement="bottom-end"
+                    popper-class="debug-tab-overflow-menu"
+                    @command="handleResponseHiddenTabCommand"
+                  >
+                    <button
+                      type="button"
+                      class="debug-inline-tab debug-inline-tab--more"
+                      aria-label="更多标签"
+                    >
+                      <SvgDocumentOmittedIcon
+                        class="debug-inline-tab__more-icon"
+                      />
+                    </button>
+                    <template #dropdown>
+                      <ElDropdownMenu>
+                        <ElDropdownItem
+                          v-for="tabItem in responseHiddenTabs"
+                          :key="tabItem.key"
+                          :command="tabItem.key"
+                          :class="{
+                            'debug-hidden-tab--active':
+                              responseTab === tabItem.key,
+                          }"
+                        >
+                          <span class="debug-hidden-tab__label">
+                            {{ tabItem.label }}
+                          </span>
+                          <span
+                            v-if="tabItem.count"
+                            class="debug-hidden-tab__count"
+                          >
+                            {{ tabItem.count }}
+                          </span>
+                        </ElDropdownItem>
+                      </ElDropdownMenu>
+                    </template>
+                  </ElDropdown>
                 </div>
               </div>
               <div
@@ -1931,6 +2254,50 @@ onBeforeUnmount(() => {
         </section>
       </div>
     </div>
+    <div class="debug-tab-measure" aria-hidden="true">
+      <div class="debug-inline-tabs">
+        <button
+          v-for="tabItem in requestInlineTabs"
+          :key="`measure-request-${tabItem.key}`"
+          type="button"
+          class="debug-inline-tab"
+          :ref="(el) => setRequestTabMeasureRef(tabItem.key, el)"
+        >
+          <span class="debug-inline-tab__label">{{ tabItem.label }}</span>
+          <span v-if="tabItem.count" class="debug-inline-tab__count">
+            {{ tabItem.count }}
+          </span>
+        </button>
+        <button
+          ref="requestMoreMeasureRef"
+          type="button"
+          class="debug-inline-tab debug-inline-tab--more"
+        >
+          <SvgDocumentOmittedIcon class="debug-inline-tab__more-icon" />
+        </button>
+      </div>
+      <div class="debug-inline-tabs">
+        <button
+          v-for="tabItem in responseInlineTabs"
+          :key="`measure-response-${tabItem.key}`"
+          type="button"
+          class="debug-inline-tab"
+          :ref="(el) => setResponseTabMeasureRef(tabItem.key, el)"
+        >
+          <span class="debug-inline-tab__label">{{ tabItem.label }}</span>
+          <span v-if="tabItem.count" class="debug-inline-tab__count">
+            {{ tabItem.count }}
+          </span>
+        </button>
+        <button
+          ref="responseMoreMeasureRef"
+          type="button"
+          class="debug-inline-tab debug-inline-tab--more"
+        >
+          <SvgDocumentOmittedIcon class="debug-inline-tab__more-icon" />
+        </button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -1958,6 +2325,8 @@ onBeforeUnmount(() => {
   --debug-radius-sm: 10px;
   --debug-radius-md: 12px;
   --debug-radius-lg: 14px;
+  --debug-count-radius: calc(var(--radius) * 1.8);
+  --debug-menu-radius: calc(var(--radius) * 2.2);
   --debug-surface: var(--el-bg-color);
   --debug-soft-bg: color-mix(
     in srgb,
@@ -2152,16 +2521,16 @@ onBeforeUnmount(() => {
 }
 
 .debug-pane__header--inline-tabs {
-  flex-wrap: wrap;
-  gap: 6px 12px;
+  flex-wrap: nowrap;
+  gap: 10px;
   align-items: center;
 }
 
 .debug-pane__header-main {
   display: inline-flex;
   flex: 1;
-  flex-wrap: wrap;
-  gap: 8px 10px;
+  flex-wrap: nowrap;
+  gap: 8px;
   align-items: center;
   min-width: 0;
 }
@@ -2180,17 +2549,21 @@ onBeforeUnmount(() => {
 
 .debug-inline-tabs {
   display: inline-flex;
-  flex-wrap: wrap;
+  flex: 1;
+  flex-wrap: nowrap;
   gap: 4px;
   align-items: center;
   min-width: 0;
+  overflow: hidden;
 }
 
 .debug-inline-tab {
   display: inline-flex;
+  flex: none;
   gap: 4px;
   align-items: center;
   justify-content: center;
+  max-width: 146px;
   min-height: 24px;
   padding: 0 8px;
   font-size: 12px;
@@ -2201,6 +2574,12 @@ onBeforeUnmount(() => {
   border: 1px solid transparent;
   border-radius: var(--debug-radius-xs);
   transition: all 0.14s ease;
+}
+
+.debug-inline-tab__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .debug-inline-tab:hover {
@@ -2221,6 +2600,7 @@ onBeforeUnmount(() => {
 
 .debug-inline-tab__count {
   display: inline-flex;
+  flex: none;
   align-items: center;
   justify-content: center;
   min-width: 16px;
@@ -2230,7 +2610,74 @@ onBeforeUnmount(() => {
   font-weight: 700;
   color: #fff;
   background: var(--el-color-primary);
-  border-radius: var(--debug-chip-radius);
+  border-radius: var(--debug-count-radius);
+}
+
+.debug-inline-tab--more {
+  width: 24px;
+  min-width: 24px;
+  padding: 0;
+}
+
+.debug-inline-tab__more-icon {
+  width: 14px;
+  height: 14px;
+  line-height: 1;
+  color: currentcolor;
+}
+
+.debug-tab-measure {
+  position: fixed;
+  top: -9999px;
+  left: -9999px;
+  z-index: -1;
+  display: grid;
+  visibility: hidden;
+  gap: 6px;
+  pointer-events: none;
+}
+
+:global(.debug-tab-overflow-menu) {
+  padding: 4px;
+  border-radius: calc(var(--radius) * 2.2);
+}
+
+:global(.debug-tab-overflow-menu .el-dropdown-menu__item) {
+  border-radius: calc(var(--radius) * 1.2);
+}
+
+:global(
+  .debug-tab-overflow-menu .el-dropdown-menu__item.debug-hidden-tab--active
+) {
+  color: var(--el-color-primary);
+  background: color-mix(
+    in srgb,
+    var(--el-color-primary-light-9) 65%,
+    var(--el-bg-color) 35%
+  );
+}
+
+:global(
+  .debug-tab-overflow-menu .el-dropdown-menu__item .debug-hidden-tab__label
+) {
+  margin-right: 6px;
+}
+
+:global(
+  .debug-tab-overflow-menu .el-dropdown-menu__item .debug-hidden-tab__count
+) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--el-color-primary);
+  border-radius: calc(var(--radius) * 1.8);
 }
 
 .debug-icon-button {
