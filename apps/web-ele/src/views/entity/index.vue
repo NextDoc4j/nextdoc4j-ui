@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import type { Schema } from '#/typings/openApi';
-
 import { computed, ref } from 'vue';
 import { useRoute } from 'vue-router';
 
@@ -9,7 +7,7 @@ import { ElButton } from 'element-plus';
 import JsonViewer from '#/components/json-viewer/index.vue';
 import SchemaView from '#/components/schema-view.vue';
 import { useApiStore } from '#/store';
-import { resolveSchema } from '#/utils/schema';
+import { adaptSchemaForView, hasRenderableSchema } from '#/utils/schema';
 
 const route = useRoute();
 const apiStore = useApiStore();
@@ -59,97 +57,11 @@ const htmlDescription = computed(() => {
   return entityInfo.value.description;
 });
 
-const hasRenderableSchema = (schema: any) => {
-  if (!schema) return false;
-  return Boolean(
-    schema.properties ||
-      schema.$ref ||
-      schema.items ||
-      (Array.isArray(schema.oneOf) && schema.oneOf.length > 0) ||
-      (Array.isArray(schema.anyOf) && schema.anyOf.length > 0) ||
-      (Array.isArray(schema.allOf) && schema.allOf.length > 0),
-  );
-};
-
-const prepareSchema = (schema: any): any => {
-  if (!schema) return null;
-
-  const resolved = schema.$ref ? resolveSchema(schema) : schema;
-  if (!resolved) {
-    return null;
-  }
-
-  if (Array.isArray(resolved.oneOf) && resolved.oneOf.length > 0) {
-    return {
-      ...resolved,
-      oneOf: resolved.oneOf
-        .map((item: Schema) => prepareSchema(item))
-        .filter(Boolean),
-    };
-  }
-
-  if (Array.isArray(resolved.anyOf) && resolved.anyOf.length > 0) {
-    return {
-      ...resolved,
-      anyOf: resolved.anyOf
-        .map((item: Schema) => prepareSchema(item))
-        .filter(Boolean),
-    };
-  }
-
-  if (Array.isArray(resolved.allOf) && resolved.allOf.length > 0) {
-    const mergedProperties = { ...resolved.properties };
-    const required = new Set<string>(resolved.required || []);
-
-    resolved.allOf.forEach((item: Schema) => {
-      const current = prepareSchema(item);
-      if (current?.properties) {
-        Object.assign(mergedProperties, current.properties);
-      }
-      (current?.required || []).forEach((field: string) => required.add(field));
-    });
-
-    return prepareSchema({
-      ...resolved,
-      allOf: undefined,
-      properties: mergedProperties,
-      required: [...required],
-      type: resolved.type || 'object',
-    });
-  }
-
-  if (
-    (resolved.type === 'object' || resolved.properties) &&
-    resolved.properties
-  ) {
-    return {
-      ...resolved,
-      properties: Object.fromEntries(
-        Object.entries(resolved.properties).map(([key, value]) => [
-          key,
-          prepareSchema(value),
-        ]),
-      ),
-      required: resolved.required || [],
-      type: 'object',
-    };
-  }
-
-  if (resolved.type === 'array' && resolved.items) {
-    return {
-      ...resolved,
-      items: prepareSchema(resolved.items),
-    };
-  }
-
-  return resolved;
-};
-
 const entitySchema = computed(() => {
   if (!entityInfo.value) {
     return null;
   }
-  return prepareSchema(entityInfo.value);
+  return adaptSchemaForView(entityInfo.value, { mode: 'entity' });
 });
 
 const propertyCount = computed(() => {
@@ -157,74 +69,11 @@ const propertyCount = computed(() => {
 });
 
 const schemaWithExamples = computed(() => {
-  if (!entitySchema.value) {
+  if (!entitySchema.value || !hasRenderableSchema(entitySchema.value)) {
     return null;
   }
-  return normalizeSchemaForExample(entitySchema.value);
+  return entitySchema.value;
 });
-
-function normalizeSchemaForExample(schema: any): any {
-  if (!schema || typeof schema !== 'object') return schema;
-
-  if (Array.isArray(schema)) {
-    return schema.map((item) => normalizeSchemaForExample(item));
-  }
-
-  if (schema.oneOf?.length) {
-    return normalizeSchemaForExample(schema.oneOf[0]);
-  }
-
-  if (schema.allOf?.length) {
-    const merged: any = { type: 'object', properties: {} };
-    schema.allOf.forEach((item: any) => {
-      const normalized = normalizeSchemaForExample(item);
-      if (normalized?.properties) {
-        Object.assign(merged.properties, normalized.properties);
-      }
-    });
-    return merged;
-  }
-
-  if (['error', 'ref', 'unknown'].includes(schema.type)) {
-    return { type: 'object', properties: {} };
-  }
-
-  const cloned: any = { ...schema };
-
-  if (!cloned.type) {
-    if (cloned.properties) {
-      cloned.type = 'object';
-    } else if (cloned.items) {
-      cloned.type = 'array';
-    } else if (cloned.enum) {
-      cloned.type = 'string';
-    }
-  }
-
-  if (cloned.type === 'array' && cloned.items) {
-    cloned.items = normalizeSchemaForExample(cloned.items);
-  }
-
-  if (cloned.type === 'object' || cloned.properties) {
-    const properties = cloned.properties ?? {};
-    cloned.properties = Object.fromEntries(
-      Object.entries(properties).map(([key, value]) => [
-        key,
-        normalizeSchemaForExample(value),
-      ]),
-    );
-  }
-
-  if (
-    cloned.example === undefined &&
-    cloned.type &&
-    !['array', 'object'].includes(cloned.type)
-  ) {
-    cloned.example = '';
-  }
-
-  return cloned;
-}
 </script>
 
 <template>
@@ -267,7 +116,7 @@ function normalizeSchemaForExample(schema: any): any {
         :class="{ 'schema-layout--open': exampleOpen && schemaWithExamples }"
       >
         <div class="schema-layout__main">
-          <SchemaView :data="entitySchema" />
+          <SchemaView :data="entitySchema" mode="entity" />
         </div>
 
         <div
@@ -276,7 +125,7 @@ function normalizeSchemaForExample(schema: any): any {
         >
           <JsonViewer
             class="json-panel app-json-schema-viewer"
-            :schema="schemaWithExamples"
+            :schema="schemaWithExamples" mode="entity"
           />
         </div>
       </div>
@@ -497,3 +346,4 @@ function normalizeSchemaForExample(schema: any): any {
   }
 }
 </style>
+

@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 
 import { SvgCaretRightIcon } from '@vben/icons';
 
-import { ElTooltip } from 'element-plus';
+import { ElButton, ElTooltip } from 'element-plus';
 
 import { getEnumItems } from '#/utils/enumexpand';
 
@@ -11,101 +11,31 @@ defineOptions({
   name: 'SchemaView',
 });
 
-defineProps<{
-  data: any;
+const props = withDefaults(
+  defineProps<{
+    data: any;
+    mode?: 'entity' | 'request' | 'response';
+    pathPrefix?: string;
+  }>(),
+  {
+    mode: 'entity',
+    pathPrefix: '$',
+  },
+);
+
+const emits = defineEmits<{
+  'variant-change': [payload: { index: number; path: string }];
 }>();
 
+type CompositionKeyword = 'allOf' | 'anyOf' | 'oneOf';
+
 const foldState = ref<Record<string, boolean>>({});
+const variantState = ref<Record<string, number>>({});
 
-const isExpandable = (item: any) => {
-  if (item?.type === 'object' && item?.properties) {
-    return Object.keys(item.properties).length > 0;
-  }
-  if (item?.type === 'array' && item?.items?.type === 'object') {
-    return true;
-  }
-  return false;
-};
+const mode = computed(() => props.mode);
+const rootPath = computed(() => props.pathPrefix || '$');
 
-const getChildSchema = (item: any) => {
-  if (!item?.type || item.type === 'object') {
-    return item?.properties || {};
-  }
-  if (item.type === 'array' && item?.items?.type === 'object') {
-    return item.items.properties || {};
-  }
-  return {};
-};
-
-const toggleFold = (key: string, value: any) => {
-  if (isExpandable(value)) {
-    foldState.value[key] = !foldState.value[key];
-  }
-};
-
-const getConstraints = (value: any) => {
-  const source = value?.schema || value;
-  const parts: string[] = [];
-
-  if (source.minLength !== undefined) {
-    parts.push(
-      `>=${source.minLength}${source.type === 'string' ? ' 字符' : ''}`,
-    );
-  }
-  if (source.maxLength !== undefined) {
-    parts.push(
-      `<=${source.maxLength}${source.type === 'string' ? ' 字符' : ''}`,
-    );
-  }
-  if (source.minimum !== undefined) {
-    parts.push(`>=${source.minimum}`);
-  }
-  if (source.maximum !== undefined) {
-    parts.push(`<=${source.maximum}`);
-  }
-
-  return parts.join(' 或 ');
-};
-
-const hasHtmlDescription = (desc: string) => desc?.includes('<');
-
-const getPropertyEnumItems = (value: any) => {
-  return getEnumItems(value);
-};
-
-const getEnumValueList = (value: any) => {
-  return getPropertyEnumItems(value)
-    .map((item) => String(item.value))
-    .join(', ');
-};
-
-const getTypeLabel = (value: any) => {
-  if (!value) return '-';
-
-  if (value.type === 'array') {
-    const itemType = value.items?.type || 'any';
-    const itemSuffix = value.items?.format ? `<${value.items.format}>` : '';
-    return `array<${itemType}${itemSuffix}>`;
-  }
-
-  const suffix = value.format ? `<${value.format}>` : '';
-  if (value.title && value.type === 'object') {
-    return `${value.type}<${value.title}>`;
-  }
-  return `${value.type || 'unknown'}${suffix}`;
-};
-
-const getExampleValue = (value: any) => {
-  return value?.example;
-};
-
-const getPatternValue = (value: any) => {
-  return value?.pattern || '';
-};
-
-const isRequired = (data: any, key: string, value: any) => {
-  return Boolean(data?.required?.includes?.(key) || value?.required === true);
-};
+const hasHtmlDescription = (desc?: string) => Boolean(desc?.includes('<'));
 
 const formatValue = (value: unknown) => {
   if (value === undefined || value === null || value === '') return '';
@@ -114,32 +44,399 @@ const formatValue = (value: unknown) => {
   }
   return String(value);
 };
+
+const getCompositionKeyword = (item: any): '' | CompositionKeyword => {
+  if (Array.isArray(item?.oneOf) && item.oneOf.length > 0) {
+    return 'oneOf';
+  }
+  if (Array.isArray(item?.anyOf) && item.anyOf.length > 0) {
+    return 'anyOf';
+  }
+  if (Array.isArray(item?.allOf) && item.allOf.length > 0) {
+    return 'allOf';
+  }
+  return '';
+};
+
+const getCompositionItems = (item: any, keyword: '' | CompositionKeyword) => {
+  if (!keyword || !Array.isArray(item?.[keyword])) {
+    return [];
+  }
+  return item[keyword] as any[];
+};
+
+const getSelectedVariantIndex = (item: any, path: string) => {
+  const keyword = getCompositionKeyword(item);
+  if (!keyword || keyword === 'allOf') {
+    return 0;
+  }
+  const options = getCompositionItems(item, keyword);
+  if (options.length <= 1) {
+    return 0;
+  }
+  const current = variantState.value[path];
+  if (typeof current !== 'number' || current < 0 || current >= options.length) {
+    return 0;
+  }
+  return current;
+};
+
+const updateVariant = (path: string, value: number | string) => {
+  const parsed = Number(value);
+  const nextIndex = Number.isFinite(parsed) ? parsed : 0;
+  variantState.value[path] = nextIndex;
+  emits('variant-change', {
+    index: nextIndex,
+    path,
+  });
+};
+
+const handleChildVariantChange = (payload: { index: number; path: string }) => {
+  emits('variant-change', payload);
+};
+
+const mergeSchema = (baseSchema: any, pickedSchema: any) => {
+  if (!pickedSchema || typeof pickedSchema !== 'object') {
+    return baseSchema;
+  }
+
+  const merged: any = {
+    ...baseSchema,
+    ...pickedSchema,
+  };
+
+  const required = [
+    ...(Array.isArray(baseSchema?.required) ? baseSchema.required : []),
+    ...(Array.isArray(pickedSchema?.required) ? pickedSchema.required : []),
+  ];
+  if (required.length > 0) {
+    merged.required = [...new Set(required)];
+  }
+
+  if (baseSchema?.properties || pickedSchema?.properties) {
+    merged.properties = {
+      ...(baseSchema?.properties || {}),
+      ...(pickedSchema?.properties || {}),
+    };
+  }
+
+  if (!merged.type) {
+    if (merged.properties) {
+      merged.type = 'object';
+    } else if (merged.items) {
+      merged.type = 'array';
+    }
+  }
+
+  if (baseSchema?.description) {
+    merged.description = baseSchema.description;
+  }
+
+  if (pickedSchema?.title && !baseSchema?.title) {
+    merged.title = pickedSchema.title;
+  }
+
+  return merged;
+};
+
+const resolveAllOfSchema = (item: any) => {
+  const merged = item?.['x-nextdoc4j-allOfMerged'];
+  if (merged && typeof merged === 'object') {
+    return merged;
+  }
+
+  const options = Array.isArray(item?.allOf) ? item.allOf : [];
+  const fallback = {
+    properties: {},
+    required: [],
+    type: 'object',
+  } as any;
+
+  options.forEach((entry: any) => {
+    if (!entry || typeof entry !== 'object') {
+      return;
+    }
+    if (entry.properties && typeof entry.properties === 'object') {
+      Object.assign(fallback.properties, entry.properties);
+    }
+    if (Array.isArray(entry.required)) {
+      fallback.required.push(...entry.required);
+    }
+  });
+
+  if (Object.keys(fallback.properties).length <= 0) {
+    delete fallback.properties;
+  }
+  if (fallback.required.length <= 0) {
+    delete fallback.required;
+  } else {
+    fallback.required = [...new Set(fallback.required)];
+  }
+
+  return fallback;
+};
+
+const getDisplaySchema = (item: any, path: string): any => {
+  if (!item || typeof item !== 'object') {
+    return item;
+  }
+
+  const keyword = getCompositionKeyword(item);
+  if (!keyword) {
+    return item;
+  }
+
+  const baseSchema = {
+    ...item,
+  };
+  delete baseSchema.oneOf;
+  delete baseSchema.anyOf;
+  delete baseSchema.allOf;
+  delete baseSchema['x-nextdoc4j-allOfMerged'];
+
+  if (keyword === 'allOf') {
+    return mergeSchema(baseSchema, resolveAllOfSchema(item));
+  }
+
+  const options = getCompositionItems(item, keyword);
+  if (options.length <= 0) {
+    return baseSchema;
+  }
+
+  const selected = options[getSelectedVariantIndex(item, path)] ?? options[0];
+  return mergeSchema(baseSchema, selected);
+};
+
+const isExpandable = (item: any, path: string) => {
+  const schema = getDisplaySchema(item, path);
+  if (schema?.type === 'object' && schema?.properties) {
+    return Object.keys(schema.properties).length > 0;
+  }
+  if (schema?.type === 'array' && schema?.items?.type === 'object') {
+    return true;
+  }
+  return false;
+};
+
+const getChildSchema = (item: any, path: string) => {
+  const schema = getDisplaySchema(item, path);
+  if (!schema?.type || schema.type === 'object') {
+    return schema?.properties || {};
+  }
+  if (schema.type === 'array' && schema?.items?.type === 'object') {
+    return schema.items.properties || {};
+  }
+  return {};
+};
+
+const getNodePath = (key: string) => `${rootPath.value}.${key}`;
+
+const toggleFold = (path: string, value: any) => {
+  if (isExpandable(value, path)) {
+    foldState.value[path] = !foldState.value[path];
+  }
+};
+
+const getConstraints = (value: any, path: string) => {
+  const source = getDisplaySchema(value, path);
+  const parts: string[] = [];
+
+  if (source?.minLength !== undefined) {
+    parts.push(`>=${source.minLength}${source.type === 'string' ? ' 字符' : ''}`);
+  }
+  if (source?.maxLength !== undefined) {
+    parts.push(`<=${source.maxLength}${source.type === 'string' ? ' 字符' : ''}`);
+  }
+  if (source?.minimum !== undefined) {
+    parts.push(`>=${source.minimum}`);
+  }
+  if (source?.maximum !== undefined) {
+    parts.push(`<=${source.maximum}`);
+  }
+
+  return parts.join(' 或 ');
+};
+
+const getPropertyEnumItems = (value: any, path: string) => {
+  return getEnumItems(getDisplaySchema(value, path));
+};
+
+const getEnumValueList = (value: any, path: string) => {
+  return getPropertyEnumItems(value, path)
+    .map((item) => String(item.value))
+    .join(', ');
+};
+
+const getTypeLabel = (value: any, path: string) => {
+  const schema = getDisplaySchema(value, path);
+  if (!schema) return '-';
+
+  if (schema.type === 'array') {
+    const itemType = schema.items?.type || 'any';
+    const itemSuffix = schema.items?.format ? `<${schema.items.format}>` : '';
+    return `array<${itemType}${itemSuffix}>`;
+  }
+
+  const suffix = schema.format ? `<${schema.format}>` : '';
+  if (schema.title && schema.type === 'object') {
+    return `${schema.type}<${schema.title}>`;
+  }
+  return `${schema.type || 'unknown'}${suffix}`;
+};
+
+const getExampleValue = (value: any, path: string) => {
+  return getDisplaySchema(value, path)?.example;
+};
+
+const getPatternValue = (value: any, path: string) => {
+  return getDisplaySchema(value, path)?.pattern || '';
+};
+
+const isRequired = (parentSchema: any, key: string, value: any) => {
+  return Boolean(
+    parentSchema?.required?.includes?.(key) || value?.required === true,
+  );
+};
+
+const isNullable = (value: any, path: string) => {
+  return getDisplaySchema(value, path)?.nullable === true;
+};
+
+const isDeprecated = (value: any, path: string) => {
+  return getDisplaySchema(value, path)?.deprecated === true;
+};
+
+const isReadOnly = (value: any, path: string) => {
+  const schema = getDisplaySchema(value, path);
+  const accessMode = `${schema?.accessMode || ''}`.toUpperCase();
+  return schema?.readOnly === true || accessMode === 'READ_ONLY';
+};
+
+const isWriteOnly = (value: any, path: string) => {
+  const schema = getDisplaySchema(value, path);
+  const accessMode = `${schema?.accessMode || ''}`.toUpperCase();
+  return schema?.writeOnly === true || accessMode === 'WRITE_ONLY';
+};
+
+const getDescription = (value: any, path: string) => {
+  return value?.description || getDisplaySchema(value, path)?.description || '';
+};
+
+const hasVariantSelector = (item: any) => {
+  const keyword = getCompositionKeyword(item);
+  if (keyword !== 'oneOf' && keyword !== 'anyOf') {
+    return false;
+  }
+  return getCompositionItems(item, keyword).length > 1;
+};
+
+const getCompositionSummary = (item: any) => {
+  const keyword = getCompositionKeyword(item);
+  if (!keyword) {
+    return '';
+  }
+  const count = getCompositionItems(item, keyword).length;
+  return count > 0 ? `${keyword} ${count}` : keyword;
+};
+
+const getVariantOptions = (item: any) => {
+  const keyword = getCompositionKeyword(item);
+  if (!keyword || keyword === 'allOf') {
+    return [];
+  }
+  return getCompositionItems(item, keyword);
+};
+
+const getVariantOptionLabel = (option: any, index: number) => {
+  const title = option?.title || '';
+  const type = option?.type ? ` · ${option.type}` : '';
+  if (title) {
+    return `${index + 1}. ${title}${type}`;
+  }
+  return `方案 ${index + 1}${type}`;
+};
+
+const resolvedRootSchema = computed(() => {
+  return getDisplaySchema(props.data, rootPath.value);
+});
+
+const rootChildren = computed(() => {
+  return getChildSchema(resolvedRootSchema.value, rootPath.value);
+});
+
+const showRootArrayPill = computed(() => {
+  return (
+    resolvedRootSchema.value?.type === 'array' &&
+    resolvedRootSchema.value?.items?.type !== 'object'
+  );
+});
+
+const showRootPrimitivePill = computed(() => {
+  if (showRootArrayPill.value) {
+    return false;
+  }
+  return Object.keys(rootChildren.value).length <= 0;
+});
 </script>
 
 <template>
   <div
-    v-if="data?.type === 'array' && data?.items?.type !== 'object'"
+    v-if="hasVariantSelector(data)"
+    class="schema-root-composition"
+  >
+    <span class="composition-switch__label">{{ getCompositionSummary(data) }}</span>
+    <div class="composition-switch__buttons">
+      <ElTooltip
+        v-for="(option, index) in getVariantOptions(data)"
+        :key="`${rootPath}-${index}`"
+        :content="getVariantOptionLabel(option, index)"
+        placement="top"
+      >
+        <ElButton
+          size="small"
+          class="variant-switch-button"
+          :class="{
+            'variant-switch-button--active':
+              getSelectedVariantIndex(data, rootPath) === index,
+          }"
+          @click="updateVariant(rootPath, index)"
+        >
+          {{ index + 1 }}
+        </ElButton>
+      </ElTooltip>
+    </div>
+  </div>
+
+  <div
+    v-else-if="getCompositionSummary(data)"
+    class="schema-root-composition"
+  >
+    <span class="meta-pill meta-pill--composition">{{ getCompositionSummary(data) }}</span>
+  </div>
+
+  <div
+    v-if="showRootArrayPill || showRootPrimitivePill"
     class="schema-root-pill"
   >
-    <span class="schema-root-pill__title">数组结构</span>
-    <span class="schema-root-pill__value">{{ getTypeLabel(data) }}</span>
+    <span class="schema-root-pill__title">结构</span>
+    <span class="schema-root-pill__value">{{ getTypeLabel(resolvedRootSchema, rootPath) }}</span>
   </div>
 
   <div v-else class="schema-stack">
     <div
-      v-for="(value, key) in getChildSchema(data)"
+      v-for="(value, key) in rootChildren"
       :key="key"
       class="schema-item"
     >
       <div class="schema-item__top">
         <button
-          v-if="isExpandable(value)"
+          v-if="isExpandable(value, getNodePath(String(key)))"
           class="schema-item__toggle"
-          @click="toggleFold(String(key), value)"
+          @click="toggleFold(getNodePath(String(key)), value)"
         >
           <SvgCaretRightIcon
             class="size-4 transition-transform"
-            :class="{ 'rotate-90': !foldState[key] }"
+            :class="{ 'rotate-90': !foldState[getNodePath(String(key))] }"
           />
         </button>
 
@@ -152,63 +449,127 @@ const formatValue = (value: unknown) => {
               <span
                 class="meta-pill"
                 :class="
-                  isRequired(data, String(key), value)
+                  isRequired(resolvedRootSchema, String(key), value)
                     ? 'meta-pill--required'
                     : 'meta-pill--optional'
                 "
               >
-                {{ isRequired(data, String(key), value) ? '必填' : '可选' }}
+                {{ isRequired(resolvedRootSchema, String(key), value) ? '必填' : '可选' }}
               </span>
               <span class="meta-pill meta-pill--type">
-                {{ getTypeLabel(value) }}
+                {{ getTypeLabel(value, getNodePath(String(key))) }}
+              </span>
+              <span
+                v-if="getCompositionSummary(value)"
+                class="meta-pill meta-pill--composition"
+              >
+                {{ getCompositionSummary(value) }}
+              </span>
+              <span
+                v-if="isNullable(value, getNodePath(String(key)))"
+                class="meta-pill meta-pill--nullable"
+              >
+                可空
+              </span>
+              <span
+                v-if="isDeprecated(value, getNodePath(String(key)))"
+                class="meta-pill meta-pill--deprecated"
+              >
+                已弃用
+              </span>
+              <span
+                v-if="isReadOnly(value, getNodePath(String(key)))"
+                class="meta-pill meta-pill--access"
+              >
+                只读
+              </span>
+              <span
+                v-if="isWriteOnly(value, getNodePath(String(key)))"
+                class="meta-pill meta-pill--access"
+              >
+                只写
               </span>
               <ElTooltip
-                v-if="getExampleValue(value) !== undefined"
-                :content="formatValue(getExampleValue(value))"
+                v-if="getExampleValue(value, getNodePath(String(key))) !== undefined"
+                :content="formatValue(getExampleValue(value, getNodePath(String(key))))"
                 placement="top"
               >
                 <span class="meta-pill meta-pill--example">
-                  示例 {{ formatValue(getExampleValue(value)) }}
+                  示例 {{ formatValue(getExampleValue(value, getNodePath(String(key)))) }}
                 </span>
               </ElTooltip>
               <ElTooltip
-                v-if="getPatternValue(value)"
-                :content="getPatternValue(value)"
+                v-if="getPatternValue(value, getNodePath(String(key)))"
+                :content="getPatternValue(value, getNodePath(String(key)))"
                 placement="top"
               >
                 <span class="meta-pill meta-pill--pattern">
-                  正则 {{ getPatternValue(value) }}
+                  正则 {{ getPatternValue(value, getNodePath(String(key))) }}
                 </span>
               </ElTooltip>
               <span
-                v-if="getConstraints(value)"
+                v-if="getConstraints(value, getNodePath(String(key)))"
                 class="meta-pill meta-pill--constraint"
               >
-                约束 {{ getConstraints(value) }}
+                约束 {{ getConstraints(value, getNodePath(String(key))) }}
               </span>
             </div>
           </div>
 
           <div
-            v-if="value.description && !hasHtmlDescription(value.description)"
+            v-if="hasVariantSelector(value)"
+            class="schema-item__composition"
+          >
+            <span class="schema-item__composition-label">{{ getCompositionSummary(value) }}</span>
+            <div class="schema-item__composition-buttons">
+              <ElTooltip
+                v-for="(option, index) in getVariantOptions(value)"
+                :key="`${getNodePath(String(key))}-${index}`"
+                :content="getVariantOptionLabel(option, index)"
+                placement="top"
+              >
+                <ElButton
+                  size="small"
+                  class="variant-switch-button"
+                  :class="{
+                    'variant-switch-button--active':
+                      getSelectedVariantIndex(value, getNodePath(String(key))) ===
+                      index,
+                  }"
+                  @click="updateVariant(getNodePath(String(key)), index)"
+                >
+                  {{ index + 1 }}
+                </ElButton>
+              </ElTooltip>
+            </div>
+          </div>
+
+          <div
+            v-if="
+              getDescription(value, getNodePath(String(key))) &&
+              !hasHtmlDescription(getDescription(value, getNodePath(String(key))))
+            "
             class="schema-item__description"
           >
-            {{ value.description }}
+            {{ getDescription(value, getNodePath(String(key))) }}
           </div>
           <div
-            v-if="value.description && hasHtmlDescription(value.description)"
+            v-if="
+              getDescription(value, getNodePath(String(key))) &&
+              hasHtmlDescription(getDescription(value, getNodePath(String(key))))
+            "
             class="schema-item__description prose prose-sm max-w-none"
-            v-html="value.description"
+            v-html="getDescription(value, getNodePath(String(key)))"
           ></div>
 
           <div
-            v-if="getPropertyEnumItems(value).length > 0"
+            v-if="getPropertyEnumItems(value, getNodePath(String(key))).length > 0"
             class="schema-item__enum"
           >
             <span class="schema-item__enum-label">枚举</span>
             <div class="schema-item__enum-values">
               <span
-                v-for="item in getPropertyEnumItems(value)"
+                v-for="item in getPropertyEnumItems(value, getNodePath(String(key)))"
                 :key="item.value"
                 class="enum-pill"
               >
@@ -219,25 +580,32 @@ const formatValue = (value: unknown) => {
               </span>
             </div>
             <span
-              v-if="getEnumValueList(value)"
+              v-if="getEnumValueList(value, getNodePath(String(key)))"
               class="schema-item__enum-available"
             >
-              可用值: {{ getEnumValueList(value) }}
+              可用值: {{ getEnumValueList(value, getNodePath(String(key))) }}
             </span>
           </div>
 
           <div
-            v-if="isExpandable(value) && !foldState[key]"
+            v-if="
+              isExpandable(value, getNodePath(String(key))) &&
+              !foldState[getNodePath(String(key))]
+            "
             class="schema-item__children"
           >
-            <SchemaView :data="value" />
+            <SchemaView
+              :data="getDisplaySchema(value, getNodePath(String(key)))"
+              :mode="mode"
+              :path-prefix="getNodePath(String(key))"
+              @variant-change="handleChildVariantChange"
+            />
           </div>
         </div>
       </div>
     </div>
   </div>
 </template>
-
 <style scoped>
 .schema-root-pill,
 .schema-stack {
@@ -275,6 +643,30 @@ const formatValue = (value: unknown) => {
 
 .schema-stack {
   display: grid;
+}
+
+.schema-root-composition {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.composition-switch__label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+}
+
+.composition-switch__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+  margin-left: auto;
 }
 
 .schema-item {
@@ -368,6 +760,46 @@ const formatValue = (value: unknown) => {
   color: var(--el-text-color-secondary);
 }
 
+.schema-item__composition {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+
+.schema-item__composition-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+}
+
+.schema-item__composition-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
+.variant-switch-button {
+  min-width: 30px;
+  height: 24px;
+  padding: 0 8px;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--doc-chip-radius);
+}
+
+.variant-switch-button--active {
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary-light-7);
+}
+
 .schema-item__children {
   padding-left: 14px;
   margin-top: 10px;
@@ -424,6 +856,30 @@ const formatValue = (value: unknown) => {
   color: #11605b;
   background: #e9fbf8;
   border-color: #9fd7cf;
+}
+
+.meta-pill--composition {
+  color: #14532d;
+  background: #ecfdf3;
+  border-color: #a7f3d0;
+}
+
+.meta-pill--nullable {
+  color: #1d4ed8;
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.meta-pill--deprecated {
+  color: #9a3412;
+  background: #fff7ed;
+  border-color: #fed7aa;
+}
+
+.meta-pill--access {
+  color: #7c3aed;
+  background: #f5f3ff;
+  border-color: #ddd6fe;
 }
 
 .enum-pill {
@@ -555,3 +1011,7 @@ const formatValue = (value: unknown) => {
   color: #d4e1f5;
 }
 </style>
+
+
+
+

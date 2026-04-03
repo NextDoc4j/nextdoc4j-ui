@@ -27,7 +27,14 @@ interface DocumentExpose {
   getDebugPayload?: () => {
     info?: ApiInfo;
     requestBodyType?: string;
+    requestBodyVariantState?: Record<string, number>;
   };
+}
+
+interface DebugTriggerPayload {
+  info: ApiInfo;
+  requestBodyType?: string;
+  requestBodyVariantState?: Record<string, number>;
 }
 
 const activeView = ref<'debug' | 'detail'>('detail');
@@ -37,13 +44,18 @@ const parameters = ref<any[]>([]);
 const responses = ref<Record<string, any>>({});
 const requestBody = ref();
 const requestBodyType = ref('');
+const requestBodyVariantState = ref<Record<string, number>>({});
 const security = ref();
 const info = ref<ApiInfo | null>(null);
 
 const documentRef = shallowRef<DocumentExpose | null>(null);
 const { isDark } = usePreferences();
 
-const syncDebugState = (payload?: ApiInfo) => {
+const syncDebugState = (
+  payload?: ApiInfo,
+  selectedRequestBodyType?: string,
+  selectedRequestBodyVariantState?: Record<string, number>,
+) => {
   const detailPayload = documentRef.value?.getDebugPayload?.();
   const currentInfo = payload || detailPayload?.info;
 
@@ -58,15 +70,24 @@ const syncDebugState = (payload?: ApiInfo) => {
   responses.value = currentInfo.responses ?? {};
   requestBody.value = currentInfo.requestBody;
   security.value = currentInfo.security;
-  requestBodyType.value = detailPayload?.requestBodyType ?? '';
+  requestBodyType.value =
+    selectedRequestBodyType ?? detailPayload?.requestBodyType ?? '';
+  requestBodyVariantState.value = {
+    ...(selectedRequestBodyVariantState ??
+      detailPayload?.requestBodyVariantState ??
+      {}),
+  };
   return true;
 };
 
-const handleTest = (data: ApiInfo) => {
-  syncDebugState(data);
+const handleTest = (payload: DebugTriggerPayload) => {
+  syncDebugState(
+    payload.info,
+    payload.requestBodyType,
+    payload.requestBodyVariantState,
+  );
   activeView.value = 'debug';
 };
-
 const handleClose = () => {
   activeView.value = 'detail';
 };
@@ -130,6 +151,7 @@ const debugReady = computed(() =>
               :request-body="requestBody"
               :security="security"
               :request-body-type="requestBodyType"
+              :request-body-variant-state="requestBodyVariantState"
               @cancel="handleClose"
             />
             <div
@@ -278,3 +300,8 @@ const debugReady = computed(() =>
   border-radius: var(--doc-radius-xl);
 }
 </style>
+
+
+
+
+

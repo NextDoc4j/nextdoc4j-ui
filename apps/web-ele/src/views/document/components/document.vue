@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ApiInfo, Schema, SecuritySchemeObject } from '#/typings/openApi';
+import type { ApiInfo, SecuritySchemeObject } from '#/typings/openApi';
 import type { SecurityMetadata } from '#/utils/securityexpand';
 
 import { computed, onBeforeMount, ref, watch } from 'vue';
@@ -14,8 +14,6 @@ import {
   ElCollapse,
   ElCollapseItem,
   ElMessage,
-  ElRadioButton,
-  ElRadioGroup,
   ElTag,
   ElTooltip,
 } from 'element-plus';
@@ -24,7 +22,11 @@ import JsonViewer from '#/components/json-viewer/index.vue';
 import SchemaView from '#/components/schema-view.vue';
 import { methodType } from '#/constants/methods';
 import { useApiStore } from '#/store';
-import { resolveSchema } from '#/utils/schema';
+import {
+  adaptSchemaForView,
+  hasRenderableSchema,
+  parseSchemaRefName,
+} from '#/utils/schema';
 import { parseSecurityMetadata } from '#/utils/securityexpand';
 
 import ParameterView from './parameter-view.vue';
@@ -40,6 +42,7 @@ interface AuthMethodItem {
 interface DebugPayload {
   info: ApiInfo;
   requestBodyType: string;
+  requestBodyVariantState: Record<string, number>;
 }
 
 defineOptions({
@@ -51,7 +54,7 @@ const props = defineProps<{
 }>();
 
 const emits = defineEmits<{
-  test: [data: ApiInfo];
+  test: [data: DebugPayload];
 }>();
 
 const { isDark } = usePreferences();
@@ -62,6 +65,7 @@ const baseUrl = ref('');
 const apiInfo = ref({} as ApiInfo);
 const activeResponseCode = ref('');
 const requestBodyType = ref('');
+const requestBodyVariantState = ref<Record<string, number>>({});
 const requestExampleOpen = ref(false);
 const responseExampleOpen = ref<Record<string, boolean>>({});
 
@@ -186,81 +190,30 @@ const showSecurityPanel = computed(() => {
   return hasAuthMethods || hasPermissionGroups || hasRoleGroups;
 });
 
-const hasRenderableSchema = (schema: any) => {
-  if (!schema) return false;
-  return Boolean(
-    schema.properties ||
-      schema.$ref ||
-      schema.items ||
-      (Array.isArray(schema.oneOf) && schema.oneOf.length > 0) ||
-      (Array.isArray(schema.anyOf) && schema.anyOf.length > 0) ||
-      (Array.isArray(schema.allOf) && schema.allOf.length > 0),
-  );
+const toSchemaTitle = (schema: any, fallback: string) => {
+  return schema?.title || parseSchemaRefName(schema?.$ref) || fallback;
 };
 
-const prepareSchema = (schema: any): any => {
-  if (!schema) return null;
-
-  const resolved = schema.$ref ? resolveSchema(schema) : schema;
-  if (!resolved) {
-    return null;
+const buildRequestBodyVariantKey = (schema: any, index: number) => {
+  const refName = parseSchemaRefName(schema?.$ref);
+  if (refName) {
+    return `ref:${index}:${refName}`;
   }
-
-  if (Array.isArray(resolved.oneOf) && resolved.oneOf.length > 0) {
-    return {
-      ...resolved,
-      oneOf: resolved.oneOf.map((item: Schema) => prepareSchema(item)),
-    };
+  if (schema?.title) {
+    return `title:${index}:${schema.title}`;
   }
+  return `index:${index}`;
+};
 
-  if (Array.isArray(resolved.allOf) && resolved.allOf.length > 0) {
-    const mergedProperties = { ...resolved.properties };
-    const required = new Set<string>(resolved.required || []);
+const resolveRequestBodyVariantValue = (item: any) => {
+  return item?.variantKey || item?.title || '';
+};
 
-    resolved.allOf.forEach((item: Schema) => {
-      const current = prepareSchema(item);
-      if (current?.properties) {
-        Object.assign(mergedProperties, current.properties);
-      }
-      (current?.required || []).forEach((field: string) => required.add(field));
-    });
-
-    const normalized = {
-      ...resolved,
-      allOf: undefined,
-      properties: mergedProperties,
-      required: [...required],
-      type: resolved.type || 'object',
-    };
-
-    return prepareSchema(normalized);
+const isMatchedRequestBodyVariant = (item: any, selected: string) => {
+  if (!selected || !item) {
+    return false;
   }
-
-  if (
-    (resolved.type === 'object' || resolved.properties) &&
-    resolved.properties
-  ) {
-    return {
-      ...resolved,
-      properties: Object.fromEntries(
-        Object.entries(resolved.properties).map(([key, value]) => [
-          key,
-          prepareSchema(value),
-        ]),
-      ),
-      required: resolved.required || [],
-      type: 'object',
-    };
-  }
-
-  if (resolved.type === 'array' && resolved.items) {
-    return {
-      ...resolved,
-      items: prepareSchema(resolved.items),
-    };
-  }
-
-  return resolved;
+  return item?.variantKey === selected || item?.title === selected;
 };
 
 const pickRequestBodySchema = () => {
@@ -293,24 +246,28 @@ const requestBody = computed(() => {
 
   if (schema.oneOf) {
     return schema.oneOf
-      .map((item: Schema) => {
-        const resolved = prepareSchema(item);
-        if (!resolved) return null;
+      .map((item: any, index: number) => {
+        const resolved = adaptSchemaForView(item, { mode: 'request' });
+        if (!resolved || !hasRenderableSchema(resolved)) return null;
 
         return {
           ...resolved,
-          title: resolved.title || item.$ref?.split('/').pop() || '请求体',
+          title: toSchemaTitle(
+            resolved,
+            toSchemaTitle(item, `请求体方案 ${index + 1}`),
+          ),
+          variantKey: buildRequestBodyVariantKey(item, index),
         };
       })
       .filter(Boolean);
   }
 
-  const resolved = prepareSchema(schema);
-  if (!resolved) return null;
+  const resolved = adaptSchemaForView(schema, { mode: 'request' });
+  if (!resolved || !hasRenderableSchema(resolved)) return null;
 
   return {
     ...resolved,
-    title: resolved.title || schema.$ref?.split('/').pop() || '请求体',
+    title: toSchemaTitle(resolved, toSchemaTitle(schema, '请求体')),
   };
 });
 
@@ -321,12 +278,13 @@ const requestBodyContentType = computed(() => {
 watch(
   requestBody,
   (newVal) => {
+    requestBodyVariantState.value = {};
     if (Array.isArray(newVal) && newVal.length > 0) {
-      const hasCurrent = newVal.some(
-        (item) => item.title === requestBodyType.value,
+      const hasCurrent = newVal.some((item) =>
+        isMatchedRequestBodyVariant(item, requestBodyType.value),
       );
       if (!hasCurrent) {
-        requestBodyType.value = newVal[0].title;
+        requestBodyType.value = resolveRequestBodyVariantValue(newVal[0]);
       }
       return;
     }
@@ -336,12 +294,27 @@ watch(
   { immediate: true },
 );
 
+watch(requestBodyType, () => {
+  requestBodyVariantState.value = {};
+});
+
+const handleRequestSchemaVariantChange = (payload: {
+  index: number;
+  path: string;
+}) => {
+  requestBodyVariantState.value = {
+    ...requestBodyVariantState.value,
+    [payload.path]: payload.index,
+  };
+};
 const currentRequestBody = computed(() => {
   if (!requestBody.value) return null;
 
   if (Array.isArray(requestBody.value)) {
     return (
-      requestBody.value.find((item) => item.title === requestBodyType.value) ||
+      requestBody.value.find((item) =>
+        isMatchedRequestBodyVariant(item, requestBodyType.value),
+      ) ||
       requestBody.value[0] ||
       null
     );
@@ -394,11 +367,15 @@ const responsePanels = computed(() => {
   return responseCodes.value.map((code) => {
     const response = apiInfo.value?.responses?.[code];
     const schema = pickContentSchema(response?.content) || response?.schema;
+    const resolved =
+      schema && hasRenderableSchema(schema)
+        ? adaptSchemaForView(schema, { mode: 'response' })
+        : null;
     return {
       code,
       contentType: pickContentType(response?.content),
       response,
-      schema: prepareSchema(schema),
+      schema: resolved && hasRenderableSchema(resolved) ? resolved : null,
     };
   });
 });
@@ -430,7 +407,7 @@ const handleTest = () => {
     return;
   }
   if (apiInfo.value) {
-    emits('test', apiInfo.value);
+    emits('test', getDebugPayload());
   }
 };
 
@@ -442,6 +419,7 @@ const getDebugPayload = (): DebugPayload => {
   return {
     info: apiInfo.value,
     requestBodyType: requestBodyType.value,
+    requestBodyVariantState: { ...requestBodyVariantState.value },
   };
 };
 
@@ -585,21 +563,24 @@ defineExpose({
               </div>
 
               <div class="sub-panel__actions">
-                <ElRadioGroup
+                <div
                   v-if="Array.isArray(requestBody)"
-                  v-model="requestBodyType"
-                  size="small"
                   class="body-type-switch"
                 >
-                  <ElRadioButton
+                  <ElButton
                     v-for="item in requestBody"
-                    :key="item.title"
-                    :label="item.title"
-                    :value="item.title"
+                    :key="item.variantKey || item.title"
+                    size="small"
+                    class="body-type-switch__button"
+                    :class="{
+                      'body-type-switch__button--active':
+                        isMatchedRequestBodyVariant(item, requestBodyType),
+                    }"
+                    @click="requestBodyType = resolveRequestBodyVariantValue(item)"
                   >
                     {{ item.title }}
-                  </ElRadioButton>
-                </ElRadioGroup>
+                  </ElButton>
+                </div>
 
                 <ElButton
                   size="small"
@@ -622,6 +603,8 @@ defineExpose({
                 <SchemaView
                   v-if="requestPreviewSchema"
                   :data="requestPreviewSchema"
+                  mode="request"
+                  @variant-change="handleRequestSchemaVariantChange"
                 />
               </div>
 
@@ -630,9 +613,10 @@ defineExpose({
                 class="schema-layout__aside"
               >
                 <JsonViewer
-                  class="json-panel app-json-schema-viewer"
-                  :schema="requestPreviewSchema"
-                />
+                    class="json-panel app-json-schema-viewer"
+                    :schema="requestPreviewSchema"
+                    mode="request"
+                  />
               </div>
             </div>
           </article>
@@ -694,7 +678,7 @@ defineExpose({
                 }"
               >
                 <div class="schema-layout__main">
-                  <SchemaView v-if="panel.schema" :data="panel.schema" />
+                  <SchemaView v-if="panel.schema" :data="panel.schema" mode="response" />
                   <div v-else class="empty-hint">暂无可展示的响应结构</div>
                 </div>
 
@@ -705,6 +689,7 @@ defineExpose({
                   <JsonViewer
                     class="json-panel app-json-schema-viewer"
                     :schema="panel.schema"
+                    mode="response"
                   />
                 </div>
               </div>
@@ -1012,9 +997,36 @@ defineExpose({
 }
 
 .body-type-switch {
-  :deep(.el-radio-button__inner) {
-    border-radius: var(--doc-chip-radius);
-  }
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.body-type-switch__button {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  background: color-mix(
+    in srgb,
+    var(--doc-panel-bg) 90%,
+    var(--el-fill-color-light) 10%
+  );
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--doc-chip-radius);
+  transition: all 0.2s ease;
+}
+
+.body-type-switch__button:hover {
+  color: var(--el-text-color-primary);
+  border-color: color-mix(in srgb, var(--el-color-primary) 35%, transparent);
+}
+
+.body-type-switch__button--active {
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary-light-7);
 }
 
 .example-toggle-button {
@@ -1244,3 +1256,9 @@ defineExpose({
   }
 }
 </style>
+
+
+
+
+
+

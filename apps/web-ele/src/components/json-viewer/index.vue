@@ -5,7 +5,7 @@ import { preferences } from '@vben/preferences';
 
 import { usePreferredDark } from '@vueuse/core';
 
-import { generateExample } from '#/utils/schema';
+import { generateExample, type SchemaViewMode } from '#/utils/schema';
 
 import JsonNode from './json-node.vue';
 
@@ -15,6 +15,7 @@ const props = withDefaults(
     defaultExpanded?: boolean;
     enableChunkedRender?: boolean;
     initialRenderCount?: number;
+    mode?: SchemaViewMode;
     renderChunkSize?: number;
     schema?: any;
     value?: unknown;
@@ -24,6 +25,7 @@ const props = withDefaults(
     defaultExpanded: true,
     enableChunkedRender: false,
     initialRenderCount: 120,
+    mode: 'entity',
     renderChunkSize: 120,
     schema: undefined,
     value: undefined,
@@ -58,7 +60,7 @@ const parsedResult = computed<{ data: unknown; error: null | string }>(() => {
 
   try {
     return {
-      data: generateExample(props.schema),
+      data: generateExample(props.schema, { mode: props.mode }),
       error: null,
     };
   } catch (error) {
@@ -176,3 +178,4 @@ defineExpose({
   animation: none !important;
 }
 </style>
+

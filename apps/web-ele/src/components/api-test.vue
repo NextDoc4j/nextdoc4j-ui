@@ -50,7 +50,7 @@ import {
   useTokenStore,
 } from '#/store';
 import { useAggregationStore } from '#/store/aggregation';
-import { resolveSchema } from '#/utils/schema';
+import { adaptSchemaForView, hasRenderableSchema } from '#/utils/schema';
 
 import bodyParams from './body-params.vue';
 import paramsTable from './params-table.vue';
@@ -106,12 +106,23 @@ interface DebugInlineTab {
   label: string;
 }
 
+interface DebugBodyTabExpose {
+  bodyType?: string;
+  fileList?: any[];
+  getExample?: () => string;
+  setEditorValue?: (value: string) => Promise<void> | void;
+  syncByRequestBodyType?: (options?: {
+    forceBodyType?: boolean;
+    preserveValue?: boolean;
+  }) => Promise<void> | void;
+}
 const props = defineProps<{
   method: string;
   parameters: ParameterObject[];
   path: string;
   requestBody: any;
   requestBodyType: string;
+  requestBodyVariantState?: Record<string, number>;
   responses?: Record<string, ResponseObject>;
   security: any;
 }>();
@@ -121,7 +132,7 @@ defineEmits(['cancel']);
 const { apiURL } = useAppConfig(import.meta.env, import.meta.env.PROD);
 const baseUrl = ref();
 const activeTab = ref(props.requestBody ? 'Body' : 'Params');
-const bodyTabRef = ref();
+const bodyTabRef = ref<DebugBodyTabExpose | null>(null);
 const responseTab = ref('RealtimeResponse');
 const realtimeResponseJsonRef = ref<InstanceType<typeof JsonViewer> | null>(
   null,
@@ -188,6 +199,21 @@ const cloneTableParams = (
   }));
 };
 
+const DEBUG_BODY_TYPES: DebugBodyType[] = [
+  'binary',
+  'form-data',
+  'json',
+  'none',
+  'raw',
+  'x-www-form-urlencoded',
+  'xml',
+];
+
+const toDebugBodyType = (value: unknown): DebugBodyType | undefined => {
+  return DEBUG_BODY_TYPES.includes(value as DebugBodyType)
+    ? (value as DebugBodyType)
+    : undefined;
+};
 const resetResponseState = () => {
   responseStatus.value = { code: 0, text: '-', type: 'default' };
   responseTime.value = 0;
@@ -237,12 +263,13 @@ const applySnapshot = async (
   formDataParams.value = cloneTableParams(snapshot.formDataParams);
   urlEncodedParams.value = cloneTableParams(snapshot.urlEncodedParams);
 
-  if (bodyTabRef.value && snapshot.bodyType) {
-    bodyTabRef.value.bodyType = snapshot.bodyType;
+  const snapshotBodyType = toDebugBodyType(snapshot.bodyType);
+  if (bodyTabRef.value && snapshotBodyType) {
+    bodyTabRef.value.bodyType = snapshotBodyType;
     await nextTick();
     if (
       snapshot.bodyContent &&
-      ['json', 'raw', 'xml'].includes(snapshot.bodyType)
+      ['json', 'raw', 'xml'].includes(snapshotBodyType)
     ) {
       await bodyTabRef.value.setEditorValue?.(snapshot.bodyContent);
     }
@@ -285,6 +312,18 @@ const restoreDefaultRequestState = async () => {
   resetResponseState();
 };
 
+const syncSelectedRequestBodyType = async (
+  options: { forceBodyType?: boolean; preserveValue?: boolean } = {},
+) => {
+  if (!props.requestBody) {
+    return;
+  }
+  await nextTick();
+  await bodyTabRef.value?.syncByRequestBodyType?.({
+    forceBodyType: options.forceBodyType ?? true,
+    preserveValue: options.preserveValue ?? true,
+  });
+};
 // 监听 props 变化，同步接口信息
 watch(
   () => props.path,
@@ -398,18 +437,6 @@ const responseHeaders = ref<
   Array<{ enabled: boolean; name: string; value: string }>
 >([]);
 
-const hasRenderableSchema = (schema: any) => {
-  if (!schema) return false;
-  return Boolean(
-    schema.properties ||
-      schema.$ref ||
-      schema.items ||
-      (Array.isArray(schema.oneOf) && schema.oneOf.length > 0) ||
-      (Array.isArray(schema.anyOf) && schema.anyOf.length > 0) ||
-      (Array.isArray(schema.allOf) && schema.allOf.length > 0),
-  );
-};
-
 const pickContentSchema = (
   content?: Record<string, { schema?: SchemaObject }>,
 ) => {
@@ -421,71 +448,6 @@ const pickContentSchema = (
     Object.values(content).find((item) => Boolean(item?.schema))?.schema ||
     null
   );
-};
-
-const prepareResponseSchema = (schema: any): any => {
-  if (!schema) return null;
-
-  const resolved = schema.$ref ? resolveSchema(schema) : schema;
-  if (!resolved) {
-    return null;
-  }
-
-  if (Array.isArray(resolved.oneOf) && resolved.oneOf.length > 0) {
-    return {
-      ...resolved,
-      oneOf: resolved.oneOf
-        .map((item: SchemaObject) => prepareResponseSchema(item))
-        .filter(Boolean),
-    };
-  }
-
-  if (Array.isArray(resolved.allOf) && resolved.allOf.length > 0) {
-    const mergedProperties = { ...resolved.properties };
-    const required = new Set<string>(resolved.required || []);
-
-    resolved.allOf.forEach((item: SchemaObject) => {
-      const current = prepareResponseSchema(item);
-      if (current?.properties) {
-        Object.assign(mergedProperties, current.properties);
-      }
-      (current?.required || []).forEach((field: string) => required.add(field));
-    });
-
-    return prepareResponseSchema({
-      ...resolved,
-      allOf: undefined,
-      properties: mergedProperties,
-      required: [...required],
-      type: resolved.type || 'object',
-    });
-  }
-
-  if (
-    (resolved.type === 'object' || resolved.properties) &&
-    resolved.properties
-  ) {
-    return {
-      ...resolved,
-      properties: Object.fromEntries(
-        Object.entries(resolved.properties).map(([key, value]) => [
-          key,
-          prepareResponseSchema(value),
-        ]),
-      ),
-      required: resolved.required || [],
-      type: 'object',
-    };
-  }
-
-  if (resolved.type === 'array' && resolved.items) {
-    return {
-      ...resolved,
-      items: prepareResponseSchema(resolved.items),
-    };
-  }
-
-  return resolved;
 };
 
 const findMatchedResponse = (statusCode: number) => {
@@ -531,10 +493,11 @@ const responseSchemaForViewer = computed(() => {
   const matchedResponse = findMatchedResponse(responseStatus.value.code);
   const schema =
     pickContentSchema(matchedResponse?.content) || matchedResponse?.schema;
-  if (!hasRenderableSchema(schema)) {
+  if (!schema || !hasRenderableSchema(schema)) {
     return null;
   }
-  return prepareResponseSchema(schema);
+  const resolved = adaptSchemaForView(schema, { mode: 'response' });
+  return resolved && hasRenderableSchema(resolved) ? resolved : null;
 });
 
 const activeGlobalQueryCount = computed(() => {
@@ -1709,10 +1672,15 @@ async function sendRequest() {
     const formData = new FormData();
     const searchParams = new URLSearchParams();
     let bodyData = '';
-    switch (bodyTabRef.value.bodyType) {
+    const currentBodyType = bodyTabRef.value?.bodyType as
+      | DebugBodyType
+      | undefined;
+    switch (currentBodyType) {
       case 'binary': {
-        const binaryData = bodyTabRef.value.fileList[0];
-        formData.append('file', binaryData);
+        const binaryData = bodyTabRef.value?.fileList?.[0];
+        if (binaryData) {
+          formData.append('file', binaryData);
+        }
         requestHeaders.append('Content-Type', 'multipart/form-data');
         break;
       }
@@ -1754,14 +1722,14 @@ async function sendRequest() {
       }
       case 'json': {
         if (props.requestBody) {
-          bodyData = bodyTabRef.value.getExample() ?? '';
+          bodyData = bodyTabRef.value?.getExample?.() ?? '';
         }
         requestHeaders.append('Content-Type', 'application/json');
         break;
       }
       case 'raw': {
         if (props.requestBody) {
-          bodyData = bodyTabRef.value.getExample() ?? '';
+          bodyData = bodyTabRef.value?.getExample?.() ?? '';
         }
         requestHeaders.append('Content-Type', 'text/plain');
         break;
@@ -1780,7 +1748,7 @@ async function sendRequest() {
       }
       case 'xml': {
         if (props.requestBody) {
-          bodyData = bodyTabRef.value.getExample() ?? '';
+          bodyData = bodyTabRef.value?.getExample?.() ?? '';
         }
         requestHeaders.append('Content-Type', 'text/xml');
         break;
@@ -1961,12 +1929,57 @@ onMounted(async () => {
     }
   }
 
+  await syncSelectedRequestBodyType({
+    forceBodyType: true,
+    preserveValue: true,
+  });
+
   await nextTick();
   syncTabOverflowObserver();
   scheduleTabOverflowUpdate();
   setupPathTableResizeObserver();
 });
 
+watch(
+  () => props.requestBodyType,
+  async (newType, oldType) => {
+    if (newType === oldType) {
+      return;
+    }
+    await syncSelectedRequestBodyType({
+      forceBodyType: true,
+      preserveValue: true,
+    });
+  },
+);
+
+watch(
+  () => props.requestBody,
+  async (nextBody, prevBody) => {
+    if (nextBody === prevBody) {
+      return;
+    }
+    await syncSelectedRequestBodyType({
+      forceBodyType: true,
+      preserveValue: false,
+    });
+  },
+  { deep: true },
+);
+
+watch(
+  () => props.requestBodyVariantState,
+  async (nextState, prevState) => {
+    if (nextState === prevState) {
+      return;
+    }
+    await syncSelectedRequestBodyType({
+      forceBodyType: true,
+      preserveValue: false,
+    });
+  },
+  { deep: true },
+);
 watch(
   () => apiTestCacheStore.debugCacheEnabled,
   (enabled) => {
@@ -1993,6 +2006,7 @@ watch(
     urlEncodedParams,
     () => bodyTabRef.value?.bodyType,
     () => props.requestBodyType,
+    () => props.requestBodyVariantState,
   ],
   () => {
     schedulePersistCache();
@@ -2232,7 +2246,8 @@ onBeforeUnmount(() => {
                   :request-body="requestBody"
                   :form-data-params="formDataParams"
                   :url-encoded-params="urlEncodedParams"
-                  :request-body-type="requestBodyType"
+                  :request-body-type="props.requestBodyType"
+                  :request-body-variant-state="props.requestBodyVariantState || {}"
                   @body-change="schedulePersistCache"
                 />
 
@@ -3400,3 +3415,8 @@ onBeforeUnmount(() => {
   }
 }
 </style>
+
+
+
+
+
