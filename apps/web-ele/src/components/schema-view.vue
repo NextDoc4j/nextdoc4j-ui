@@ -330,14 +330,6 @@ const hasVariantSelector = (item: any) => {
   return getCompositionItems(item, keyword).length > 1;
 };
 
-const getCompositionSummary = (item: any) => {
-  const keyword = getCompositionKeyword(item);
-  if (!keyword) {
-    return '';
-  }
-  const count = getCompositionItems(item, keyword).length;
-  return count > 0 ? `${keyword} ${count}` : keyword;
-};
 
 const getVariantOptions = (item: any) => {
   const keyword = getCompositionKeyword(item);
@@ -377,15 +369,35 @@ const showRootPrimitivePill = computed(() => {
   }
   return Object.keys(rootChildren.value).length <= 0;
 });
+
+const rootHasVariantSelector = computed(() => {
+  return hasVariantSelector(props.data);
+});
+
+const showRootHeader = computed(() => {
+  return (
+    showRootArrayPill.value || showRootPrimitivePill.value || rootHasVariantSelector.value
+  );
+});
+
+const showSchemaStack = computed(() => {
+  return !showRootArrayPill.value && !showRootPrimitivePill.value;
+});
 </script>
 
 <template>
   <div
-    v-if="hasVariantSelector(data)"
-    class="schema-root-composition"
+    v-if="showRootHeader"
+    class="schema-root-pill"
   >
-    <span class="composition-switch__label">{{ getCompositionSummary(data) }}</span>
-    <div class="composition-switch__buttons">
+    <span class="schema-root-pill__title">
+      {{ showRootArrayPill || showRootPrimitivePill ? '结构' : '根' }}
+    </span>
+    <span class="schema-root-pill__value">{{ getTypeLabel(resolvedRootSchema, rootPath) }}</span>
+    <div
+      v-if="rootHasVariantSelector"
+      class="composition-switch__buttons"
+    >
       <ElTooltip
         v-for="(option, index) in getVariantOptions(data)"
         :key="`${rootPath}-${index}`"
@@ -407,22 +419,7 @@ const showRootPrimitivePill = computed(() => {
     </div>
   </div>
 
-  <div
-    v-else-if="getCompositionSummary(data)"
-    class="schema-root-composition"
-  >
-    <span class="meta-pill meta-pill--composition">{{ getCompositionSummary(data) }}</span>
-  </div>
-
-  <div
-    v-if="showRootArrayPill || showRootPrimitivePill"
-    class="schema-root-pill"
-  >
-    <span class="schema-root-pill__title">结构</span>
-    <span class="schema-root-pill__value">{{ getTypeLabel(resolvedRootSchema, rootPath) }}</span>
-  </div>
-
-  <div v-else class="schema-stack">
+  <div v-if="showSchemaStack" class="schema-stack">
     <div
       v-for="(value, key) in rootChildren"
       :key="key"
@@ -458,12 +455,6 @@ const showRootPrimitivePill = computed(() => {
               </span>
               <span class="meta-pill meta-pill--type">
                 {{ getTypeLabel(value, getNodePath(String(key))) }}
-              </span>
-              <span
-                v-if="getCompositionSummary(value)"
-                class="meta-pill meta-pill--composition"
-              >
-                {{ getCompositionSummary(value) }}
               </span>
               <span
                 v-if="isNullable(value, getNodePath(String(key)))"
@@ -514,35 +505,32 @@ const showRootPrimitivePill = computed(() => {
                 约束 {{ getConstraints(value, getNodePath(String(key))) }}
               </span>
             </div>
+            <div
+                v-if="hasVariantSelector(value)"
+                class="schema-item__meta-variant"
+              >
+                <ElTooltip
+                  v-for="(option, index) in getVariantOptions(value)"
+                  :key="`${getNodePath(String(key))}-${index}`"
+                  :content="getVariantOptionLabel(option, index)"
+                  placement="top"
+                >
+                  <ElButton
+                    size="small"
+                    class="variant-switch-button"
+                    :class="{
+                      'variant-switch-button--active':
+                        getSelectedVariantIndex(value, getNodePath(String(key))) ===
+                        index,
+                    }"
+                    @click="updateVariant(getNodePath(String(key)), index)"
+                  >
+                    {{ index + 1 }}
+                  </ElButton>
+                </ElTooltip>
+              </div>
           </div>
 
-          <div
-            v-if="hasVariantSelector(value)"
-            class="schema-item__composition"
-          >
-            <span class="schema-item__composition-label">{{ getCompositionSummary(value) }}</span>
-            <div class="schema-item__composition-buttons">
-              <ElTooltip
-                v-for="(option, index) in getVariantOptions(value)"
-                :key="`${getNodePath(String(key))}-${index}`"
-                :content="getVariantOptionLabel(option, index)"
-                placement="top"
-              >
-                <ElButton
-                  size="small"
-                  class="variant-switch-button"
-                  :class="{
-                    'variant-switch-button--active':
-                      getSelectedVariantIndex(value, getNodePath(String(key))) ===
-                      index,
-                  }"
-                  @click="updateVariant(getNodePath(String(key)), index)"
-                >
-                  {{ index + 1 }}
-                </ElButton>
-              </ElTooltip>
-            </div>
-          </div>
 
           <div
             v-if="
@@ -614,12 +602,15 @@ const showRootPrimitivePill = computed(() => {
 }
 
 .schema-root-pill {
-  display: inline-flex;
+  display: flex;
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
+  width: 100%;
+  min-width: 0;
   min-height: 34px;
   padding: 0 11px;
+  margin-bottom: 8px;
   color: #175cd3;
   background: #e8f1ff;
   border: 1px solid #b7cdfb;
@@ -645,20 +636,7 @@ const showRootPrimitivePill = computed(() => {
   display: grid;
 }
 
-.schema-root-composition {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 10px;
-}
 
-.composition-switch__label {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--el-text-color-secondary);
-}
 
 .composition-switch__buttons {
   display: flex;
@@ -706,17 +684,18 @@ const showRootPrimitivePill = computed(() => {
 }
 
 .schema-item__name {
-  font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
+  font-family: 'HarmonyOS Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 900;
   color: var(--el-text-color-primary);
 }
 
 .schema-item__headline {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 6px 8px;
   align-items: center;
+  min-width: 0;
 }
 
 .schema-item__meta,
@@ -725,6 +704,19 @@ const showRootPrimitivePill = computed(() => {
   flex-wrap: wrap;
   gap: 4px;
   align-items: center;
+}
+
+.schema-item__meta {
+  min-width: 0;
+}
+
+.schema-item__meta-variant {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  justify-self: end;
+  justify-content: flex-end;
 }
 
 .schema-item__enum {
@@ -760,34 +752,14 @@ const showRootPrimitivePill = computed(() => {
   color: var(--el-text-color-secondary);
 }
 
-.schema-item__composition {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 8px;
-}
 
-.schema-item__composition-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--el-text-color-secondary);
-}
 
-.schema-item__composition-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-  justify-content: flex-end;
-  margin-left: auto;
-}
 
 .variant-switch-button {
-  min-width: 30px;
-  height: 24px;
-  padding: 0 8px;
+  min-width: 26px;
+  height: 22px;
+  padding: 0 7px;
+  font-size: 11px;
   color: var(--el-text-color-secondary);
   background: var(--el-fill-color-light);
   border: 1px solid var(--el-border-color-lighter);
@@ -1011,7 +983,4 @@ const showRootPrimitivePill = computed(() => {
   color: #d4e1f5;
 }
 </style>
-
-
-
 

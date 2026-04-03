@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 
 import { ElButton } from 'element-plus';
@@ -12,6 +12,7 @@ import { adaptSchemaForView, hasRenderableSchema } from '#/utils/schema';
 const route = useRoute();
 const apiStore = useApiStore();
 const exampleOpen = ref(false);
+const entityVariantState = ref<Record<string, number>>({});
 
 const entityName = computed(() => {
   const routeName = route.name;
@@ -64,15 +65,151 @@ const entitySchema = computed(() => {
   return adaptSchemaForView(entityInfo.value, { mode: 'entity' });
 });
 
+
+const mergeComposedSchema = (baseSchema: any, pickedSchema: any) => {
+  if (!pickedSchema || typeof pickedSchema !== 'object') {
+    return baseSchema;
+  }
+
+  const merged: any = {
+    ...baseSchema,
+    ...pickedSchema,
+  };
+
+  if (baseSchema?.properties || pickedSchema?.properties) {
+    merged.properties = {
+      ...(baseSchema?.properties || {}),
+      ...(pickedSchema?.properties || {}),
+    };
+  }
+
+  const required = [
+    ...(Array.isArray(baseSchema?.required) ? baseSchema.required : []),
+    ...(Array.isArray(pickedSchema?.required) ? pickedSchema.required : []),
+  ];
+  if (required.length > 0) {
+    merged.required = [...new Set(required)];
+  }
+
+  if (!merged.type && merged.properties) {
+    merged.type = 'object';
+  }
+
+  return merged;
+};
+
+const applyEntityVariantState = (
+  schema: any,
+  state: Record<string, number>,
+) => {
+  const pickVariantIndex = (path: string, options: any[]) => {
+    const selected = state[path];
+    if (!Array.isArray(options) || options.length <= 0) {
+      return 0;
+    }
+    if (
+      typeof selected !== 'number' ||
+      !Number.isInteger(selected) ||
+      selected < 0 ||
+      selected >= options.length
+    ) {
+      return 0;
+    }
+    return selected;
+  };
+
+  const visit = (node: any, path: string): any => {
+    if (node === null || node === undefined) {
+      return null;
+    }
+    if (typeof node !== 'object') {
+      return node;
+    }
+    if (Array.isArray(node)) {
+      return node.map((item, index) => visit(item, `${path}.${index}`));
+    }
+
+    let current: any = { ...node };
+
+    if (Array.isArray(current.oneOf) && current.oneOf.length > 0) {
+      const index = pickVariantIndex(path, current.oneOf);
+      const base = { ...current };
+      delete base.oneOf;
+      delete base.anyOf;
+      delete base.allOf;
+      delete base['x-nextdoc4j-allOfMerged'];
+      const picked = current.oneOf[index] ?? current.oneOf[0];
+      current = mergeComposedSchema(base, picked);
+    } else if (Array.isArray(current.anyOf) && current.anyOf.length > 0) {
+      const index = pickVariantIndex(path, current.anyOf);
+      const base = { ...current };
+      delete base.oneOf;
+      delete base.anyOf;
+      delete base.allOf;
+      delete base['x-nextdoc4j-allOfMerged'];
+      const picked = current.anyOf[index] ?? current.anyOf[0];
+      current = mergeComposedSchema(base, picked);
+    } else if (Array.isArray(current.allOf) && current.allOf.length > 0) {
+      const mergedAllOf = current.allOf.reduce((acc: any, item: any) => {
+        return mergeComposedSchema(acc, visit(item, path));
+      }, {});
+      const base = { ...current };
+      delete base.allOf;
+      delete base['x-nextdoc4j-allOfMerged'];
+      current = mergeComposedSchema(base, mergedAllOf);
+    }
+
+    if (current.properties && typeof current.properties === 'object') {
+      const nextProperties: Record<string, any> = {};
+      Object.entries(current.properties).forEach(([key, value]) => {
+        nextProperties[key] = visit(value, `${path}.${key}`);
+      });
+      current.properties = nextProperties;
+    }
+
+    if (current.items) {
+      current.items = visit(current.items, path);
+    }
+
+    if (Array.isArray(current.prefixItems)) {
+      current.prefixItems = current.prefixItems.map((item: any, index: number) =>
+        visit(item, `${path}.${index}`),
+      );
+    }
+
+    return current;
+  };
+
+  if (!schema || typeof schema !== 'object') {
+    return schema;
+  }
+
+  return visit(schema, '$');
+};
+
 const propertyCount = computed(() => {
   return Object.keys(entitySchema.value?.properties || {}).length;
 });
+
+watch(entityName, () => {
+  entityVariantState.value = {};
+});
+
+const handleEntitySchemaVariantChange = (payload: {
+  index: number;
+  path: string;
+}) => {
+  entityVariantState.value = {
+    ...entityVariantState.value,
+    [payload.path]: payload.index,
+  };
+};
 
 const schemaWithExamples = computed(() => {
   if (!entitySchema.value || !hasRenderableSchema(entitySchema.value)) {
     return null;
   }
-  return entitySchema.value;
+  return applyEntityVariantState(entitySchema.value, entityVariantState.value);
 });
 </script>
 
@@ -116,7 +253,7 @@ const schemaWithExamples = computed(() => {
         :class="{ 'schema-layout--open': exampleOpen && schemaWithExamples }"
       >
         <div class="schema-layout__main">
-          <SchemaView :data="entitySchema" mode="entity" />
+          <SchemaView :data="entitySchema" mode="entity" @variant-change="handleEntitySchemaVariantChange" />
         </div>
 
         <div

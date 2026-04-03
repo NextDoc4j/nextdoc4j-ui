@@ -68,6 +68,7 @@ const requestBodyType = ref('');
 const requestBodyVariantState = ref<Record<string, number>>({});
 const requestExampleOpen = ref(false);
 const responseExampleOpen = ref<Record<string, boolean>>({});
+const responseVariantState = ref<Record<string, Record<string, number>>>({});
 
 const displayTags = computed(() => {
   const tags = apiInfo.value?.tags?.filter(Boolean) ?? [];
@@ -323,11 +324,140 @@ const currentRequestBody = computed(() => {
   return requestBody.value;
 });
 
-const requestPreviewSchema = computed(() => {
+const applyRequestBodyVariantState = (
+  schema: any,
+  state: Record<string, number>,
+) => {
+  if (!schema || typeof schema !== 'object') {
+    return schema;
+  }
+
+  const pickVariantIndex = (path: string, options: any[]) => {
+    const selected = state[path];
+    if (!Array.isArray(options) || options.length <= 0) {
+      return 0;
+    }
+    if (
+      typeof selected !== 'number' ||
+      !Number.isInteger(selected) ||
+      selected < 0 ||
+      selected >= options.length
+    ) {
+      return 0;
+    }
+    return selected;
+  };
+
+  const mergeComposedSchema = (baseSchema: any, pickedSchema: any) => {
+    if (!pickedSchema || typeof pickedSchema !== 'object') {
+      return baseSchema;
+    }
+
+    const merged: any = {
+      ...baseSchema,
+      ...pickedSchema,
+    };
+
+    if (baseSchema?.properties || pickedSchema?.properties) {
+      merged.properties = {
+        ...(baseSchema?.properties || {}),
+        ...(pickedSchema?.properties || {}),
+      };
+    }
+
+    const required = [
+      ...(Array.isArray(baseSchema?.required) ? baseSchema.required : []),
+      ...(Array.isArray(pickedSchema?.required) ? pickedSchema.required : []),
+    ];
+    if (required.length > 0) {
+      merged.required = [...new Set(required)];
+    }
+
+    if (!merged.type && merged.properties) {
+      merged.type = 'object';
+    }
+
+    return merged;
+  };
+
+  const visit = (node: any, path: string): any => {
+    if (node === null || node === undefined) {
+      return null;
+    }
+    if (typeof node !== 'object') {
+      return node;
+    }
+    if (Array.isArray(node)) {
+      return node.map((item, index) => visit(item, `${path}.${index}`));
+    }
+
+    let current: any = { ...node };
+
+    if (Array.isArray(current.oneOf) && current.oneOf.length > 0) {
+      const index = pickVariantIndex(path, current.oneOf);
+      const base = { ...current };
+      delete base.oneOf;
+      delete base.anyOf;
+      delete base.allOf;
+      delete base['x-nextdoc4j-allOfMerged'];
+      const picked = current.oneOf[index] ?? current.oneOf[0];
+      current = mergeComposedSchema(base, picked);
+    } else if (Array.isArray(current.anyOf) && current.anyOf.length > 0) {
+      const index = pickVariantIndex(path, current.anyOf);
+      const base = { ...current };
+      delete base.oneOf;
+      delete base.anyOf;
+      delete base.allOf;
+      delete base['x-nextdoc4j-allOfMerged'];
+      const picked = current.anyOf[index] ?? current.anyOf[0];
+      current = mergeComposedSchema(base, picked);
+    } else if (Array.isArray(current.allOf) && current.allOf.length > 0) {
+      const mergedAllOf = current.allOf.reduce((acc: any, item: any) => {
+        return mergeComposedSchema(acc, visit(item, path));
+      }, {});
+      const base = { ...current };
+      delete base.allOf;
+      delete base['x-nextdoc4j-allOfMerged'];
+      current = mergeComposedSchema(base, mergedAllOf);
+    }
+
+    if (current.properties && typeof current.properties === 'object') {
+      const nextProperties: Record<string, any> = {};
+      Object.entries(current.properties).forEach(([key, value]) => {
+        nextProperties[key] = visit(value, `${path}.${key}`);
+      });
+      current.properties = nextProperties;
+    }
+
+    if (current.items) {
+      current.items = visit(current.items, path);
+    }
+
+    if (Array.isArray(current.prefixItems)) {
+      current.prefixItems = current.prefixItems.map((item: any, index: number) =>
+        visit(item, `${path}.${index}`),
+      );
+    }
+
+    return current;
+  };
+
+  return visit(schema, '$');
+};
+
+const requestSchemaForView = computed(() => {
   return (
     currentRequestBody.value ||
     (Array.isArray(requestBody.value) ? null : requestBody.value)
   );
+});
+
+const requestPreviewSchema = computed(() => {
+  const source = requestSchemaForView.value;
+  if (!source) {
+    return null;
+  }
+  return applyRequestBodyVariantState(source, requestBodyVariantState.value);
 });
 
 const responseCodes = computed(() => {
@@ -342,6 +472,7 @@ watch(
     responseExampleOpen.value = Object.fromEntries(
       codes.map((code) => [code, false]),
     );
+    responseVariantState.value = {};
   },
   { immediate: true },
 );
@@ -413,6 +544,30 @@ const handleTest = () => {
 
 const toggleResponseExample = (code: string) => {
   responseExampleOpen.value[code] = !responseExampleOpen.value[code];
+};
+
+
+const handleResponseSchemaVariantChange = (
+  code: string,
+  payload: { index: number; path: string },
+) => {
+  responseVariantState.value = {
+    ...responseVariantState.value,
+    [code]: {
+      ...(responseVariantState.value[code] || {}),
+      [payload.path]: payload.index,
+    },
+  };
+};
+
+const getResponsePreviewSchema = (code: string, schema: any) => {
+  if (!schema) {
+    return null;
+  }
+  return applyRequestBodyVariantState(
+    schema,
+    responseVariantState.value[code] || {},
+  );
 };
 
 const getDebugPayload = (): DebugPayload => {
@@ -601,8 +756,9 @@ defineExpose({
             >
               <div class="schema-layout__main">
                 <SchemaView
-                  v-if="requestPreviewSchema"
-                  :data="requestPreviewSchema"
+                  v-if="requestSchemaForView"
+                  :key="requestBodyType || '__request_schema__'"
+                  :data="requestSchemaForView"
                   mode="request"
                   @variant-change="handleRequestSchemaVariantChange"
                 />
@@ -678,7 +834,14 @@ defineExpose({
                 }"
               >
                 <div class="schema-layout__main">
-                  <SchemaView v-if="panel.schema" :data="panel.schema" mode="response" />
+                  <SchemaView
+                    v-if="panel.schema"
+                    :data="panel.schema"
+                    mode="response"
+                    @variant-change="
+                      handleResponseSchemaVariantChange(panel.code, $event)
+                    "
+                  />
                   <div v-else class="empty-hint">暂无可展示的响应结构</div>
                 </div>
 
@@ -688,7 +851,7 @@ defineExpose({
                 >
                   <JsonViewer
                     class="json-panel app-json-schema-viewer"
-                    :schema="panel.schema"
+                    :schema="getResponsePreviewSchema(panel.code, panel.schema)"
                     mode="response"
                   />
                 </div>
