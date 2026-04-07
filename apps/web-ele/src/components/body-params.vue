@@ -609,11 +609,21 @@ defineExpose({
 
       <div v-else class="body-editor" @click.capture="focusJsonEditor">
         <template v-if="bodyType === 'form-data'">
-          <params-table :table-data="formDataParams" show-content-type />
+          <params-table
+            :table-data="formDataParams"
+            show-content-type
+            show-description-column
+            show-delete-in-description
+          />
         </template>
 
         <template v-if="bodyType === 'x-www-form-urlencoded'">
-          <params-table :table-data="urlEncodedParams" show-content-type />
+          <params-table
+            :table-data="urlEncodedParams"
+            show-content-type
+            show-description-column
+            show-delete-in-description
+          />
         </template>
 
         <template v-if="bodyType === 'json'">

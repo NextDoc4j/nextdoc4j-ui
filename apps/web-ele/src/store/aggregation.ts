@@ -212,7 +212,7 @@ export const useAggregationStore = defineStore('aggregation', () => {
       return pending;
     }
 
-    const task = (async (): Promise<ServiceData> => {
+    const task = (async () => {
       const cache = getOrCreateServiceCache(cacheKey);
 
       // 首次进入聚合页时，probe 已经拉过 openApi，这里只做增量补全

@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import type { ParamsType } from './body-params.vue';
+import type {ParamsType} from './body-params.vue';
 
 import type {
   ParameterObject,
@@ -7,7 +7,7 @@ import type {
   SchemaObject,
   SecuritySchemeObject,
 } from '#/typings/openApi';
-import type { DetectedBase64Image } from '#/utils/base64-image';
+import type {DetectedBase64Image} from '#/utils/base64-image';
 
 import {
   computed,
@@ -19,7 +19,7 @@ import {
   watch,
 } from 'vue';
 
-import { useAppConfig } from '@vben/hooks';
+import {useAppConfig} from '@vben/hooks';
 import {
   SvgApiPrefixIcon,
   SvgDocumentLayoutIcon,
@@ -44,20 +44,20 @@ import {
 } from 'element-plus';
 
 import JsonViewer from '#/components/json-viewer/index.vue';
-import { methodType } from '#/constants/methods';
+import {methodType} from '#/constants/methods';
 import {
   useApiStore,
   useApiTestCacheStore,
   useDocManageStore,
   useTokenStore,
 } from '#/store';
-import { useAggregationStore } from '#/store/aggregation';
+import {useAggregationStore} from '#/store/aggregation';
 import {
   buildDetectedImageFileName,
   detectBase64ImagesInData,
   formatDetectedImageSize,
 } from '#/utils/base64-image';
-import { adaptSchemaForView, hasRenderableSchema } from '#/utils/schema';
+import {adaptSchemaForView, hasRenderableSchema} from '#/utils/schema';
 
 import bodyParams from './body-params.vue';
 import paramsTable from './params-table.vue';
@@ -137,7 +137,7 @@ const props = defineProps<{
 
 defineEmits(['cancel']);
 
-const { apiURL } = useAppConfig(import.meta.env, import.meta.env.PROD);
+const {apiURL} = useAppConfig(import.meta.env, import.meta.env.PROD);
 const baseUrl = ref();
 const activeTab = ref(props.requestBody ? 'Body' : 'Params');
 const bodyTabRef = ref<DebugBodyTabExpose | null>(null);
@@ -150,11 +150,9 @@ const realtimeResponseScrollTop = ref(0);
 const paneLayout = ref<'horizontal' | 'vertical'>('horizontal');
 const paneRatio = ref(0.52);
 const debugLayoutRef = ref<HTMLElement>();
-const pathTableRef = ref();
 const isPaneResizing = ref(false);
 const actualRequestSnapshot = ref<DebugActualRequestSnapshot | null>(null);
 let removePaneResizeListeners: (() => void) | null = null;
-let pathTableResizeObserver: null | ResizeObserver = null;
 const aggregationStore = useAggregationStore();
 const docManageStore = useDocManageStore();
 const apiTestCacheStore = useApiTestCacheStore();
@@ -224,7 +222,7 @@ const toDebugBodyType = (value: unknown): DebugBodyType | undefined => {
     : undefined;
 };
 const resetResponseState = () => {
-  responseStatus.value = { code: 0, text: '-', type: 'default' };
+  responseStatus.value = {code: 0, text: '-', type: 'default'};
   responseTime.value = 0;
   responseSize.value = '0 B';
   responseData.value = null;
@@ -342,7 +340,7 @@ watch(
       requestUrl.value = newPath;
     }
   },
-  { immediate: true },
+  {immediate: true},
 );
 
 // 监听 parameters 变化，同步参数信息
@@ -366,8 +364,8 @@ watch(
     };
 
     newParams.forEach((param) => {
-      const { schema = {} } = param;
-      const { type, format, enum: enumValues, items } = schema;
+      const {schema = {}} = param;
+      const {type, format, enum: enumValues, items} = schema;
 
       let value = param.example?.toString() || '';
       if (!value && enumValues?.length) {
@@ -385,16 +383,16 @@ watch(
         enum: enumValues,
         schema: schema
           ? {
-              type,
-              format,
-              enum: enumValues,
-              items: items
-                ? {
-                    enum: items.enum,
-                    format: items.format,
-                  }
-                : undefined,
-            }
+            type,
+            format,
+            enum: enumValues,
+            items: items
+              ? {
+                enum: items.enum,
+                format: items.format,
+              }
+              : undefined,
+          }
           : undefined,
       };
 
@@ -407,7 +405,7 @@ watch(
     syncSecurityParamsToDebugTable();
     syncGlobalParamsToDebugTable();
   },
-  { immediate: true },
+  {immediate: true},
 );
 
 watch(
@@ -416,7 +414,7 @@ watch(
     syncSecurityParamsToDebugTable();
     syncGlobalParamsToDebugTable();
   },
-  { deep: true, immediate: true },
+  {deep: true, immediate: true},
 );
 
 watch(
@@ -425,7 +423,7 @@ watch(
     syncSecurityParamsToDebugTable();
     syncGlobalParamsToDebugTable();
   },
-  { deep: true },
+  {deep: true},
 );
 
 watch(
@@ -434,11 +432,11 @@ watch(
     syncSecurityParamsToDebugTable();
     syncGlobalParamsToDebugTable();
   },
-  { deep: true },
+  {deep: true},
 );
 
 // 响应状态
-const responseStatus = ref({ code: 0, text: '-', type: 'default' });
+const responseStatus = ref({code: 0, text: '-', type: 'default'});
 const responseTime = ref(0);
 const responseSize = ref('0 B');
 const responseData = shallowRef<any>(null);
@@ -520,7 +518,7 @@ const responseSchemaForViewer = computed(() => {
   if (!schema || !hasRenderableSchema(schema)) {
     return null;
   }
-  const resolved = adaptSchemaForView(schema, { mode: 'response' });
+  const resolved = adaptSchemaForView(schema, {mode: 'response'});
   return resolved && hasRenderableSchema(resolved) ? resolved : null;
 });
 
@@ -627,7 +625,7 @@ const resolveOverflowVisibleKeys = (options: {
   moreMeasureElement?: HTMLElement;
   tabs: DebugInlineTab[];
 }) => {
-  const { activeKey, hostElement, measureRefs, moreMeasureElement, tabs } =
+  const {activeKey, hostElement, measureRefs, moreMeasureElement, tabs} =
     options;
   const keys = tabs.map((tab) => tab.key);
   if (keys.length === 0 || !hostElement) {
@@ -683,7 +681,7 @@ const resolveOverflowVisibleKeys = (options: {
     while (
       adjustedKeys.length > 0 &&
       !canFitWithMoreButton([...adjustedKeys, activeKey])
-    ) {
+      ) {
       adjustedKeys.pop();
     }
     if (canFitWithMoreButton([...adjustedKeys, activeKey])) {
@@ -801,7 +799,7 @@ watch(
   () => {
     scheduleTabOverflowUpdate();
   },
-  { deep: true },
+  {deep: true},
 );
 
 watch(
@@ -809,7 +807,7 @@ watch(
   () => {
     scheduleTabOverflowUpdate();
   },
-  { deep: true },
+  {deep: true},
 );
 
 watch(
@@ -839,31 +837,6 @@ watch([() => requestTabsHostRef.value, () => responseTabsHostRef.value], () => {
   syncTabOverflowObserver();
   scheduleTabOverflowUpdate();
 });
-
-watch(
-  () => pathParams.value.length,
-  async (length) => {
-    if (length <= 0) {
-      pathTableResizeObserver?.disconnect();
-      pathTableResizeObserver = null;
-      return;
-    }
-    await nextTick();
-    setupPathTableResizeObserver();
-  },
-  { immediate: true },
-);
-
-watch(
-  () => activeTab.value,
-  async (tab) => {
-    if (tab !== 'Params' || pathParams.value.length <= 0) {
-      return;
-    }
-    await nextTick();
-    setupPathTableResizeObserver();
-  },
-);
 
 const isStackedLayout = computed(() => paneLayout.value === 'vertical');
 const layoutTooltipText = computed(() => {
@@ -934,30 +907,6 @@ const startPaneResize = (event: PointerEvent) => {
     window.removeEventListener('pointermove', onPointerMove);
     window.removeEventListener('pointerup', onPointerUp);
   };
-};
-
-const getPathTableElement = () => {
-  return pathTableRef.value?.$el as HTMLElement | undefined;
-};
-
-const setupPathTableResizeObserver = () => {
-  pathTableResizeObserver?.disconnect();
-  pathTableResizeObserver = null;
-
-  if (typeof ResizeObserver === 'undefined') {
-    return;
-  }
-
-  const tableElement = getPathTableElement();
-  if (!tableElement) {
-    return;
-  }
-
-  pathTableResizeObserver = new ResizeObserver(() => {
-    pathTableRef.value?.doLayout?.();
-  });
-  pathTableResizeObserver.observe(tableElement);
-  pathTableRef.value?.doLayout?.();
 };
 
 function normalizeSecurityIn(value?: string) {
@@ -1038,10 +987,10 @@ function syncSecurityParamsToDebugTable() {
       `${key}_${securityIn.toUpperCase()}`,
       ...(rawSecurityIn
         ? [
-            `${key}_${rawSecurityIn}`,
-            `${key}_${rawSecurityIn.toLowerCase()}`,
-            `${key}_${rawSecurityIn.toUpperCase()}`,
-          ]
+          `${key}_${rawSecurityIn}`,
+          `${key}_${rawSecurityIn.toLowerCase()}`,
+          `${key}_${rawSecurityIn.toUpperCase()}`,
+        ]
         : []),
     ];
     const tokenValue =
@@ -1853,7 +1802,7 @@ async function sendRequest() {
         ['binary', 'form-data'].includes(bodyType || '')
           ? formData
           : // eslint-disable-next-line unicorn/no-nested-ternary
-            bodyType === 'x-www-form-urlencoded'
+          bodyType === 'x-www-form-urlencoded'
             ? searchParams
             : bodyData || undefined,
     });
@@ -1998,7 +1947,6 @@ onMounted(async () => {
   await nextTick();
   syncTabOverflowObserver();
   scheduleTabOverflowUpdate();
-  setupPathTableResizeObserver();
 });
 
 watch(
@@ -2025,7 +1973,7 @@ watch(
       preserveValue: false,
     });
   },
-  { deep: true },
+  {deep: true},
 );
 
 watch(
@@ -2039,7 +1987,7 @@ watch(
       preserveValue: false,
     });
   },
-  { deep: true },
+  {deep: true},
 );
 watch(
   () => apiTestCacheStore.debugCacheEnabled,
@@ -2072,7 +2020,7 @@ watch(
   () => {
     schedulePersistCache();
   },
-  { deep: true },
+  {deep: true},
 );
 
 onBeforeUnmount(() => {
@@ -2083,8 +2031,6 @@ onBeforeUnmount(() => {
   }
   tabOverflowObserver?.disconnect();
   tabOverflowObserver = null;
-  pathTableResizeObserver?.disconnect();
-  pathTableResizeObserver = null;
   if (overflowRaf) {
     window.cancelAnimationFrame(overflowRaf);
     overflowRaf = null;
@@ -2110,7 +2056,7 @@ onBeforeUnmount(() => {
             </span>
             <ElTooltip v-if="baseUrl" placement="top" :content="baseUrl">
               <ElButton text class="debug-prefix-button">
-                <SvgApiPrefixIcon class="size-4" />
+                <SvgApiPrefixIcon class="size-4"/>
               </ElButton>
             </ElTooltip>
           </template>
@@ -2130,7 +2076,7 @@ onBeforeUnmount(() => {
               class="debug-icon-button"
               @click="handleRestoreDefault"
             >
-              <SvgDocumentResetIcon class="size-4" />
+              <SvgDocumentResetIcon class="size-4"/>
             </ElButton>
           </ElTooltip>
           <ElTooltip :content="layoutTooltipText" placement="top">
@@ -2184,8 +2130,8 @@ onBeforeUnmount(() => {
                     @click="activeTab = tabItem.key"
                   >
                     <span class="debug-inline-tab__label">{{
-                      tabItem.label
-                    }}</span>
+                        tabItem.label
+                      }}</span>
                     <span v-if="tabItem.count" class="debug-inline-tab__count">
                       {{ tabItem.count }}
                     </span>
@@ -2234,70 +2180,39 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <div class="debug-tabs-wrap">
-              <ElTabs v-model="activeTab" class="debug-tabs debug-tabs--inline">
-                <ElTabPane name="Params" label="Params">
-                  <div v-if="pathParams.length > 0">
-                    <h3 class="debug-section-title">Path 参数</h3>
-                    <div class="actual-request__block params-table-block">
-                      <ElTable
-                        ref="pathTableRef"
-                        border
-                        class="params-table params-table--path"
-                        :data="pathParams"
-                        header-cell-class-name="p-2"
-                        table-layout="auto"
-                        :allow-drag-last-column="false"
-                        :style="{ minWidth: '560px' }"
-                      >
-                        <ElTableColumn
-                          prop="name"
-                          label="参数名"
-                          min-width="140"
-                        >
-                          <template #default="{ row }">
-                            <ElInput v-model="row.name" />
-                          </template>
-                        </ElTableColumn>
-                        <ElTableColumn
-                          prop="value"
-                          label="参数值"
-                          min-width="220"
-                        >
-                          <template #default="{ row }">
-                            <ElInput v-model="row.value" />
-                          </template>
-                        </ElTableColumn>
-                        <ElTableColumn
-                          prop="description"
-                          label="描述"
-                          min-width="200"
-                          show-overflow-tooltip
-                        >
-                          <template #default="{ row }">
-                            <ElTooltip
-                              v-if="row.description?.trim()"
-                              :content="row.description.trim()"
-                              placement="top"
-                            >
-                              <span class="path-param-description">{{
-                                row.description.trim()
-                              }}</span>
-                            </ElTooltip>
-                            <span v-else class="path-param-description">-</span>
-                          </template>
-                        </ElTableColumn>
-                      </ElTable>
+                <ElTabs v-model="activeTab" class="debug-tabs debug-tabs--inline">
+                  <ElTabPane name="Params" label="Params">
+                  <div class="params-tab-sections">
+                    <div v-if="pathParams.length > 0">
+                      <div class="actual-request__block params-table-block">
+                        <div class="params-table-block__header">
+                          <h3 class="actual-request__title">Path 参数</h3>
+                        </div>
+                        <div class="params-table-block__body">
+                          <params-table
+                            :table-data="pathParams"
+                            :allow-delete="false"
+                            :show-add-button="false"
+                            :show-selection-column="false"
+                            show-description-column
+                          />
+                        </div>
+                      </div>
                     </div>
-                  </div>
 
-                  <div>
-                    <h3 class="debug-section-title">Query 参数</h3>
-                    <div class="actual-request__block params-table-block">
-                      <params-table
-                        :table-data="queryParams"
-                        show-description-column
-                        show-delete-in-description
-                      />
+                    <div>
+                      <div class="actual-request__block params-table-block">
+                        <div class="params-table-block__header">
+                          <h3 class="actual-request__title">Query 参数</h3>
+                        </div>
+                        <div class="params-table-block__body">
+                          <params-table
+                            :table-data="queryParams"
+                            show-description-column
+                            show-delete-in-description
+                          />
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </ElTabPane>
@@ -2316,16 +2231,26 @@ onBeforeUnmount(() => {
 
                 <ElTabPane name="Headers" label="Headers">
                   <div class="actual-request__block params-table-block">
-                    <params-table
-                      :table-data="headers"
-                      show-description-column
-                      show-delete-in-description
-                    />
+                    <div class="params-table-block__header">
+                      <h3 class="actual-request__title">Headers</h3>
+                    </div>
+                    <div class="params-table-block__body">
+                      <params-table
+                        :table-data="headers"
+                        show-description-column
+                        show-delete-in-description
+                      />
+                    </div>
                   </div>
                 </ElTabPane>
                 <ElTabPane name="Cookies" label="Cookies">
                   <div class="actual-request__block params-table-block">
-                    <params-table :table-data="cookies" />
+                    <div class="params-table-block__header">
+                      <h3 class="actual-request__title">Cookies</h3>
+                    </div>
+                    <div class="params-table-block__body">
+                      <params-table :table-data="cookies"/>
+                    </div>
                   </div>
                 </ElTabPane>
               </ElTabs>
@@ -2358,8 +2283,8 @@ onBeforeUnmount(() => {
                     @click="responseTab = tabItem.key"
                   >
                     <span class="debug-inline-tab__label">{{
-                      tabItem.label
-                    }}</span>
+                        tabItem.label
+                      }}</span>
                     <span v-if="tabItem.count" class="debug-inline-tab__count">
                       {{ tabItem.count }}
                     </span>
@@ -2524,8 +2449,8 @@ onBeforeUnmount(() => {
                       class="response-headers"
                     >
                       <ElTable border :data="responseHeaders">
-                        <ElTableColumn label="参数名" prop="name" />
-                        <ElTableColumn label="参数值" prop="value" />
+                        <ElTableColumn label="参数名" prop="name"/>
+                        <ElTableColumn label="参数值" prop="value"/>
                       </ElTable>
                     </div>
                     <ElEmpty v-else :image-size="68">
@@ -2552,8 +2477,8 @@ onBeforeUnmount(() => {
                       >
                         <div class="actual-request__title">请求头</div>
                         <ElTable border :data="actualRequestSnapshot.headers">
-                          <ElTableColumn label="参数名" prop="name" />
-                          <ElTableColumn label="参数值" prop="value" />
+                          <ElTableColumn label="参数名" prop="name"/>
+                          <ElTableColumn label="参数值" prop="value"/>
                         </ElTable>
                       </div>
 
@@ -2566,8 +2491,8 @@ onBeforeUnmount(() => {
                           border
                           :data="actualRequestSnapshot.queryParams"
                         >
-                          <ElTableColumn label="参数名" prop="name" />
-                          <ElTableColumn label="参数值" prop="value" />
+                          <ElTableColumn label="参数名" prop="name"/>
+                          <ElTableColumn label="参数值" prop="value"/>
                         </ElTable>
                       </div>
 
@@ -2580,8 +2505,8 @@ onBeforeUnmount(() => {
                           border
                           :data="actualRequestSnapshot.pathParams"
                         >
-                          <ElTableColumn label="参数名" prop="name" />
-                          <ElTableColumn label="参数值" prop="value" />
+                          <ElTableColumn label="参数名" prop="name"/>
+                          <ElTableColumn label="参数值" prop="value"/>
                         </ElTable>
                       </div>
 
@@ -2593,8 +2518,8 @@ onBeforeUnmount(() => {
                           请求体 ({{ actualRequestSnapshot.bodyType }})
                         </div>
                         <pre class="actual-request__code">{{
-                          actualRequestSnapshot.bodyText
-                        }}</pre>
+                            actualRequestSnapshot.bodyText
+                          }}</pre>
                       </div>
                     </div>
                     <ElEmpty v-else :image-size="68">
@@ -2681,8 +2606,8 @@ onBeforeUnmount(() => {
                 <div class="debug-base64-card__info">
                   <span class="debug-base64-card__index">#{{ index + 1 }}</span>
                   <span class="debug-base64-card__path" :title="item.path">{{
-                    item.path
-                  }}</span>
+                      item.path
+                    }}</span>
                 </div>
                 <ElButton
                   size="small"
@@ -2707,8 +2632,8 @@ onBeforeUnmount(() => {
               <div class="debug-base64-card__footer">
                 <span class="debug-base64-card__chip">{{ item.mimeType }}</span>
                 <span class="debug-base64-card__chip">{{
-                  formatDetectedImageSize(item.sizeBytes)
-                }}</span>
+                    formatDetectedImageSize(item.sizeBytes)
+                  }}</span>
               </div>
             </article>
           </div>
@@ -2735,7 +2660,7 @@ onBeforeUnmount(() => {
           type="button"
           class="debug-inline-tab debug-inline-tab--more"
         >
-          <SvgDocumentOmittedIcon class="debug-inline-tab__more-icon" />
+          <SvgDocumentOmittedIcon class="debug-inline-tab__more-icon"/>
         </button>
       </div>
       <div class="debug-inline-tabs">
@@ -2756,7 +2681,7 @@ onBeforeUnmount(() => {
           type="button"
           class="debug-inline-tab debug-inline-tab--more"
         >
-          <SvgDocumentOmittedIcon class="debug-inline-tab__more-icon" />
+          <SvgDocumentOmittedIcon class="debug-inline-tab__more-icon"/>
         </button>
       </div>
     </div>
@@ -2847,20 +2772,17 @@ onBeforeUnmount(() => {
     #8d97a7 20%,
     transparent
   );
-  --debug-request-shell-shadow:
-    inset 0 1px 0 var(--debug-request-shell-top-line),
-    inset 0 -1px 0 var(--debug-request-shell-bottom-line),
-    0 0 0 1px color-mix(in srgb, #9aa3b2 20%, transparent),
-    0 9px 18px -15px color-mix(in srgb, #7f8899 42%, transparent),
-    0 -9px 18px -15px color-mix(in srgb, #8e97a6 44%, transparent);
-  --debug-request-shell-shadow-hover:
-    inset 0 1px 0 color-mix(in srgb, #8692a5 42%, transparent),
-    inset 0 -1px 0 color-mix(in srgb, #8692a5 24%, transparent),
-    0 0 0 1px color-mix(in srgb, #8d97a7 24%, transparent),
-    0 11px 22px -15px color-mix(in srgb, #738093 48%, transparent),
-    0 -11px 22px -15px color-mix(in srgb, #8d97a7 50%, transparent);
-  --debug-shadow: 0 6px 14px
-    color-mix(in srgb, var(--el-text-color-primary) 3%, transparent);
+  --debug-request-shell-shadow: inset 0 1px 0 var(--debug-request-shell-top-line),
+  inset 0 -1px 0 var(--debug-request-shell-bottom-line),
+  0 0 0 1px color-mix(in srgb, #9aa3b2 20%, transparent),
+  0 9px 18px -15px color-mix(in srgb, #7f8899 42%, transparent),
+  0 -9px 18px -15px color-mix(in srgb, #8e97a6 44%, transparent);
+  --debug-request-shell-shadow-hover: inset 0 1px 0 color-mix(in srgb, #8692a5 42%, transparent),
+  inset 0 -1px 0 color-mix(in srgb, #8692a5 24%, transparent),
+  0 0 0 1px color-mix(in srgb, #8d97a7 24%, transparent),
+  0 11px 22px -15px color-mix(in srgb, #738093 48%, transparent),
+  0 -11px 22px -15px color-mix(in srgb, #8d97a7 50%, transparent);
+  --debug-shadow: 0 6px 14px color-mix(in srgb, var(--el-text-color-primary) 3%, transparent);
 
   display: flex;
   flex-direction: column;
@@ -2938,15 +2860,12 @@ onBeforeUnmount(() => {
   background: var(--el-bg-color);
   border: 1px solid var(--debug-border-strong);
   border-radius: var(--debug-radius-md);
-  box-shadow: 0 4px 12px
-    color-mix(in srgb, var(--el-text-color-primary) 6%, transparent);
-  transition:
-    transform 0.2s ease,
-    box-shadow 0.2s ease;
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--el-text-color-primary) 6%, transparent);
+  transition: transform 0.2s ease,
+  box-shadow 0.2s ease;
 
   &:hover {
-    box-shadow: 0 8px 24px
-      color-mix(in srgb, var(--el-text-color-primary) 10%, transparent);
+    box-shadow: 0 8px 24px color-mix(in srgb, var(--el-text-color-primary) 10%, transparent);
     transform: translateY(-2px);
   }
 }
@@ -3002,16 +2921,14 @@ onBeforeUnmount(() => {
 
   /* 棋盘格背景：适配透明图片 */
   background-color: var(--el-fill-color-lighter);
-  background-image:
-    linear-gradient(45deg, var(--el-fill-color-darker) 25%, transparent 25%),
-    linear-gradient(-45deg, var(--el-fill-color-darker) 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, var(--el-fill-color-darker) 75%),
-    linear-gradient(-45deg, transparent 75%, var(--el-fill-color-darker) 75%);
-  background-position:
-    0 0,
-    0 10px,
-    10px -10px,
-    -10px 0;
+  background-image: linear-gradient(45deg, var(--el-fill-color-darker) 25%, transparent 25%),
+  linear-gradient(-45deg, var(--el-fill-color-darker) 25%, transparent 25%),
+  linear-gradient(45deg, transparent 75%, var(--el-fill-color-darker) 75%),
+  linear-gradient(-45deg, transparent 75%, var(--el-fill-color-darker) 75%);
+  background-position: 0 0,
+  0 10px,
+  10px -10px,
+  -10px 0;
   background-size: 20px 20px;
   border: 1px solid var(--debug-border);
   border-radius: var(--debug-radius-sm);
@@ -3408,9 +3325,8 @@ onBeforeUnmount(() => {
   border: none;
   border-radius: 0;
   box-shadow: none;
-  transition:
-    color 0.18s ease,
-    transform 0.18s ease;
+  transition: color 0.18s ease,
+  transform 0.18s ease;
 }
 
 .debug-icon-button:hover {
@@ -3502,8 +3418,7 @@ onBeforeUnmount(() => {
   height: 38px;
   font-weight: 700;
   border-radius: var(--debug-radius-sm);
-  box-shadow: 0 4px 10px
-    color-mix(in srgb, var(--el-color-primary) 20%, transparent);
+  box-shadow: 0 4px 10px color-mix(in srgb, var(--el-color-primary) 20%, transparent);
   transition: transform 0.16s ease;
 }
 
@@ -3529,17 +3444,38 @@ onBeforeUnmount(() => {
 }
 
 .params-table-block {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   padding: 0;
   overflow: hidden;
 }
 
-.path-param-description {
-  display: inline-block;
-  max-width: 100%;
+.params-tab-sections {
+  display: grid;
+  gap: 12px;
+}
+
+.params-table-block__header {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 8px 12px;
+  background: var(--debug-soft-bg-strong);
+  border-bottom: 1px solid var(--debug-border);
+}
+
+.params-table-block__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 12px 10px;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.params-table-block__header .actual-request__title {
+  margin-bottom: 0;
 }
 
 .response-body {
@@ -3613,6 +3549,11 @@ onBeforeUnmount(() => {
   border-radius: var(--debug-radius-xs);
 }
 
+.actual-request__block.params-table-block {
+  padding: 0;
+  overflow: hidden;
+}
+
 .actual-request__title {
   margin-bottom: 8px;
   font-size: 12px;
@@ -3668,46 +3609,6 @@ onBeforeUnmount(() => {
 
 .loading-dots .dot:nth-child(3) {
   animation-delay: 0.4s;
-}
-
-:deep(.params-table.el-table) {
-  width: 100%;
-  margin-top: 4px;
-  margin-bottom: 8px;
-  border-radius: var(--debug-radius-xs);
-
-  .el-table__header-wrapper th {
-    background: var(--debug-soft-bg-strong);
-  }
-
-  .el-table__cell {
-    padding: 0;
-  }
-
-  .cell {
-    min-width: 0;
-    padding: 0;
-
-    .el-input__wrapper {
-      width: 100%;
-      min-width: 0;
-      background-color: transparent;
-      border: none;
-      border-radius: 0;
-      box-shadow: none;
-    }
-
-    .el-input,
-    .el-select,
-    .el-select__wrapper {
-      width: 100%;
-      min-width: 0;
-    }
-  }
-
-  .el-table__header .cell {
-    padding: 4px 8px;
-  }
 }
 
 :deep(.debug-tabs.el-tabs),
@@ -3789,16 +3690,14 @@ onBeforeUnmount(() => {
   --debug-request-shell-bg: #20242b;
   --debug-request-shell-top-line: color-mix(in srgb, #fff 18%, transparent);
   --debug-request-shell-bottom-line: color-mix(in srgb, #fff 10%, transparent);
-  --debug-request-shell-shadow:
-    inset 0 1px 0 var(--debug-request-shell-top-line),
-    inset 0 -1px 0 var(--debug-request-shell-bottom-line),
-    0 8px 18px -14px color-mix(in srgb, #000 58%, transparent),
-    0 -8px 18px -14px color-mix(in srgb, #fff 12%, transparent);
-  --debug-request-shell-shadow-hover:
-    inset 0 1px 0 color-mix(in srgb, #fff 24%, transparent),
-    inset 0 -1px 0 color-mix(in srgb, #fff 14%, transparent),
-    0 10px 22px -14px color-mix(in srgb, #000 62%, transparent),
-    0 -10px 22px -14px color-mix(in srgb, #fff 16%, transparent);
+  --debug-request-shell-shadow: inset 0 1px 0 var(--debug-request-shell-top-line),
+  inset 0 -1px 0 var(--debug-request-shell-bottom-line),
+  0 8px 18px -14px color-mix(in srgb, #000 58%, transparent),
+  0 -8px 18px -14px color-mix(in srgb, #fff 12%, transparent);
+  --debug-request-shell-shadow-hover: inset 0 1px 0 color-mix(in srgb, #fff 24%, transparent),
+  inset 0 -1px 0 color-mix(in srgb, #fff 14%, transparent),
+  0 10px 22px -14px color-mix(in srgb, #000 62%, transparent),
+  0 -10px 22px -14px color-mix(in srgb, #fff 16%, transparent);
   --debug-shadow: 0 8px 20px color-mix(in srgb, #000 45%, transparent);
 }
 </style>
