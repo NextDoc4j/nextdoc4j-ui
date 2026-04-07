@@ -7,6 +7,7 @@ import type {
   SchemaObject,
   SecuritySchemeObject,
 } from '#/typings/openApi';
+import type { DetectedBase64Image } from '#/utils/base64-image';
 
 import {
   computed,
@@ -28,6 +29,7 @@ import {
 
 import {
   ElButton,
+  ElDrawer,
   ElDropdown,
   ElDropdownItem,
   ElDropdownMenu,
@@ -50,6 +52,11 @@ import {
   useTokenStore,
 } from '#/store';
 import { useAggregationStore } from '#/store/aggregation';
+import {
+  buildDetectedImageFileName,
+  detectBase64ImagesInData,
+  formatDetectedImageSize,
+} from '#/utils/base64-image';
 import { adaptSchemaForView, hasRenderableSchema } from '#/utils/schema';
 
 import bodyParams from './body-params.vue';
@@ -116,6 +123,7 @@ interface DebugBodyTabExpose {
     preserveValue?: boolean;
   }) => Promise<void> | void;
 }
+
 const props = defineProps<{
   method: string;
   parameters: ParameterObject[];
@@ -134,6 +142,7 @@ const baseUrl = ref();
 const activeTab = ref(props.requestBody ? 'Body' : 'Params');
 const bodyTabRef = ref<DebugBodyTabExpose | null>(null);
 const responseTab = ref('RealtimeResponse');
+const base64ImageDrawerVisible = ref(false);
 const realtimeResponseJsonRef = ref<InstanceType<typeof JsonViewer> | null>(
   null,
 );
@@ -199,7 +208,7 @@ const cloneTableParams = (
   }));
 };
 
-const DEBUG_BODY_TYPES: DebugBodyType[] = [
+const DEBUG_BODY_TYPES = new Set<DebugBodyType>([
   'binary',
   'form-data',
   'json',
@@ -207,10 +216,10 @@ const DEBUG_BODY_TYPES: DebugBodyType[] = [
   'raw',
   'x-www-form-urlencoded',
   'xml',
-];
+]);
 
 const toDebugBodyType = (value: unknown): DebugBodyType | undefined => {
-  return DEBUG_BODY_TYPES.includes(value as DebugBodyType)
+  return DEBUG_BODY_TYPES.has(value as DebugBodyType)
     ? (value as DebugBodyType)
     : undefined;
 };
@@ -219,6 +228,7 @@ const resetResponseState = () => {
   responseTime.value = 0;
   responseSize.value = '0 B';
   responseData.value = null;
+  base64ImageDrawerVisible.value = false;
   responseMimeType.value = '';
   responseHeaders.value = [];
   actualRequestSnapshot.value = null;
@@ -436,6 +446,20 @@ const responseMimeType = ref('');
 const responseHeaders = ref<
   Array<{ enabled: boolean; name: string; value: string }>
 >([]);
+
+const realtimeDetectedBase64Images = computed<DetectedBase64Image[]>(() => {
+  if (responseStatus.value.type === 'default') {
+    return [];
+  }
+  if (responseData.value === null || responseData.value === undefined) {
+    return [];
+  }
+  return detectBase64ImagesInData(responseData.value);
+});
+
+const hasRealtimeBase64Images = computed(() => {
+  return realtimeDetectedBase64Images.value.length > 0;
+});
 
 const pickContentSchema = (
   content?: Record<string, { schema?: SchemaObject }>,
@@ -804,6 +828,12 @@ watch(
     );
   },
 );
+
+watch(hasRealtimeBase64Images, (hasImages) => {
+  if (!hasImages) {
+    base64ImageDrawerVisible.value = false;
+  }
+});
 
 watch([() => requestTabsHostRef.value, () => responseTabsHostRef.value], () => {
   syncTabOverflowObserver();
@@ -1592,6 +1622,37 @@ async function parseResponseBody(response: Response, requestUrl: string) {
   };
 }
 
+const openBase64ImageDrawer = () => {
+  if (!hasRealtimeBase64Images.value) {
+    ElMessage.warning('当前响应未检测到可预览的 base64 图片');
+    return;
+  }
+  base64ImageDrawerVisible.value = true;
+};
+
+const closeBase64ImageDrawer = () => {
+  base64ImageDrawerVisible.value = false;
+};
+
+const base64ImageTotalSize = computed(() => {
+  return realtimeDetectedBase64Images.value.reduce((total, item) => {
+    return total + item.sizeBytes;
+  }, 0);
+});
+
+const downloadDetectedBase64Image = (
+  image: DetectedBase64Image,
+  index: number,
+) => {
+  const link = document.createElement('a');
+  link.href = image.dataUrl;
+  link.download = buildDetectedImageFileName(image, index + 1);
+  link.style.display = 'none';
+  document.body.append(link);
+  link.click();
+  link.remove();
+};
+
 async function sendRequest() {
   loading.value = true;
   responseLoading.value = true;
@@ -2247,7 +2308,9 @@ onBeforeUnmount(() => {
                   :form-data-params="formDataParams"
                   :url-encoded-params="urlEncodedParams"
                   :request-body-type="props.requestBodyType"
-                  :request-body-variant-state="props.requestBodyVariantState || {}"
+                  :request-body-variant-state="
+                    props.requestBodyVariantState || {}
+                  "
                   @body-change="schedulePersistCache"
                 />
 
@@ -2342,6 +2405,25 @@ onBeforeUnmount(() => {
                     </template>
                   </ElDropdown>
                 </div>
+                <ElTooltip
+                  v-if="hasRealtimeBase64Images"
+                  :content="`已识别 ${realtimeDetectedBase64Images.length} 张图片`"
+                  placement="top"
+                >
+                  <button
+                    type="button"
+                    class="debug-inline-tab debug-inline-tab--image"
+                    :class="{
+                      'debug-inline-tab--active': base64ImageDrawerVisible,
+                    }"
+                    @click="openBase64ImageDrawer"
+                  >
+                    <span class="debug-inline-tab__label">图片</span>
+                    <span class="debug-inline-tab__count">
+                      {{ realtimeDetectedBase64Images.length }}
+                    </span>
+                  </button>
+                </ElTooltip>
               </div>
               <div
                 v-if="responseStatus.type !== 'default' && !responseLoading"
@@ -2533,6 +2615,107 @@ onBeforeUnmount(() => {
         </section>
       </div>
     </div>
+
+    <ElDrawer
+      v-model="base64ImageDrawerVisible"
+      direction="rtl"
+      size="min(560px, 92vw)"
+      :with-header="false"
+      append-to-body
+      class="debug-base64-drawer"
+    >
+      <div class="debug-base64-drawer__shell">
+        <div class="debug-base64-drawer__header">
+          <div class="debug-base64-drawer__heading">
+            <div class="debug-base64-drawer__title-row">
+              <span class="debug-base64-drawer__title">Base64 响应图片</span>
+              <span
+                v-if="hasRealtimeBase64Images"
+                class="debug-base64-drawer__title-count"
+              >
+                {{ realtimeDetectedBase64Images.length }}
+              </span>
+            </div>
+          </div>
+          <ElButton
+            text
+            class="debug-base64-drawer__collapse"
+            @click="closeBase64ImageDrawer"
+          >
+            收起
+          </ElButton>
+        </div>
+
+        <div class="debug-base64-drawer__body">
+          <div
+            v-if="hasRealtimeBase64Images"
+            class="debug-base64-drawer__summary"
+          >
+            <span class="debug-status-chip debug-status-chip--metric">
+              共 {{ realtimeDetectedBase64Images.length }} 张图片
+            </span>
+            <span class="debug-status-chip debug-status-chip--metric">
+              总计 {{ formatDetectedImageSize(base64ImageTotalSize) }}
+            </span>
+          </div>
+
+          <ElEmpty
+            v-if="!hasRealtimeBase64Images"
+            :image-size="80"
+            class="debug-base64-empty"
+          >
+            <template #description>
+              <span class="text-secondary text-sm">
+                未检测到可预览的 Base64 图片数据
+              </span>
+            </template>
+          </ElEmpty>
+
+          <div v-else class="debug-base64-drawer__list">
+            <article
+              v-for="(item, index) in realtimeDetectedBase64Images"
+              :key="`${item.path}-${index}`"
+              class="debug-base64-card"
+            >
+              <div class="debug-base64-card__header">
+                <div class="debug-base64-card__info">
+                  <span class="debug-base64-card__index">#{{ index + 1 }}</span>
+                  <span class="debug-base64-card__path" :title="item.path">{{
+                    item.path
+                  }}</span>
+                </div>
+                <ElButton
+                  size="small"
+                  type="primary"
+                  plain
+                  @click="downloadDetectedBase64Image(item, index)"
+                >
+                  下载
+                </ElButton>
+              </div>
+
+              <div class="debug-base64-card__preview">
+                <div class="debug-base64-card__preview-stage">
+                  <img
+                    :src="item.dataUrl"
+                    :alt="`image-${index}`"
+                    loading="lazy"
+                  />
+                </div>
+              </div>
+
+              <div class="debug-base64-card__footer">
+                <span class="debug-base64-card__chip">{{ item.mimeType }}</span>
+                <span class="debug-base64-card__chip">{{
+                  formatDetectedImageSize(item.sizeBytes)
+                }}</span>
+              </div>
+            </article>
+          </div>
+        </div>
+      </div>
+    </ElDrawer>
+
     <div class="debug-tab-measure" aria-hidden="true">
       <div class="debug-inline-tabs">
         <button
@@ -2598,16 +2781,40 @@ onBeforeUnmount(() => {
   }
 }
 
+@media (max-width: 1024px) {
+  .debug-console__request-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .debug-console__request-actions {
+    justify-content: flex-end;
+    padding-left: 0;
+  }
+
+  .debug-console__request-actions::before {
+    display: none;
+  }
+
+  .debug-send-button {
+    min-width: 92px;
+  }
+
+  .debug-status-list {
+    justify-content: flex-start;
+  }
+}
+
 .debug-console {
-  --debug-chip-radius: calc(var(--radius) * 0.62);
-  --debug-radius-xs: calc(var(--radius) * 0.56);
-  --debug-radius-sm: calc(var(--radius) * 0.72);
-  --debug-radius-md: calc(var(--radius) * 0.94);
-  --debug-radius-lg: calc(var(--radius) * 1.18);
-  --debug-count-radius: calc(var(--radius) * 0.44);
-  --debug-menu-radius: calc(var(--radius) * 0.96);
-  --el-border-radius-base: calc(var(--radius) * 0.75);
-  --el-border-radius-small: calc(var(--radius) * 0.62);
+  --debug-chip-radius: var(--radius);
+  --debug-radius-xs: var(--radius);
+  --debug-radius-sm: calc(var(--radius) * 1.08);
+  --debug-radius-md: calc(var(--radius) * 1.16);
+  --debug-radius-lg: calc(var(--radius) * 1.24);
+  --debug-count-radius: var(--radius);
+  --debug-menu-radius: calc(var(--radius) * 1.12);
+  --el-border-radius-base: var(--radius);
+  --el-border-radius-small: var(--radius);
   --debug-surface: var(--el-bg-color);
   --debug-soft-bg: color-mix(
     in srgb,
@@ -2621,12 +2828,12 @@ onBeforeUnmount(() => {
   );
   --debug-border: color-mix(
     in srgb,
-    var(--el-text-color-primary) 18%,
+    var(--el-text-color-primary) 12%,
     transparent
   );
   --debug-border-strong: color-mix(
     in srgb,
-    var(--el-text-color-primary) 26%,
+    var(--el-text-color-primary) 22%,
     transparent
   );
   --debug-request-shell-bg: color-mix(
@@ -2660,6 +2867,190 @@ onBeforeUnmount(() => {
   height: 100%;
   min-height: 0;
 }
+
+/* --- Base64 图片抽屉增强样式 --- */
+:deep(.debug-base64-drawer .el-drawer) {
+  background: var(--debug-surface);
+  border-left: 1px solid var(--debug-border);
+  box-shadow: -4px 0 16px color-mix(in srgb, #000 10%, transparent);
+}
+
+.debug-base64-drawer__shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--debug-soft-bg); /* 与左侧面板背景统一 */
+}
+
+.debug-base64-drawer__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  background: var(--debug-surface);
+  border-bottom: 1px solid var(--debug-border);
+}
+
+.debug-base64-drawer__title {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--el-text-color-primary);
+}
+
+.debug-base64-drawer__title-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--el-color-primary);
+  border-radius: var(--radius);
+}
+
+.debug-base64-drawer__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.debug-base64-drawer__summary {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.debug-base64-drawer__list {
+  display: flex;
+  flex-direction: column;
+  gap: 20px; /* 图片卡片之间的明显界限 */
+}
+
+.debug-base64-card {
+  overflow: hidden;
+  background: var(--el-bg-color);
+  border: 1px solid var(--debug-border-strong);
+  border-radius: var(--debug-radius-md);
+  box-shadow: 0 4px 12px
+    color-mix(in srgb, var(--el-text-color-primary) 6%, transparent);
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+
+  &:hover {
+    box-shadow: 0 8px 24px
+      color-mix(in srgb, var(--el-text-color-primary) 10%, transparent);
+    transform: translateY(-2px);
+  }
+}
+
+.debug-base64-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--debug-soft-bg-strong);
+  border-bottom: 1px solid var(--debug-border);
+}
+
+.debug-base64-card__info {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.debug-base64-card__index {
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--el-color-primary);
+  background: color-mix(in srgb, var(--el-color-primary) 10%, transparent);
+  border-radius: 4px;
+}
+
+.debug-base64-card__path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+}
+
+.debug-base64-card__preview {
+  padding: 12px;
+  background: var(--debug-surface);
+}
+
+.debug-base64-card__preview-stage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+  max-height: 400px;
+  overflow: hidden;
+
+  /* 棋盘格背景：适配透明图片 */
+  background-color: var(--el-fill-color-lighter);
+  background-image:
+    linear-gradient(45deg, var(--el-fill-color-darker) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--el-fill-color-darker) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--el-fill-color-darker) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--el-fill-color-darker) 75%);
+  background-position:
+    0 0,
+    0 10px,
+    10px -10px,
+    -10px 0;
+  background-size: 20px 20px;
+  border: 1px solid var(--debug-border);
+  border-radius: var(--debug-radius-sm);
+  box-shadow: inset 0 2px 8px color-mix(in srgb, #000 5%, transparent);
+
+  img {
+    max-width: 100%;
+    max-height: 380px;
+    object-fit: contain;
+    background: transparent;
+    filter: drop-shadow(0 4px 12px color-mix(in srgb, #000 15%, transparent));
+  }
+}
+
+.debug-base64-card__footer {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 14px;
+  background: var(--debug-surface);
+  border-top: 1px solid var(--debug-border);
+
+  .debug-base64-card__chip {
+    padding: 2px 6px;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--el-text-color-regular);
+    background: var(--debug-soft-bg-strong);
+    border: 1px solid var(--debug-border);
+    border-radius: 4px;
+  }
+}
+
+.debug-base64-empty {
+  margin-top: 40px;
+  opacity: 0.8;
+}
+
+/* --- 基础布局与原有样式 --- */
 
 .debug-console__top {
   display: grid;
@@ -2892,7 +3283,27 @@ onBeforeUnmount(() => {
   font-weight: 700;
   color: #fff;
   background: var(--el-color-primary);
-  border-radius: var(--debug-count-radius);
+  border-radius: var(--radius);
+}
+
+.debug-inline-tab--image {
+  flex: none;
+  max-width: none;
+  margin-left: 4px;
+  border-color: var(--debug-border);
+  border-radius: var(--radius);
+}
+
+.debug-inline-tab--image:disabled {
+  color: var(--el-text-color-placeholder);
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.debug-inline-tab--image:disabled:hover {
+  color: var(--el-text-color-placeholder);
+  background: var(--debug-soft-bg);
+  border-color: var(--debug-border);
 }
 
 .debug-inline-tab--more {
@@ -3390,33 +3801,4 @@ onBeforeUnmount(() => {
     0 -10px 22px -14px color-mix(in srgb, #fff 16%, transparent);
   --debug-shadow: 0 8px 20px color-mix(in srgb, #000 45%, transparent);
 }
-
-@media (max-width: 1024px) {
-  .debug-console__request-row {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .debug-console__request-actions {
-    justify-content: flex-end;
-    padding-left: 0;
-  }
-
-  .debug-console__request-actions::before {
-    display: none;
-  }
-
-  .debug-send-button {
-    min-width: 92px;
-  }
-
-  .debug-status-list {
-    justify-content: flex-start;
-  }
-}
 </style>
-
-
-
-
-
