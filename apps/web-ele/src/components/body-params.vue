@@ -1,7 +1,6 @@
 <script lang="ts" setup>
 import type { UploadInstance, UploadProps, UploadRawFile } from 'element-plus';
 
-
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 
 import {
@@ -150,8 +149,8 @@ const mergeComposedSchema = (baseSchema: any, pickedSchema: any) => {
   };
   if (baseSchema?.properties || pickedSchema?.properties) {
     merged.properties = {
-      ...(baseSchema?.properties || {}),
-      ...(pickedSchema?.properties || {}),
+      ...baseSchema?.properties,
+      ...pickedSchema?.properties,
     };
   }
   const required = [
@@ -178,7 +177,7 @@ const applyPropertyVariantState = (schema: any) => {
     return schema;
   }
 
-  const nextSchema: any = JSON.parse(JSON.stringify(schema));
+  const nextSchema: any = structuredClone(schema);
 
   keys.forEach((path) => {
     if (!path.startsWith('$.')) {
@@ -204,7 +203,11 @@ const applyPropertyVariantState = (schema: any) => {
         break;
       }
       cursor = nextNode;
-      if (cursor?.type === 'array' && cursor?.items && i < segments.length - 1) {
+      if (
+        cursor?.type === 'array' &&
+        cursor?.items &&
+        i < segments.length - 1
+      ) {
         cursor = cursor.items;
       }
     }
@@ -270,7 +273,6 @@ const resolvedRequestBody = computed(() => {
     return item?.title || parseSchemaRefName(item?.$ref) || fallback;
   };
 
-
   if (Array.isArray(schema.oneOf) && schema.oneOf.length > 0) {
     return schema.oneOf
       .map((item: any, index: number) => {
@@ -330,6 +332,13 @@ const handleBodyChange = () => {
   emit('bodyChange');
 };
 
+const focusJsonEditor = () => {
+  if (!['json', 'raw', 'xml'].includes(bodyType.value || '')) {
+    return;
+  }
+  editorRef.value?.focusEditor?.();
+};
+
 const handleExceed: UploadProps['onExceed'] = (files) => {
   uploadRef.value!.clearFiles();
   const file = files[0] as UploadRawFile;
@@ -344,12 +353,11 @@ const resolveCurrentRequestSchema = () => {
   }
 
   const selectedSchema = Array.isArray(current)
-    ?
-        current.find((item) =>
-          isMatchedRequestBodyVariant(item, props.requestBodyType),
-        ) ||
-        current[0] ||
-        null
+    ? current.find((item) =>
+        isMatchedRequestBodyVariant(item, props.requestBodyType),
+      ) ||
+      current[0] ||
+      null
     : current;
 
   if (!selectedSchema) {
@@ -359,7 +367,10 @@ const resolveCurrentRequestSchema = () => {
   return applyPropertyVariantState(selectedSchema);
 };
 
-const detectPreferredBodyType = (contentType: string, schema: any): BodyType => {
+const detectPreferredBodyType = (
+  contentType: string,
+  schema: any,
+): BodyType => {
   const normalizedContentType = `${contentType || ''}`.toLowerCase();
 
   let preferred: BodyType = 'none';
@@ -377,7 +388,8 @@ const detectPreferredBodyType = (contentType: string, schema: any): BodyType => 
 
   const properties = schema?.properties ?? {};
   const hasBinaryField = Object.values(properties).some(
-    (item: any) => item?.format === 'binary' || item?.items?.format === 'binary',
+    (item: any) =>
+      item?.format === 'binary' || item?.items?.format === 'binary',
   );
   if (hasBinaryField) {
     return 'form-data';
@@ -406,25 +418,27 @@ const rebuildBodyParamsBySchema = (
     (props.urlEncodedParams || []).map((item) => [item.name, item]),
   );
 
-  const nextFormDataParams: ParamsType[] = Object.keys(properties).map((key) => {
-    const property = properties[key] || {};
-    const previous = preserveValue ? previousFormMap.get(key) : undefined;
-    const required = requiredFields.includes(key);
-    const fieldFormat =
-      property.type === 'array' ? property?.items?.format : property?.format;
+  const nextFormDataParams: ParamsType[] = Object.keys(properties).map(
+    (key) => {
+      const property = properties[key] || {};
+      const previous = preserveValue ? previousFormMap.get(key) : undefined;
+      const required = requiredFields.includes(key);
+      const fieldFormat =
+        property.type === 'array' ? property?.items?.format : property?.format;
 
-    return {
-      contentType: inferContentType(property.type, fieldFormat),
-      description: property.description,
-      enabled: previous?.enabled ?? required,
-      fileList: previous?.fileList ?? [],
-      format: fieldFormat,
-      name: key,
-      required,
-      type: property.type,
-      value: previous?.value ?? '',
-    };
-  });
+      return {
+        contentType: inferContentType(property.type, fieldFormat),
+        description: property.description,
+        enabled: previous?.enabled ?? required,
+        fileList: previous?.fileList ?? [],
+        format: fieldFormat,
+        name: key,
+        required,
+        type: property.type,
+        value: previous?.value ?? '',
+      };
+    },
+  );
 
   const nextUrlEncodedParams: ParamsType[] = nextFormDataParams
     .filter((item) => item.format !== 'binary')
@@ -440,7 +454,11 @@ const rebuildBodyParamsBySchema = (
     });
 
   // eslint-disable-next-line vue/no-mutating-props
-  props.formDataParams.splice(0, props.formDataParams.length, ...nextFormDataParams);
+  props.formDataParams.splice(
+    0,
+    props.formDataParams.length,
+    ...nextFormDataParams,
+  );
   // eslint-disable-next-line vue/no-mutating-props
   props.urlEncodedParams.splice(
     0,
@@ -474,9 +492,9 @@ const syncByRequestBodyType = async (
   if (!picked?.schema) {
     bodyType.value = 'none';
     // eslint-disable-next-line vue/no-mutating-props
-    props.formDataParams.splice(0, props.formDataParams.length);
+    props.formDataParams.splice(0);
     // eslint-disable-next-line vue/no-mutating-props
-    props.urlEncodedParams.splice(0, props.urlEncodedParams.length);
+    props.urlEncodedParams.splice(0);
     return;
   }
 
@@ -567,86 +585,98 @@ defineExpose({
         }}
       </span>
     </template>
-    <div class="body-params flex flex-wrap">
-      <ElRadioGroup v-model="bodyType" size="small">
-        <ElRadioButton value="none">none</ElRadioButton>
-        <ElRadioButton value="form-data">form-data</ElRadioButton>
-        <ElRadioButton value="x-www-form-urlencoded">
-          x-www-form-urlencoded
-        </ElRadioButton>
-        <ElRadioButton value="json">json</ElRadioButton>
-        <ElRadioButton value="raw">raw</ElRadioButton>
-        <ElRadioButton value="binary">binary</ElRadioButton>
-        <ElRadioButton value="xml">xml</ElRadioButton>
-      </ElRadioGroup>
-    </div>
-    <div
-      v-if="bodyType === 'none'"
-      class="my-2 border py-8 text-center text-sm text-inherit"
-    >
-      该请求没有 Body 体
-    </div>
+    <div class="body-tab-content">
+      <div class="body-params flex flex-wrap">
+        <ElRadioGroup v-model="bodyType" size="small">
+          <ElRadioButton value="none">none</ElRadioButton>
+          <ElRadioButton value="form-data">form-data</ElRadioButton>
+          <ElRadioButton value="x-www-form-urlencoded">
+            x-www-form-urlencoded
+          </ElRadioButton>
+          <ElRadioButton value="json">json</ElRadioButton>
+          <ElRadioButton value="raw">raw</ElRadioButton>
+          <ElRadioButton value="binary">binary</ElRadioButton>
+          <ElRadioButton value="xml">xml</ElRadioButton>
+        </ElRadioGroup>
+      </div>
 
-    <div class="body-editor">
-      <template v-if="bodyType === 'form-data'">
-        <params-table :table-data="formDataParams" show-content-type />
-      </template>
+      <div
+        v-if="bodyType === 'none'"
+        class="my-2 border py-8 text-center text-sm text-inherit"
+      >
+        该请求没有 Body 体
+      </div>
 
-      <template v-if="bodyType === 'x-www-form-urlencoded'">
-        <params-table :table-data="urlEncodedParams" show-content-type />
-      </template>
+      <div v-else class="body-editor" @click.capture="focusJsonEditor">
+        <template v-if="bodyType === 'form-data'">
+          <params-table :table-data="formDataParams" show-content-type />
+        </template>
 
-      <template v-if="bodyType === 'json'">
-        <JsonView
-          ref="editorRef"
-          :one-of="true"
-          :data="requestBodyExample"
-          :descriptions="{}"
-          :read-only="false"
-          @change="handleBodyChange"
-        />
-      </template>
+        <template v-if="bodyType === 'x-www-form-urlencoded'">
+          <params-table :table-data="urlEncodedParams" show-content-type />
+        </template>
 
-      <template v-if="bodyType === 'raw'">
-        <JsonView
-          ref="editorRef"
-          :data="requestBodyExample"
-          :descriptions="{}"
-          :read-only="false"
-          language="null"
-          @change="handleBodyChange"
-        />
-      </template>
+        <template v-if="bodyType === 'json'">
+          <JsonView
+            ref="editorRef"
+            class="body-editor__json"
+            :one-of="true"
+            :data="requestBodyExample"
+            :descriptions="{}"
+            :read-only="false"
+            @change="handleBodyChange"
+          />
+        </template>
 
-      <template v-if="bodyType === 'xml'">
-        <JsonView
-          ref="editorRef"
-          :data="requestBodyXMLExample"
-          :descriptions="{}"
-          :read-only="false"
-          language="xml"
-          @change="handleBodyChange"
-        />
-      </template>
+        <template v-if="bodyType === 'raw'">
+          <JsonView
+            ref="editorRef"
+            class="body-editor__json"
+            :data="requestBodyExample"
+            :descriptions="{}"
+            :read-only="false"
+            language="null"
+            @change="handleBodyChange"
+          />
+        </template>
 
-      <template v-if="bodyType === 'binary'">
-        <ElUpload
-          ref="uploadRef"
-          v-model:file-list="fileList"
-          class="w-full"
-          action="#"
-          :limit="1"
-          :on-exceed="handleExceed"
-          :auto-upload="false"
-        >
-          <ElButton plain size="small" class="w-full">Upload</ElButton>
-        </ElUpload>
-      </template>
+        <template v-if="bodyType === 'xml'">
+          <JsonView
+            ref="editorRef"
+            class="body-editor__json"
+            :data="requestBodyXMLExample"
+            :descriptions="{}"
+            :read-only="false"
+            language="xml"
+            @change="handleBodyChange"
+          />
+        </template>
+
+        <template v-if="bodyType === 'binary'">
+          <ElUpload
+            ref="uploadRef"
+            v-model:file-list="fileList"
+            class="w-full"
+            action="#"
+            :limit="1"
+            :on-exceed="handleExceed"
+            :auto-upload="false"
+          >
+            <ElButton plain size="small" class="w-full">Upload</ElButton>
+          </ElUpload>
+        </template>
+      </div>
     </div>
   </ElTabPane>
 </template>
 
 <style lang="scss" scoped>
+.body-tab-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
 .body-params {
   :deep(.el-radio-button) {
     padding: 0 6px 6px;
@@ -658,15 +688,31 @@ defineExpose({
   }
 }
 
+.body-editor {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.body-editor > * {
+  flex: 1;
+  min-height: 0;
+}
+
+.body-editor__json {
+  flex: 1;
+  min-height: 100%;
+}
+
+:deep(.body-editor .json-viewer-ultimate),
+:deep(.body-editor .json-viewer-ultimate > .flex),
+:deep(.body-editor .json-viewer-ultimate > .json-view-main),
+:deep(.body-editor .json-viewer-ultimate .json-editor-instance) {
+  height: 100%;
+  min-height: 0;
+}
+
 :deep(.w-full .el-upload) {
   width: 100%;
 }
 </style>
-
-
-
-
-
-
-
-

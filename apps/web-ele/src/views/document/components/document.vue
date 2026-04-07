@@ -5,7 +5,7 @@ import type { SecurityMetadata } from '#/utils/securityexpand';
 import { computed, onBeforeMount, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 
-import { ApiLinkPrefix, ApiTestRun, ApiTestRunning } from '@vben/icons';
+import { ApiTestRun, ApiTestRunning, SvgApiPrefixIcon } from '@vben/icons';
 import { usePreferences } from '@vben/preferences';
 
 import { useClipboard } from '@vueuse/core';
@@ -360,8 +360,8 @@ const applyRequestBodyVariantState = (
 
     if (baseSchema?.properties || pickedSchema?.properties) {
       merged.properties = {
-        ...(baseSchema?.properties || {}),
-        ...(pickedSchema?.properties || {}),
+        ...baseSchema?.properties,
+        ...pickedSchema?.properties,
       };
     }
 
@@ -412,9 +412,10 @@ const applyRequestBodyVariantState = (
       const picked = current.anyOf[index] ?? current.anyOf[0];
       current = mergeComposedSchema(base, picked);
     } else if (Array.isArray(current.allOf) && current.allOf.length > 0) {
-      const mergedAllOf = current.allOf.reduce((acc: any, item: any) => {
-        return mergeComposedSchema(acc, visit(item, path));
-      }, {});
+      let mergedAllOf: any = {};
+      for (const item of current.allOf) {
+        mergedAllOf = mergeComposedSchema(mergedAllOf, visit(item, path));
+      }
       const base = { ...current };
       delete base.allOf;
       delete base['x-nextdoc4j-allOfMerged'];
@@ -434,8 +435,8 @@ const applyRequestBodyVariantState = (
     }
 
     if (Array.isArray(current.prefixItems)) {
-      current.prefixItems = current.prefixItems.map((item: any, index: number) =>
-        visit(item, `${path}.${index}`),
+      current.prefixItems = current.prefixItems.map(
+        (item: any, index: number) => visit(item, `${path}.${index}`),
       );
     }
 
@@ -546,7 +547,6 @@ const toggleResponseExample = (code: string) => {
   responseExampleOpen.value[code] = !responseExampleOpen.value[code];
 };
 
-
 const handleResponseSchemaVariantChange = (
   code: string,
   payload: { index: number; path: string },
@@ -554,7 +554,7 @@ const handleResponseSchemaVariantChange = (
   responseVariantState.value = {
     ...responseVariantState.value,
     [code]: {
-      ...(responseVariantState.value[code] || {}),
+      ...responseVariantState.value[code],
       [payload.path]: payload.index,
     },
   };
@@ -644,7 +644,7 @@ defineExpose({
 
             <ElTooltip v-if="baseUrl" :content="baseUrl" placement="top">
               <button class="endpoint-prefix" @click="handleCopyBaseUrl">
-                <ApiLinkPrefix class="size-4" />
+                <SvgApiPrefixIcon class="endpoint-prefix__icon" />
               </button>
             </ElTooltip>
 
@@ -718,10 +718,7 @@ defineExpose({
               </div>
 
               <div class="sub-panel__actions">
-                <div
-                  v-if="Array.isArray(requestBody)"
-                  class="body-type-switch"
-                >
+                <div v-if="Array.isArray(requestBody)" class="body-type-switch">
                   <ElButton
                     v-for="item in requestBody"
                     :key="item.variantKey || item.title"
@@ -731,7 +728,9 @@ defineExpose({
                       'body-type-switch__button--active':
                         isMatchedRequestBodyVariant(item, requestBodyType),
                     }"
-                    @click="requestBodyType = resolveRequestBodyVariantValue(item)"
+                    @click="
+                      requestBodyType = resolveRequestBodyVariantValue(item)
+                    "
                   >
                     {{ item.title }}
                   </ElButton>
@@ -769,10 +768,10 @@ defineExpose({
                 class="schema-layout__aside"
               >
                 <JsonViewer
-                    class="json-panel app-json-schema-viewer"
-                    :schema="requestPreviewSchema"
-                    mode="request"
-                  />
+                  class="json-panel app-json-schema-viewer"
+                  :schema="requestPreviewSchema"
+                  mode="request"
+                />
               </div>
             </div>
           </article>
@@ -1073,13 +1072,22 @@ defineExpose({
 
 .endpoint-prefix {
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  color: var(--el-text-color-secondary);
+  width: auto;
+  height: auto;
+  padding: 0;
+  color: color-mix(in srgb, var(--el-color-primary) 88%, #fff 12%);
   cursor: pointer;
-  background: var(--el-fill-color-light);
-  border-radius: var(--doc-chip-radius);
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
   transition: all 0.2s ease;
+}
+
+.endpoint-prefix__icon {
+  width: 19px;
+  height: 19px;
+  opacity: 0.9;
 }
 
 .endpoint-path {
@@ -1103,6 +1111,12 @@ defineExpose({
     var(--el-bg-color) 72%,
     var(--el-color-primary-light-9) 28%
   );
+}
+
+.endpoint-prefix:hover {
+  color: var(--el-color-primary);
+  background: transparent;
+  transform: scale(1.04);
 }
 
 .section-panel__header {
@@ -1419,9 +1433,3 @@ defineExpose({
   }
 }
 </style>
-
-
-
-
-
-
