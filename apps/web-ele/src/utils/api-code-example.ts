@@ -1101,6 +1101,8 @@ const resolveTsTypeExpression = (
     return 'unknown';
   }
 
+  const schemaType = `${normalized.type || ''}`.toLowerCase();
+
   if (Array.isArray(normalized.enum) && normalized.enum.length > 0) {
     const enumName = ensureNamedDeclaration(
       pickDeclarationName(suggestedName, rawSchema, normalized, suggestedName),
@@ -1166,8 +1168,10 @@ const resolveTsTypeExpression = (
     return withNullable(normalized, modelName);
   }
 
-  const schemaType = `${normalized.type || ''}`.toLowerCase();
   switch (schemaType) {
+    case 'any': {
+      return withNullable(normalized, 'any');
+    }
     case 'array': {
       const itemType = resolveTsTypeExpression(
         rawResolved?.items,

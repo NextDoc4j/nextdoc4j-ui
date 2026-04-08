@@ -6,7 +6,7 @@ import { computed } from 'vue';
 import { ElTooltip } from 'element-plus';
 
 import { getEnumItems } from '#/utils/enumexpand';
-import { resolveSchema } from '#/utils/schema';
+import { getSchemaTypeLabel, resolveSchema } from '#/utils/schema';
 
 defineOptions({
   name: 'ParameterView',
@@ -71,17 +71,7 @@ const enumValueList = computed(() => {
 });
 
 const typeLabel = computed(() => {
-  const target = schema.value;
-  if (!target) return '-';
-
-  if (target.type === 'array') {
-    const itemType = target.items?.type || 'any';
-    const itemSuffix = target.items?.format ? `<${target.items.format}>` : '';
-    return `array<${itemType}${itemSuffix}>`;
-  }
-
-  const suffix = target.format ? `<${target.format}>` : '';
-  return `${target.type || 'unknown'}${suffix}`;
+  return getSchemaTypeLabel(schema.value);
 });
 
 const exampleValue = computed(() => {

@@ -6,6 +6,7 @@ import { SvgCaretRightIcon } from '@vben/icons';
 import { ElButton, ElTooltip } from 'element-plus';
 
 import { getEnumItems } from '#/utils/enumexpand';
+import { getSchemaTypeLabel } from '#/utils/schema';
 
 defineOptions({
   name: 'SchemaView',
@@ -24,7 +25,7 @@ const props = withDefaults(
 );
 
 const emits = defineEmits<{
-  'variant-change': [payload: { index: number; path: string }];
+  variantChange: [payload: { index: number; path: string }];
 }>();
 
 type CompositionKeyword = 'allOf' | 'anyOf' | 'oneOf';
@@ -85,14 +86,14 @@ const updateVariant = (path: string, value: number | string) => {
   const parsed = Number(value);
   const nextIndex = Number.isFinite(parsed) ? parsed : 0;
   variantState.value[path] = nextIndex;
-  emits('variant-change', {
+  emits('variantChange', {
     index: nextIndex,
     path,
   });
 };
 
 const handleChildVariantChange = (payload: { index: number; path: string }) => {
-  emits('variant-change', payload);
+  emits('variantChange', payload);
 };
 
 const mergeSchema = (baseSchema: any, pickedSchema: any) => {
@@ -115,8 +116,8 @@ const mergeSchema = (baseSchema: any, pickedSchema: any) => {
 
   if (baseSchema?.properties || pickedSchema?.properties) {
     merged.properties = {
-      ...(baseSchema?.properties || {}),
-      ...(pickedSchema?.properties || {}),
+      ...baseSchema?.properties,
+      ...pickedSchema?.properties,
     };
   }
 
@@ -242,10 +243,14 @@ const getConstraints = (value: any, path: string) => {
   const parts: string[] = [];
 
   if (source?.minLength !== undefined) {
-    parts.push(`>=${source.minLength}${source.type === 'string' ? ' 字符' : ''}`);
+    parts.push(
+      `>=${source.minLength}${source.type === 'string' ? ' 字符' : ''}`,
+    );
   }
   if (source?.maxLength !== undefined) {
-    parts.push(`<=${source.maxLength}${source.type === 'string' ? ' 字符' : ''}`);
+    parts.push(
+      `<=${source.maxLength}${source.type === 'string' ? ' 字符' : ''}`,
+    );
   }
   if (source?.minimum !== undefined) {
     parts.push(`>=${source.minimum}`);
@@ -269,19 +274,7 @@ const getEnumValueList = (value: any, path: string) => {
 
 const getTypeLabel = (value: any, path: string) => {
   const schema = getDisplaySchema(value, path);
-  if (!schema) return '-';
-
-  if (schema.type === 'array') {
-    const itemType = schema.items?.type || 'any';
-    const itemSuffix = schema.items?.format ? `<${schema.items.format}>` : '';
-    return `array<${itemType}${itemSuffix}>`;
-  }
-
-  const suffix = schema.format ? `<${schema.format}>` : '';
-  if (schema.title && schema.type === 'object') {
-    return `${schema.type}<${schema.title}>`;
-  }
-  return `${schema.type || 'unknown'}${suffix}`;
+  return getSchemaTypeLabel(schema);
 };
 
 const getExampleValue = (value: any, path: string) => {
@@ -330,7 +323,6 @@ const hasVariantSelector = (item: any) => {
   return getCompositionItems(item, keyword).length > 1;
 };
 
-
 const getVariantOptions = (item: any) => {
   const keyword = getCompositionKeyword(item);
   if (!keyword || keyword === 'allOf') {
@@ -376,7 +368,9 @@ const rootHasVariantSelector = computed(() => {
 
 const showRootHeader = computed(() => {
   return (
-    showRootArrayPill.value || showRootPrimitivePill.value || rootHasVariantSelector.value
+    showRootArrayPill.value ||
+    showRootPrimitivePill.value ||
+    rootHasVariantSelector.value
   );
 });
 
@@ -386,18 +380,14 @@ const showSchemaStack = computed(() => {
 </script>
 
 <template>
-  <div
-    v-if="showRootHeader"
-    class="schema-root-pill"
-  >
+  <div v-if="showRootHeader" class="schema-root-pill">
     <span class="schema-root-pill__title">
       {{ showRootArrayPill || showRootPrimitivePill ? '结构' : '根' }}
     </span>
-    <span class="schema-root-pill__value">{{ getTypeLabel(resolvedRootSchema, rootPath) }}</span>
-    <div
-      v-if="rootHasVariantSelector"
-      class="composition-switch__buttons"
-    >
+    <span class="schema-root-pill__value">{{
+      getTypeLabel(resolvedRootSchema, rootPath)
+    }}</span>
+    <div v-if="rootHasVariantSelector" class="composition-switch__buttons">
       <ElTooltip
         v-for="(option, index) in getVariantOptions(data)"
         :key="`${rootPath}-${index}`"
@@ -420,11 +410,7 @@ const showSchemaStack = computed(() => {
   </div>
 
   <div v-if="showSchemaStack" class="schema-stack">
-    <div
-      v-for="(value, key) in rootChildren"
-      :key="key"
-      class="schema-item"
-    >
+    <div v-for="(value, key) in rootChildren" :key="key" class="schema-item">
       <div class="schema-item__top">
         <button
           v-if="isExpandable(value, getNodePath(String(key)))"
@@ -451,7 +437,11 @@ const showSchemaStack = computed(() => {
                     : 'meta-pill--optional'
                 "
               >
-                {{ isRequired(resolvedRootSchema, String(key), value) ? '必填' : '可选' }}
+                {{
+                  isRequired(resolvedRootSchema, String(key), value)
+                    ? '必填'
+                    : '可选'
+                }}
               </span>
               <span class="meta-pill meta-pill--type">
                 {{ getTypeLabel(value, getNodePath(String(key))) }}
@@ -481,12 +471,21 @@ const showSchemaStack = computed(() => {
                 只写
               </span>
               <ElTooltip
-                v-if="getExampleValue(value, getNodePath(String(key))) !== undefined"
-                :content="formatValue(getExampleValue(value, getNodePath(String(key))))"
+                v-if="
+                  getExampleValue(value, getNodePath(String(key))) !== undefined
+                "
+                :content="
+                  formatValue(getExampleValue(value, getNodePath(String(key))))
+                "
                 placement="top"
               >
                 <span class="meta-pill meta-pill--example">
-                  示例 {{ formatValue(getExampleValue(value, getNodePath(String(key)))) }}
+                  示例
+                  {{
+                    formatValue(
+                      getExampleValue(value, getNodePath(String(key))),
+                    )
+                  }}
                 </span>
               </ElTooltip>
               <ElTooltip
@@ -506,36 +505,39 @@ const showSchemaStack = computed(() => {
               </span>
             </div>
             <div
-                v-if="hasVariantSelector(value)"
-                class="schema-item__meta-variant"
+              v-if="hasVariantSelector(value)"
+              class="schema-item__meta-variant"
+            >
+              <ElTooltip
+                v-for="(option, index) in getVariantOptions(value)"
+                :key="`${getNodePath(String(key))}-${index}`"
+                :content="getVariantOptionLabel(option, index)"
+                placement="top"
               >
-                <ElTooltip
-                  v-for="(option, index) in getVariantOptions(value)"
-                  :key="`${getNodePath(String(key))}-${index}`"
-                  :content="getVariantOptionLabel(option, index)"
-                  placement="top"
+                <ElButton
+                  size="small"
+                  class="variant-switch-button"
+                  :class="{
+                    'variant-switch-button--active':
+                      getSelectedVariantIndex(
+                        value,
+                        getNodePath(String(key)),
+                      ) === index,
+                  }"
+                  @click="updateVariant(getNodePath(String(key)), index)"
                 >
-                  <ElButton
-                    size="small"
-                    class="variant-switch-button"
-                    :class="{
-                      'variant-switch-button--active':
-                        getSelectedVariantIndex(value, getNodePath(String(key))) ===
-                        index,
-                    }"
-                    @click="updateVariant(getNodePath(String(key)), index)"
-                  >
-                    {{ index + 1 }}
-                  </ElButton>
-                </ElTooltip>
-              </div>
+                  {{ index + 1 }}
+                </ElButton>
+              </ElTooltip>
+            </div>
           </div>
-
 
           <div
             v-if="
               getDescription(value, getNodePath(String(key))) &&
-              !hasHtmlDescription(getDescription(value, getNodePath(String(key))))
+              !hasHtmlDescription(
+                getDescription(value, getNodePath(String(key))),
+              )
             "
             class="schema-item__description"
           >
@@ -544,20 +546,27 @@ const showSchemaStack = computed(() => {
           <div
             v-if="
               getDescription(value, getNodePath(String(key))) &&
-              hasHtmlDescription(getDescription(value, getNodePath(String(key))))
+              hasHtmlDescription(
+                getDescription(value, getNodePath(String(key))),
+              )
             "
             class="schema-item__description prose prose-sm max-w-none"
             v-html="getDescription(value, getNodePath(String(key)))"
           ></div>
 
           <div
-            v-if="getPropertyEnumItems(value, getNodePath(String(key))).length > 0"
+            v-if="
+              getPropertyEnumItems(value, getNodePath(String(key))).length > 0
+            "
             class="schema-item__enum"
           >
             <span class="schema-item__enum-label">枚举</span>
             <div class="schema-item__enum-values">
               <span
-                v-for="item in getPropertyEnumItems(value, getNodePath(String(key)))"
+                v-for="item in getPropertyEnumItems(
+                  value,
+                  getNodePath(String(key)),
+                )"
                 :key="item.value"
                 class="enum-pill"
               >
@@ -636,8 +645,6 @@ const showSchemaStack = computed(() => {
   display: grid;
 }
 
-
-
 .composition-switch__buttons {
   display: flex;
   flex-wrap: wrap;
@@ -684,7 +691,8 @@ const showSchemaStack = computed(() => {
 }
 
 .schema-item__name {
-  font-family: 'HarmonyOS Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-family:
+    'HarmonyOS Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   font-size: 14px;
   font-weight: 900;
   color: var(--el-text-color-primary);
@@ -751,9 +759,6 @@ const showSchemaStack = computed(() => {
   line-height: 1.6;
   color: var(--el-text-color-secondary);
 }
-
-
-
 
 .variant-switch-button {
   min-width: 26px;
@@ -983,4 +988,3 @@ const showSchemaStack = computed(() => {
   color: #d4e1f5;
 }
 </style>
-

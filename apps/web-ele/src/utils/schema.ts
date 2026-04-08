@@ -25,6 +25,36 @@ const mergeUniqueStrings = (...valueGroups: Array<undefined | unknown[]>) => {
   return [...new Set(values)];
 };
 
+const hasSchemaComposition = (schema: any) => {
+  return Boolean(
+    (Array.isArray(schema?.oneOf) && schema.oneOf.length > 0) ||
+      (Array.isArray(schema?.anyOf) && schema.anyOf.length > 0) ||
+      (Array.isArray(schema?.allOf) && schema.allOf.length > 0),
+  );
+};
+
+const hasSchemaStructuralShape = (schema: any) => {
+  return Boolean(
+    schema?.type ||
+      (Array.isArray(schema?.types) && schema.types.length > 0) ||
+      schema?.properties ||
+      schema?.additionalProperties !== undefined ||
+      schema?.maxProperties !== undefined ||
+      schema?.minProperties !== undefined ||
+      schema?.items ||
+      (Array.isArray(schema?.prefixItems) && schema.prefixItems.length > 0) ||
+      (Array.isArray(schema?.enum) && schema.enum.length > 0) ||
+      hasSchemaComposition(schema),
+  );
+};
+
+const isFreeFormSchema = (schema: any) => {
+  if (!schema || typeof schema !== 'object') {
+    return false;
+  }
+  return !hasSchemaStructuralShape(schema);
+};
+
 const inferSchemaType = (schema: any) => {
   if (schema?.type) {
     return schema.type;
@@ -52,6 +82,9 @@ const inferSchemaType = (schema: any) => {
     }
     return typeof schema.enum[0];
   }
+  if (isFreeFormSchema(schema)) {
+    return 'any';
+  }
   return '';
 };
 
@@ -67,7 +100,7 @@ const parseExampleValue = (value: unknown) => {
     trimmed === 'true' ||
     trimmed === 'false' ||
     trimmed === 'null' ||
-    /^-?\d+(\.\d+)?$/.test(trimmed) ||
+    /^-?\d+(?:\.\d+)?$/.test(trimmed) ||
     (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
     (trimmed.startsWith('[') && trimmed.endsWith(']'))
   ) {
@@ -215,7 +248,7 @@ const adaptSchemaInternal = (
   }
 
   let schema = inputSchema;
-  let nextResolvedRefs = new Set(resolvedRefs);
+  const nextResolvedRefs = new Set(resolvedRefs);
   const refName = parseSchemaRefName(schema.$ref);
   if (refName) {
     if (resolvedRefs.has(refName)) {
@@ -252,7 +285,10 @@ const adaptSchemaInternal = (
     adapted.types = [...schema.types];
   }
 
-  const required = mergeUniqueStrings(schema.required, schema.requiredProperties);
+  const required = mergeUniqueStrings(
+    schema.required,
+    schema.requiredProperties,
+  );
   if (required.length > 0) {
     adapted.required = required;
   } else {
@@ -262,7 +298,12 @@ const adaptSchemaInternal = (
   if (Array.isArray(schema.oneOf) && schema.oneOf.length > 0) {
     adapted.oneOf = schema.oneOf
       .map((item: any) =>
-        adaptSchemaInternal(item, options, new Set(nextResolvedRefs), depth + 1),
+        adaptSchemaInternal(
+          item,
+          options,
+          new Set(nextResolvedRefs),
+          depth + 1,
+        ),
       )
       .filter(Boolean);
   }
@@ -270,7 +311,12 @@ const adaptSchemaInternal = (
   if (Array.isArray(schema.anyOf) && schema.anyOf.length > 0) {
     adapted.anyOf = schema.anyOf
       .map((item: any) =>
-        adaptSchemaInternal(item, options, new Set(nextResolvedRefs), depth + 1),
+        adaptSchemaInternal(
+          item,
+          options,
+          new Set(nextResolvedRefs),
+          depth + 1,
+        ),
       )
       .filter(Boolean);
   }
@@ -278,7 +324,12 @@ const adaptSchemaInternal = (
   if (Array.isArray(schema.allOf) && schema.allOf.length > 0) {
     adapted.allOf = schema.allOf
       .map((item: any) =>
-        adaptSchemaInternal(item, options, new Set(nextResolvedRefs), depth + 1),
+        adaptSchemaInternal(
+          item,
+          options,
+          new Set(nextResolvedRefs),
+          depth + 1,
+        ),
       )
       .filter(Boolean);
     const merged = mergeAllOfSchemas(adapted.allOf);
@@ -293,8 +344,8 @@ const adaptSchemaInternal = (
     adapted.additionalProperties !== undefined
   ) {
     const sourceProperties = {
-      ...(allOfMerged.properties || {}),
-      ...(adapted.properties || {}),
+      ...allOfMerged.properties,
+      ...adapted.properties,
     };
 
     const nextProperties: Record<string, any> = {};
@@ -385,14 +436,34 @@ export function hasRenderableSchema(schema: any) {
     return false;
   }
   return Boolean(
-    schema.properties ||
+    inferSchemaType(schema) ||
       schema.$ref ||
-      schema.items ||
-      schema.additionalProperties !== undefined ||
-      (Array.isArray(schema.oneOf) && schema.oneOf.length > 0) ||
-      (Array.isArray(schema.anyOf) && schema.anyOf.length > 0) ||
-      (Array.isArray(schema.allOf) && schema.allOf.length > 0),
+      schema.format ||
+      schema.example !== undefined ||
+      (Array.isArray(schema.examples) && schema.examples.length > 0) ||
+      schema.default !== undefined,
   );
+}
+
+export function getSchemaTypeLabel(schema: any): string {
+  if (!schema || typeof schema !== 'object') {
+    return '-';
+  }
+
+  const schemaType = inferSchemaType(schema) || 'any';
+  if (schemaType === 'array') {
+    return `array<${getSchemaTypeLabel(schema.items)}>`;
+  }
+
+  if (schemaType === 'any') {
+    return schema.title ? `any<${schema.title}>` : 'any';
+  }
+
+  const suffix = schema.format ? `<${schema.format}>` : '';
+  if (schema.title && schemaType === 'object') {
+    return `${schemaType}<${schema.title}>`;
+  }
+  return `${schemaType}${suffix}`;
 }
 
 export function adaptSchemaForView(
@@ -486,14 +557,17 @@ export function formatJson(data: any): string {
 const stringExampleByFormat = (format?: string) => {
   const normalized = `${format || ''}`.toLowerCase();
   switch (normalized) {
+    case 'binary': {
+      return '<binary>';
+    }
+    case 'byte': {
+      return '<base64>';
+    }
     case 'date': {
       return '2026-01-01';
     }
     case 'date-time': {
       return '2026-01-01T00:00:00Z';
-    }
-    case 'uuid': {
-      return '123e4567-e89b-12d3-a456-426614174000';
     }
     case 'email': {
       return 'user@example.com';
@@ -502,11 +576,8 @@ const stringExampleByFormat = (format?: string) => {
     case 'url': {
       return 'https://example.com';
     }
-    case 'binary': {
-      return '<binary>';
-    }
-    case 'byte': {
-      return '<base64>';
+    case 'uuid': {
+      return '123e4567-e89b-12d3-a456-426614174000';
     }
     default: {
       return 'string';
@@ -588,7 +659,12 @@ const generateExampleInternal = (
     let hasMerged = false;
 
     normalized.allOf.forEach((item: any) => {
-      const value = generateExampleInternal(item, options, seenObjects, depth + 1);
+      const value = generateExampleInternal(
+        item,
+        options,
+        seenObjects,
+        depth + 1,
+      );
       if (isPlainObject(value)) {
         Object.assign(mergedObject, value);
         hasMerged = true;
@@ -608,15 +684,26 @@ const generateExampleInternal = (
 
   const schemaType = inferSchemaType(normalized);
   switch (schemaType) {
+    case 'any': {
+      return {};
+    }
     case 'array': {
-      if (Array.isArray(normalized.prefixItems) && normalized.prefixItems.length > 0) {
+      if (
+        Array.isArray(normalized.prefixItems) &&
+        normalized.prefixItems.length > 0
+      ) {
         return normalized.prefixItems.map((item: any) =>
           generateExampleInternal(item, options, seenObjects, depth + 1),
         );
       }
       if (normalized.items) {
         return [
-          generateExampleInternal(normalized.items, options, seenObjects, depth + 1),
+          generateExampleInternal(
+            normalized.items,
+            options,
+            seenObjects,
+            depth + 1,
+          ),
         ];
       }
       return [];
@@ -720,4 +807,3 @@ export const processSchema = (schema: Schema) => {
   }
   return {};
 };
-
