@@ -20,7 +20,7 @@ import {
 
 import JsonViewer from '#/components/json-viewer/index.vue';
 import SchemaView from '#/components/schema-view.vue';
-import { methodType } from '#/constants/methods';
+import { getMethodStyle } from '#/constants/methods';
 import { useApiStore } from '#/store';
 import {
   adaptSchemaForView,
@@ -91,7 +91,7 @@ const descriptionText = computed(() => {
 
 const methodStyle = computed(() => {
   const method = apiInfo.value.method?.toUpperCase?.() || 'GET';
-  return methodType[method] || methodType.GET;
+  return getMethodStyle(method, isDark.value);
 });
 
 const securityMetadata = computed<null | SecurityMetadata>(() => {

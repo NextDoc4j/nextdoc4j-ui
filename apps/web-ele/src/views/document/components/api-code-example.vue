@@ -7,10 +7,17 @@ import { SvgApiPrefixIcon, SvgCopyIcon } from '@vben/icons';
 import { usePreferences } from '@vben/preferences';
 import { useClipboard } from '@vueuse/core';
 
-import { ElButton, ElEmpty, ElMessage, ElRadioButton, ElRadioGroup, ElTooltip } from 'element-plus';
+import {
+  ElButton,
+  ElEmpty,
+  ElMessage,
+  ElRadioButton,
+  ElRadioGroup,
+  ElTooltip,
+} from 'element-plus';
 
 import MarkdownCodeBlock from '#/components/markdown-code-block.vue';
-import { methodType } from '#/constants/methods';
+import { getMethodStyle } from '#/constants/methods';
 import { useApiStore } from '#/store';
 import {
   buildCodeExampleContext,
@@ -49,7 +56,7 @@ const methodLabel = computed(() => {
 });
 
 const methodStyle = computed(() => {
-  return methodType[methodLabel.value] || methodType.GET;
+  return getMethodStyle(methodLabel.value, isDark.value);
 });
 
 const pathLabel = computed(() => props.info?.path || '/');
@@ -103,7 +110,11 @@ async function handleCopyCode() {
 
         <div class="code-example-page__toolbar">
           <ElTooltip content="复制代码" placement="top">
-            <ElButton text class="code-example-page__copy-button" @click="handleCopyCode">
+            <ElButton
+              text
+              class="code-example-page__copy-button"
+              @click="handleCopyCode"
+            >
               <SvgCopyIcon class="size-4" />
             </ElButton>
           </ElTooltip>
@@ -148,7 +159,8 @@ async function handleCopyCode() {
   background: var(--el-bg-color);
   border: 1px solid color-mix(in srgb, var(--el-border-color) 92%, transparent);
   border-radius: calc(var(--radius) * 1.1);
-  box-shadow: 0 10px 24px color-mix(in srgb, var(--el-text-color-primary) 4%, transparent);
+  box-shadow: 0 10px 24px
+    color-mix(in srgb, var(--el-text-color-primary) 4%, transparent);
 }
 
 .code-example-page--dark .code-example-page__shell {
@@ -161,7 +173,8 @@ async function handleCopyCode() {
   align-items: flex-start;
   justify-content: space-between;
   padding: 18px 20px 16px;
-  border-bottom: 1px solid color-mix(in srgb, var(--el-border-color) 86%, transparent);
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--el-border-color) 86%, transparent);
 }
 
 .code-example-page__endpoint {

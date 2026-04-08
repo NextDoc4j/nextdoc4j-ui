@@ -5,7 +5,8 @@ import { computed } from 'vue';
 
 import { VbenTooltip } from '@vben-core/shadcn-ui';
 
-import { methodType } from '../../../../../apps/web-ele/src/constants/methods';
+import { getMethodStyle } from '../../../../../apps/web-ele/src/constants/methods';
+import { useMenuContext } from './hooks';
 import { MenuBadge, MenuItem, SubMenu as SubMenuComp } from './components';
 // eslint-disable-next-line import/no-self-import
 import SubMenu from './sub-menu.vue';
@@ -22,6 +23,8 @@ defineOptions({
 });
 
 const props = withDefaults(defineProps<Props>(), {});
+const rootMenu = useMenuContext();
+const menu = computed(() => props.menu);
 
 /**
  * 判断是否有子节点，动态渲染 menu-item/sub-menu-item
@@ -38,6 +41,10 @@ const showEntityDescriptionTooltip = computed(() => {
   return (
     !hasChildren.value && !!menu.description && menu.path.startsWith('/entity/')
   );
+});
+
+const methodStyle = computed(() => {
+  return getMethodStyle(menu.value?.method, rootMenu?.theme === 'dark');
 });
 
 const countLeaves = (treeData: MenuRecordRaw) => {
@@ -91,7 +98,7 @@ const countLeaves = (treeData: MenuRecordRaw) => {
       <span v-else class="flex-1">{{ menu.name }}</span>
       <span
         class="inline-flex max-w-[70px] items-center rounded-md px-1.5 py-0.5 font-mono text-xs font-bold text-white"
-        :style="{ ...methodType[menu?.method?.toUpperCase()] }"
+        :style="methodStyle"
         v-if="menu.method"
       >
         {{ menu?.method?.toUpperCase() ?? '' }}

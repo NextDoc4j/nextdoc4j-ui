@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import type {ParamsType} from './body-params.vue';
+import type { ParamsType } from './body-params.vue';
 
 import type {
   ParameterObject,
@@ -7,7 +7,7 @@ import type {
   SchemaObject,
   SecuritySchemeObject,
 } from '#/typings/openApi';
-import type {DetectedBase64Image} from '#/utils/base64-image';
+import type { DetectedBase64Image } from '#/utils/base64-image';
 
 import {
   computed,
@@ -19,13 +19,14 @@ import {
   watch,
 } from 'vue';
 
-import {useAppConfig} from '@vben/hooks';
+import { useAppConfig } from '@vben/hooks';
 import {
   SvgApiPrefixIcon,
   SvgDocumentLayoutIcon,
   SvgDocumentOmittedIcon,
   SvgDocumentResetIcon,
 } from '@vben/icons';
+import { usePreferences } from '@vben/preferences';
 
 import {
   ElButton,
@@ -44,20 +45,20 @@ import {
 } from 'element-plus';
 
 import JsonViewer from '#/components/json-viewer/index.vue';
-import {methodType} from '#/constants/methods';
+import { getMethodStyle } from '#/constants/methods';
 import {
   useApiStore,
   useApiTestCacheStore,
   useDocManageStore,
   useTokenStore,
 } from '#/store';
-import {useAggregationStore} from '#/store/aggregation';
+import { useAggregationStore } from '#/store/aggregation';
 import {
   buildDetectedImageFileName,
   detectBase64ImagesInData,
   formatDetectedImageSize,
 } from '#/utils/base64-image';
-import {adaptSchemaForView, hasRenderableSchema} from '#/utils/schema';
+import { adaptSchemaForView, hasRenderableSchema } from '#/utils/schema';
 
 import bodyParams from './body-params.vue';
 import paramsTable from './params-table.vue';
@@ -137,7 +138,8 @@ const props = defineProps<{
 
 defineEmits(['cancel']);
 
-const {apiURL} = useAppConfig(import.meta.env, import.meta.env.PROD);
+const { apiURL } = useAppConfig(import.meta.env, import.meta.env.PROD);
+const { isDark } = usePreferences();
 const baseUrl = ref();
 const activeTab = ref(props.requestBody ? 'Body' : 'Params');
 const bodyTabRef = ref<DebugBodyTabExpose | null>(null);
@@ -171,6 +173,10 @@ const cookies = ref<Array<TableParamsObject>>([]);
 const isRestoringCache = ref(false);
 const defaultRequestState = ref<DebugRequestStateSnapshot | null>(null);
 let persistTimer: null | number = null;
+
+const methodPillStyle = computed(() => {
+  return getMethodStyle(props.method, isDark.value);
+});
 
 const normalizeParamName = (name: string) => name.trim();
 const normalizeHeaderName = (name: string) => name.trim().toLowerCase();
@@ -222,7 +228,7 @@ const toDebugBodyType = (value: unknown): DebugBodyType | undefined => {
     : undefined;
 };
 const resetResponseState = () => {
-  responseStatus.value = {code: 0, text: '-', type: 'default'};
+  responseStatus.value = { code: 0, text: '-', type: 'default' };
   responseTime.value = 0;
   responseSize.value = '0 B';
   responseData.value = null;
@@ -340,7 +346,7 @@ watch(
       requestUrl.value = newPath;
     }
   },
-  {immediate: true},
+  { immediate: true },
 );
 
 // 监听 parameters 变化，同步参数信息
@@ -364,8 +370,8 @@ watch(
     };
 
     newParams.forEach((param) => {
-      const {schema = {}} = param;
-      const {type, format, enum: enumValues, items} = schema;
+      const { schema = {} } = param;
+      const { type, format, enum: enumValues, items } = schema;
 
       let value = param.example?.toString() || '';
       if (!value && enumValues?.length) {
@@ -383,16 +389,16 @@ watch(
         enum: enumValues,
         schema: schema
           ? {
-            type,
-            format,
-            enum: enumValues,
-            items: items
-              ? {
-                enum: items.enum,
-                format: items.format,
-              }
-              : undefined,
-          }
+              type,
+              format,
+              enum: enumValues,
+              items: items
+                ? {
+                    enum: items.enum,
+                    format: items.format,
+                  }
+                : undefined,
+            }
           : undefined,
       };
 
@@ -405,7 +411,7 @@ watch(
     syncSecurityParamsToDebugTable();
     syncGlobalParamsToDebugTable();
   },
-  {immediate: true},
+  { immediate: true },
 );
 
 watch(
@@ -414,7 +420,7 @@ watch(
     syncSecurityParamsToDebugTable();
     syncGlobalParamsToDebugTable();
   },
-  {deep: true, immediate: true},
+  { deep: true, immediate: true },
 );
 
 watch(
@@ -423,7 +429,7 @@ watch(
     syncSecurityParamsToDebugTable();
     syncGlobalParamsToDebugTable();
   },
-  {deep: true},
+  { deep: true },
 );
 
 watch(
@@ -432,11 +438,11 @@ watch(
     syncSecurityParamsToDebugTable();
     syncGlobalParamsToDebugTable();
   },
-  {deep: true},
+  { deep: true },
 );
 
 // 响应状态
-const responseStatus = ref({code: 0, text: '-', type: 'default'});
+const responseStatus = ref({ code: 0, text: '-', type: 'default' });
 const responseTime = ref(0);
 const responseSize = ref('0 B');
 const responseData = shallowRef<any>(null);
@@ -518,7 +524,7 @@ const responseSchemaForViewer = computed(() => {
   if (!schema || !hasRenderableSchema(schema)) {
     return null;
   }
-  const resolved = adaptSchemaForView(schema, {mode: 'response'});
+  const resolved = adaptSchemaForView(schema, { mode: 'response' });
   return resolved && hasRenderableSchema(resolved) ? resolved : null;
 });
 
@@ -625,7 +631,7 @@ const resolveOverflowVisibleKeys = (options: {
   moreMeasureElement?: HTMLElement;
   tabs: DebugInlineTab[];
 }) => {
-  const {activeKey, hostElement, measureRefs, moreMeasureElement, tabs} =
+  const { activeKey, hostElement, measureRefs, moreMeasureElement, tabs } =
     options;
   const keys = tabs.map((tab) => tab.key);
   if (keys.length === 0 || !hostElement) {
@@ -681,7 +687,7 @@ const resolveOverflowVisibleKeys = (options: {
     while (
       adjustedKeys.length > 0 &&
       !canFitWithMoreButton([...adjustedKeys, activeKey])
-      ) {
+    ) {
       adjustedKeys.pop();
     }
     if (canFitWithMoreButton([...adjustedKeys, activeKey])) {
@@ -799,7 +805,7 @@ watch(
   () => {
     scheduleTabOverflowUpdate();
   },
-  {deep: true},
+  { deep: true },
 );
 
 watch(
@@ -807,7 +813,7 @@ watch(
   () => {
     scheduleTabOverflowUpdate();
   },
-  {deep: true},
+  { deep: true },
 );
 
 watch(
@@ -987,10 +993,10 @@ function syncSecurityParamsToDebugTable() {
       `${key}_${securityIn.toUpperCase()}`,
       ...(rawSecurityIn
         ? [
-          `${key}_${rawSecurityIn}`,
-          `${key}_${rawSecurityIn.toLowerCase()}`,
-          `${key}_${rawSecurityIn.toUpperCase()}`,
-        ]
+            `${key}_${rawSecurityIn}`,
+            `${key}_${rawSecurityIn.toLowerCase()}`,
+            `${key}_${rawSecurityIn.toUpperCase()}`,
+          ]
         : []),
     ];
     const tokenValue =
@@ -1802,7 +1808,7 @@ async function sendRequest() {
         ['binary', 'form-data'].includes(bodyType || '')
           ? formData
           : // eslint-disable-next-line unicorn/no-nested-ternary
-          bodyType === 'x-www-form-urlencoded'
+            bodyType === 'x-www-form-urlencoded'
             ? searchParams
             : bodyData || undefined,
     });
@@ -1973,7 +1979,7 @@ watch(
       preserveValue: false,
     });
   },
-  {deep: true},
+  { deep: true },
 );
 
 watch(
@@ -1987,7 +1993,7 @@ watch(
       preserveValue: false,
     });
   },
-  {deep: true},
+  { deep: true },
 );
 watch(
   () => apiTestCacheStore.debugCacheEnabled,
@@ -2020,7 +2026,7 @@ watch(
   () => {
     schedulePersistCache();
   },
-  {deep: true},
+  { deep: true },
 );
 
 onBeforeUnmount(() => {
@@ -2048,15 +2054,12 @@ onBeforeUnmount(() => {
           class="debug-request-input"
         >
           <template #prefix>
-            <span
-              class="method-pill"
-              :style="{ ...methodType[method?.toUpperCase()] }"
-            >
+            <span class="method-pill" :style="methodPillStyle">
               {{ method?.toUpperCase() }}
             </span>
             <ElTooltip v-if="baseUrl" placement="top" :content="baseUrl">
               <ElButton text class="debug-prefix-button">
-                <SvgApiPrefixIcon class="size-4"/>
+                <SvgApiPrefixIcon class="size-4" />
               </ElButton>
             </ElTooltip>
           </template>
@@ -2076,7 +2079,7 @@ onBeforeUnmount(() => {
               class="debug-icon-button"
               @click="handleRestoreDefault"
             >
-              <SvgDocumentResetIcon class="size-4"/>
+              <SvgDocumentResetIcon class="size-4" />
             </ElButton>
           </ElTooltip>
           <ElTooltip :content="layoutTooltipText" placement="top">
@@ -2130,8 +2133,8 @@ onBeforeUnmount(() => {
                     @click="activeTab = tabItem.key"
                   >
                     <span class="debug-inline-tab__label">{{
-                        tabItem.label
-                      }}</span>
+                      tabItem.label
+                    }}</span>
                     <span v-if="tabItem.count" class="debug-inline-tab__count">
                       {{ tabItem.count }}
                     </span>
@@ -2180,8 +2183,8 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <div class="debug-tabs-wrap">
-                <ElTabs v-model="activeTab" class="debug-tabs debug-tabs--inline">
-                  <ElTabPane name="Params" label="Params">
+              <ElTabs v-model="activeTab" class="debug-tabs debug-tabs--inline">
+                <ElTabPane name="Params" label="Params">
                   <div class="params-tab-sections">
                     <div v-if="pathParams.length > 0">
                       <div class="actual-request__block params-table-block">
@@ -2249,7 +2252,7 @@ onBeforeUnmount(() => {
                       <h3 class="actual-request__title">Cookies</h3>
                     </div>
                     <div class="params-table-block__body">
-                      <params-table :table-data="cookies"/>
+                      <params-table :table-data="cookies" />
                     </div>
                   </div>
                 </ElTabPane>
@@ -2283,8 +2286,8 @@ onBeforeUnmount(() => {
                     @click="responseTab = tabItem.key"
                   >
                     <span class="debug-inline-tab__label">{{
-                        tabItem.label
-                      }}</span>
+                      tabItem.label
+                    }}</span>
                     <span v-if="tabItem.count" class="debug-inline-tab__count">
                       {{ tabItem.count }}
                     </span>
@@ -2449,8 +2452,8 @@ onBeforeUnmount(() => {
                       class="response-headers"
                     >
                       <ElTable border :data="responseHeaders">
-                        <ElTableColumn label="参数名" prop="name"/>
-                        <ElTableColumn label="参数值" prop="value"/>
+                        <ElTableColumn label="参数名" prop="name" />
+                        <ElTableColumn label="参数值" prop="value" />
                       </ElTable>
                     </div>
                     <ElEmpty v-else :image-size="68">
@@ -2477,8 +2480,8 @@ onBeforeUnmount(() => {
                       >
                         <div class="actual-request__title">请求头</div>
                         <ElTable border :data="actualRequestSnapshot.headers">
-                          <ElTableColumn label="参数名" prop="name"/>
-                          <ElTableColumn label="参数值" prop="value"/>
+                          <ElTableColumn label="参数名" prop="name" />
+                          <ElTableColumn label="参数值" prop="value" />
                         </ElTable>
                       </div>
 
@@ -2491,8 +2494,8 @@ onBeforeUnmount(() => {
                           border
                           :data="actualRequestSnapshot.queryParams"
                         >
-                          <ElTableColumn label="参数名" prop="name"/>
-                          <ElTableColumn label="参数值" prop="value"/>
+                          <ElTableColumn label="参数名" prop="name" />
+                          <ElTableColumn label="参数值" prop="value" />
                         </ElTable>
                       </div>
 
@@ -2505,8 +2508,8 @@ onBeforeUnmount(() => {
                           border
                           :data="actualRequestSnapshot.pathParams"
                         >
-                          <ElTableColumn label="参数名" prop="name"/>
-                          <ElTableColumn label="参数值" prop="value"/>
+                          <ElTableColumn label="参数名" prop="name" />
+                          <ElTableColumn label="参数值" prop="value" />
                         </ElTable>
                       </div>
 
@@ -2518,8 +2521,8 @@ onBeforeUnmount(() => {
                           请求体 ({{ actualRequestSnapshot.bodyType }})
                         </div>
                         <pre class="actual-request__code">{{
-                            actualRequestSnapshot.bodyText
-                          }}</pre>
+                          actualRequestSnapshot.bodyText
+                        }}</pre>
                       </div>
                     </div>
                     <ElEmpty v-else :image-size="68">
@@ -2606,8 +2609,8 @@ onBeforeUnmount(() => {
                 <div class="debug-base64-card__info">
                   <span class="debug-base64-card__index">#{{ index + 1 }}</span>
                   <span class="debug-base64-card__path" :title="item.path">{{
-                      item.path
-                    }}</span>
+                    item.path
+                  }}</span>
                 </div>
                 <ElButton
                   size="small"
@@ -2632,8 +2635,8 @@ onBeforeUnmount(() => {
               <div class="debug-base64-card__footer">
                 <span class="debug-base64-card__chip">{{ item.mimeType }}</span>
                 <span class="debug-base64-card__chip">{{
-                    formatDetectedImageSize(item.sizeBytes)
-                  }}</span>
+                  formatDetectedImageSize(item.sizeBytes)
+                }}</span>
               </div>
             </article>
           </div>
@@ -2660,7 +2663,7 @@ onBeforeUnmount(() => {
           type="button"
           class="debug-inline-tab debug-inline-tab--more"
         >
-          <SvgDocumentOmittedIcon class="debug-inline-tab__more-icon"/>
+          <SvgDocumentOmittedIcon class="debug-inline-tab__more-icon" />
         </button>
       </div>
       <div class="debug-inline-tabs">
@@ -2681,7 +2684,7 @@ onBeforeUnmount(() => {
           type="button"
           class="debug-inline-tab debug-inline-tab--more"
         >
-          <SvgDocumentOmittedIcon class="debug-inline-tab__more-icon"/>
+          <SvgDocumentOmittedIcon class="debug-inline-tab__more-icon" />
         </button>
       </div>
     </div>
@@ -2772,17 +2775,20 @@ onBeforeUnmount(() => {
     #8d97a7 20%,
     transparent
   );
-  --debug-request-shell-shadow: inset 0 1px 0 var(--debug-request-shell-top-line),
-  inset 0 -1px 0 var(--debug-request-shell-bottom-line),
-  0 0 0 1px color-mix(in srgb, #9aa3b2 20%, transparent),
-  0 9px 18px -15px color-mix(in srgb, #7f8899 42%, transparent),
-  0 -9px 18px -15px color-mix(in srgb, #8e97a6 44%, transparent);
-  --debug-request-shell-shadow-hover: inset 0 1px 0 color-mix(in srgb, #8692a5 42%, transparent),
-  inset 0 -1px 0 color-mix(in srgb, #8692a5 24%, transparent),
-  0 0 0 1px color-mix(in srgb, #8d97a7 24%, transparent),
-  0 11px 22px -15px color-mix(in srgb, #738093 48%, transparent),
-  0 -11px 22px -15px color-mix(in srgb, #8d97a7 50%, transparent);
-  --debug-shadow: 0 6px 14px color-mix(in srgb, var(--el-text-color-primary) 3%, transparent);
+  --debug-request-shell-shadow:
+    inset 0 1px 0 var(--debug-request-shell-top-line),
+    inset 0 -1px 0 var(--debug-request-shell-bottom-line),
+    0 0 0 1px color-mix(in srgb, #9aa3b2 20%, transparent),
+    0 9px 18px -15px color-mix(in srgb, #7f8899 42%, transparent),
+    0 -9px 18px -15px color-mix(in srgb, #8e97a6 44%, transparent);
+  --debug-request-shell-shadow-hover:
+    inset 0 1px 0 color-mix(in srgb, #8692a5 42%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, #8692a5 24%, transparent),
+    0 0 0 1px color-mix(in srgb, #8d97a7 24%, transparent),
+    0 11px 22px -15px color-mix(in srgb, #738093 48%, transparent),
+    0 -11px 22px -15px color-mix(in srgb, #8d97a7 50%, transparent);
+  --debug-shadow: 0 6px 14px
+    color-mix(in srgb, var(--el-text-color-primary) 3%, transparent);
 
   display: flex;
   flex-direction: column;
@@ -2860,12 +2866,15 @@ onBeforeUnmount(() => {
   background: var(--el-bg-color);
   border: 1px solid var(--debug-border-strong);
   border-radius: var(--debug-radius-md);
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--el-text-color-primary) 6%, transparent);
-  transition: transform 0.2s ease,
-  box-shadow 0.2s ease;
+  box-shadow: 0 4px 12px
+    color-mix(in srgb, var(--el-text-color-primary) 6%, transparent);
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
 
   &:hover {
-    box-shadow: 0 8px 24px color-mix(in srgb, var(--el-text-color-primary) 10%, transparent);
+    box-shadow: 0 8px 24px
+      color-mix(in srgb, var(--el-text-color-primary) 10%, transparent);
     transform: translateY(-2px);
   }
 }
@@ -2921,14 +2930,16 @@ onBeforeUnmount(() => {
 
   /* 棋盘格背景：适配透明图片 */
   background-color: var(--el-fill-color-lighter);
-  background-image: linear-gradient(45deg, var(--el-fill-color-darker) 25%, transparent 25%),
-  linear-gradient(-45deg, var(--el-fill-color-darker) 25%, transparent 25%),
-  linear-gradient(45deg, transparent 75%, var(--el-fill-color-darker) 75%),
-  linear-gradient(-45deg, transparent 75%, var(--el-fill-color-darker) 75%);
-  background-position: 0 0,
-  0 10px,
-  10px -10px,
-  -10px 0;
+  background-image:
+    linear-gradient(45deg, var(--el-fill-color-darker) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--el-fill-color-darker) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--el-fill-color-darker) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--el-fill-color-darker) 75%);
+  background-position:
+    0 0,
+    0 10px,
+    10px -10px,
+    -10px 0;
   background-size: 20px 20px;
   border: 1px solid var(--debug-border);
   border-radius: var(--debug-radius-sm);
@@ -3325,8 +3336,9 @@ onBeforeUnmount(() => {
   border: none;
   border-radius: 0;
   box-shadow: none;
-  transition: color 0.18s ease,
-  transform 0.18s ease;
+  transition:
+    color 0.18s ease,
+    transform 0.18s ease;
 }
 
 .debug-icon-button:hover {
@@ -3418,7 +3430,8 @@ onBeforeUnmount(() => {
   height: 38px;
   font-weight: 700;
   border-radius: var(--debug-radius-sm);
-  box-shadow: 0 4px 10px color-mix(in srgb, var(--el-color-primary) 20%, transparent);
+  box-shadow: 0 4px 10px
+    color-mix(in srgb, var(--el-color-primary) 20%, transparent);
   transition: transform 0.16s ease;
 }
 
@@ -3690,14 +3703,16 @@ onBeforeUnmount(() => {
   --debug-request-shell-bg: #20242b;
   --debug-request-shell-top-line: color-mix(in srgb, #fff 18%, transparent);
   --debug-request-shell-bottom-line: color-mix(in srgb, #fff 10%, transparent);
-  --debug-request-shell-shadow: inset 0 1px 0 var(--debug-request-shell-top-line),
-  inset 0 -1px 0 var(--debug-request-shell-bottom-line),
-  0 8px 18px -14px color-mix(in srgb, #000 58%, transparent),
-  0 -8px 18px -14px color-mix(in srgb, #fff 12%, transparent);
-  --debug-request-shell-shadow-hover: inset 0 1px 0 color-mix(in srgb, #fff 24%, transparent),
-  inset 0 -1px 0 color-mix(in srgb, #fff 14%, transparent),
-  0 10px 22px -14px color-mix(in srgb, #000 62%, transparent),
-  0 -10px 22px -14px color-mix(in srgb, #fff 16%, transparent);
+  --debug-request-shell-shadow:
+    inset 0 1px 0 var(--debug-request-shell-top-line),
+    inset 0 -1px 0 var(--debug-request-shell-bottom-line),
+    0 8px 18px -14px color-mix(in srgb, #000 58%, transparent),
+    0 -8px 18px -14px color-mix(in srgb, #fff 12%, transparent);
+  --debug-request-shell-shadow-hover:
+    inset 0 1px 0 color-mix(in srgb, #fff 24%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, #fff 14%, transparent),
+    0 10px 22px -14px color-mix(in srgb, #000 62%, transparent),
+    0 -10px 22px -14px color-mix(in srgb, #fff 16%, transparent);
   --debug-shadow: 0 8px 20px color-mix(in srgb, #000 45%, transparent);
 }
 </style>
