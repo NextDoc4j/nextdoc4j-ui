@@ -40,6 +40,6 @@ export const getMethodStyle = (method?: string, isDark = false) => {
 
   return {
     ...baseStyle,
-    ...(darkMethodType[normalizedMethod] || {}),
+    ...darkMethodType[normalizedMethod],
   };
 };

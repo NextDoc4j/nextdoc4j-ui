@@ -6,8 +6,8 @@ import { computed } from 'vue';
 import { VbenTooltip } from '@vben-core/shadcn-ui';
 
 import { getMethodStyle } from '../../../../../apps/web-ele/src/constants/methods';
-import { useMenuContext } from './hooks';
 import { MenuBadge, MenuItem, SubMenu as SubMenuComp } from './components';
+import { useMenuContext } from './hooks';
 // eslint-disable-next-line import/no-self-import
 import SubMenu from './sub-menu.vue';
 

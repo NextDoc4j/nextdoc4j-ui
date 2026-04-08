@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import type { ApiInfo } from '#/typings/openApi';
+import type { CodeExampleLanguage } from '#/utils/api-code-example';
 
 import { computed, ref } from 'vue';
 
 import { SvgApiPrefixIcon, SvgCopyIcon } from '@vben/icons';
 import { usePreferences } from '@vben/preferences';
-import { useClipboard } from '@vueuse/core';
 
+import { useClipboard } from '@vueuse/core';
 import {
   ElButton,
   ElEmpty,
@@ -22,7 +23,6 @@ import { useApiStore } from '#/store';
 import {
   buildCodeExampleContext,
   renderCodeExample,
-  type CodeExampleLanguage,
 } from '#/utils/api-code-example';
 
 import PathSegment from './path-segment.vue';
@@ -180,17 +180,17 @@ async function handleCopyCode() {
 .code-example-page__endpoint {
   display: flex;
   flex: 1;
-  gap: 8px;
-  min-width: 0;
-  align-items: center;
   flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
 }
 
 .code-example-page__toolbar {
   display: inline-flex;
+  flex: none;
   gap: 6px;
   align-items: center;
-  flex: none;
 }
 
 .code-example-page__copy-button {
