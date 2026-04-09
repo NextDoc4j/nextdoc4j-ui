@@ -1716,8 +1716,8 @@ defineExpose({
 }
 
 .response-collapse__item {
-  padding: 10px;
-  margin-bottom: 8px;
+  padding: 2px 10px;
+  margin-bottom: 6px;
   background: var(--doc-soft-bg);
   border: 1px solid var(--el-border-color-lighter);
   border-radius: var(--doc-radius-sm);
@@ -1730,7 +1730,7 @@ defineExpose({
 .response-collapse__title {
   display: flex;
   flex: 1;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
   justify-content: space-between;
   min-width: 0;
@@ -1738,7 +1738,7 @@ defineExpose({
 
 .response-collapse__status {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
   min-width: 0;
 }
@@ -1776,12 +1776,12 @@ defineExpose({
 }
 
 .response-content {
-  margin-top: 8px;
+  margin-top: 1px;
 }
 
 .response-content__toolbar {
   justify-content: flex-end;
-  margin-bottom: 2px;
+  margin-bottom: 1px;
 }
 
 .response-content__actions {
