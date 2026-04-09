@@ -14,6 +14,8 @@ import {
   ElCollapse,
   ElCollapseItem,
   ElMessage,
+  ElOption,
+  ElSelect,
   ElTag,
   ElTooltip,
 } from 'element-plus';
@@ -45,6 +47,13 @@ interface DebugPayload {
   requestBodyVariantState: Record<string, number>;
 }
 
+interface ResponseExampleOption {
+  description?: string;
+  key: string;
+  label: string;
+  value: unknown;
+}
+
 defineOptions({
   name: 'DocumentView',
 });
@@ -68,6 +77,7 @@ const requestBodyType = ref('');
 const requestBodyVariantState = ref<Record<string, number>>({});
 const requestExampleOpen = ref(false);
 const responseExampleOpen = ref<Record<string, boolean>>({});
+const responseExampleSelection = ref<Record<string, string>>({});
 const responseVariantState = ref<Record<string, Record<string, number>>>({});
 
 const displayTags = computed(() => {
@@ -473,6 +483,7 @@ watch(
     responseExampleOpen.value = Object.fromEntries(
       codes.map((code) => [code, false]),
     );
+    responseExampleSelection.value = {};
     responseVariantState.value = {};
   },
   { immediate: true },
@@ -495,19 +506,374 @@ const pickContentType = (content?: Record<string, any>) => {
   return Object.keys(content)[0] || '';
 };
 
-const responsePanels = computed(() => {
+const decodeJsonPointerToken = (value: string) => {
+  return value.replaceAll('~1', '/').replaceAll('~0', '~');
+};
+
+const normalizeExampleValue = (value: unknown): unknown => {
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+    (trimmed.startsWith('[') && trimmed.endsWith(']'))
+  ) {
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return value;
+    }
+  }
+
+  return value;
+};
+
+const normalizeMatchText = (value?: unknown) => {
+  return `${value ?? ''}`.trim().toLowerCase();
+};
+
+const splitDescriptionTokens = (value?: string) => {
+  const normalized = `${value || ''}`.trim();
+  if (!normalized) {
+    return [];
+  }
+
+  return [
+    normalized,
+    ...normalized
+      .split(/[|/、,，;；]+/u)
+      .map((item) => item.trim())
+      .filter(Boolean),
+  ];
+};
+
+const getComponentExampleMap = () => {
+  return ((apiStore.openApi as any)?.components?.examples ?? {}) as Record<
+    string,
+    any
+  >;
+};
+
+const resolveExampleReference = (ref?: string) => {
+  if (!ref) {
+    return undefined;
+  }
+
+  const segments = ref
+    .replace(/^#\/+/u, '')
+    .split('/')
+    .map((item) => decodeJsonPointerToken(item));
+  const explicitKey = segments.length > 2 ? segments.slice(2).join('/') : '';
+  const fallbackKey = segments.at(-1) || '';
+  const componentExamples = getComponentExampleMap();
+
+  return componentExamples[explicitKey] ?? componentExamples[fallbackKey];
+};
+
+const resolveExampleValue = (example: any): unknown => {
+  if (example === undefined) {
+    return undefined;
+  }
+
+  if (example === null) {
+    return null;
+  }
+
+  if (typeof example !== 'object') {
+    return normalizeExampleValue(example);
+  }
+
+  if (typeof example.$ref === 'string') {
+    return resolveExampleValue(resolveExampleReference(example.$ref));
+  }
+
+  if (example.value !== undefined) {
+    return normalizeExampleValue(example.value);
+  }
+
+  if (example.example !== undefined) {
+    return normalizeExampleValue(example.example);
+  }
+
+  if (
+    example.summary !== undefined ||
+    example.description !== undefined ||
+    example.externalValue !== undefined
+  ) {
+    return undefined;
+  }
+
+  return normalizeExampleValue(example);
+};
+
+const pickContentEntry = (content?: Record<string, any>) => {
+  if (!content) {
+    return {
+      contentType: '',
+      value: null,
+    };
+  }
+
+  const preferredEntries = [
+    ['application/json', content['application/json']],
+    ['*/*', content['*/*']],
+    ...Object.entries(content).filter(
+      ([contentType]) =>
+        contentType !== 'application/json' && contentType !== '*/*',
+    ),
+  ].filter(([, value]) => Boolean(value));
+
+  if (preferredEntries.length <= 0) {
+    return {
+      contentType: '',
+      value: null,
+    };
+  }
+
+  const picked =
+    preferredEntries.find(([, value]) => {
+      return Boolean(
+        (value as any)?.examples ||
+          (value as any)?.example ||
+          (value as any)?.schema,
+      );
+    }) || preferredEntries[0];
+
+  return {
+    contentType: picked?.[0] || '',
+    value: (picked?.[1] as any) ?? null,
+  };
+};
+
+const resolveExampleScore = (
+  exampleKey: string,
+  exampleSummary: string,
+  exampleDescription: string,
+  responseCode: string,
+  responseDescription?: string,
+) => {
+  let score = 0;
+  const normalizedCode = normalizeMatchText(responseCode);
+  const normalizedKey = normalizeMatchText(exampleKey);
+  const normalizedSummary = normalizeMatchText(exampleSummary);
+  const normalizedDescription = normalizeMatchText(exampleDescription);
+
+  if (normalizedCode) {
+    if (normalizedKey === normalizedCode) {
+      score += 100;
+    }
+    if (
+      normalizedKey.startsWith(`${normalizedCode}_`) ||
+      normalizedKey.startsWith(`${normalizedCode}.`) ||
+      normalizedKey.startsWith(`${normalizedCode}-`)
+    ) {
+      score += 80;
+    }
+  }
+
+  const responseDescriptionTokens = splitDescriptionTokens(
+    responseDescription,
+  ).map((item) => normalizeMatchText(item));
+
+  responseDescriptionTokens.forEach((token) => {
+    if (!token) {
+      return;
+    }
+
+    [normalizedSummary, normalizedDescription].forEach((label) => {
+      if (!label) {
+        return;
+      }
+
+      if (label === token) {
+        score += 60;
+        return;
+      }
+
+      if (label.includes(token) || token.includes(label)) {
+        score += 40;
+      }
+    });
+  });
+
+  return score;
+};
+
+const resolveResponseExampleFromExamples = (
+  examples: Record<string, any>,
+  responseCode: string,
+  responseDescription?: string,
+) => {
+  const candidates = Object.entries(examples)
+    .map(([key, example], index) => {
+      const value = resolveExampleValue(example);
+      if (value === undefined) {
+        return null;
+      }
+
+      const summary = `${example?.summary || ''}`;
+      const description = `${example?.description || ''}`;
+      return {
+        description,
+        index,
+        key,
+        label: summary || description || key,
+        score: resolveExampleScore(
+          key,
+          summary,
+          description,
+          responseCode,
+          responseDescription,
+        ),
+        value,
+      };
+    })
+    .filter(Boolean) as Array<{
+    description: string;
+    index: number;
+    key: string;
+    label: string;
+    score: number;
+    value: unknown;
+  }>;
+
+  if (candidates.length <= 0) {
+    return {
+      defaultKey: '',
+      hasValue: false,
+      options: [],
+      value: undefined,
+    };
+  }
+
+  const matched = [...candidates].sort((a, b) => {
+    if (b.score !== a.score) {
+      return b.score - a.score;
+    }
+    return a.index - b.index;
+  })[0];
+
+  return {
+    defaultKey: matched?.key || '',
+    hasValue: true,
+    options: candidates.map((item) => ({
+      description: item.description,
+      key: item.key,
+      label: item.label,
+      value: item.value,
+    })),
+    value: matched?.value,
+  };
+};
+
+const resolveResponseExampleData = (
+  responseCode: string,
+  responseDescription: string | undefined,
+  contentValue: any,
+) => {
+  if (contentValue?.examples && typeof contentValue.examples === 'object') {
+    const matched = resolveResponseExampleFromExamples(
+      contentValue.examples,
+      responseCode,
+      responseDescription,
+    );
+    if (matched.hasValue) {
+      return matched;
+    }
+  }
+
+  if (contentValue?.example !== undefined) {
+    return {
+      defaultKey: '',
+      hasValue: true,
+      options: [],
+      value: resolveExampleValue(contentValue.example),
+    };
+  }
+
+  return {
+    defaultKey: '',
+    hasValue: false,
+    options: [],
+    value: undefined,
+  };
+};
+
+const responsePanelSources = computed(() => {
   return responseCodes.value.map((code) => {
     const response = apiInfo.value?.responses?.[code];
-    const schema = pickContentSchema(response?.content) || response?.schema;
+    const { contentType, value: contentValue } = pickContentEntry(
+      response?.content,
+    );
+    const schema =
+      pickContentSchema(response?.content) ||
+      contentValue?.schema ||
+      response?.schema;
     const resolved =
       schema && hasRenderableSchema(schema)
         ? adaptSchemaForView(schema, { mode: 'response' })
         : null;
+    const exampleData = resolveResponseExampleData(
+      code,
+      response?.description,
+      contentValue,
+    );
+
     return {
       code,
-      contentType: pickContentType(response?.content),
+      contentType: contentType || pickContentType(response?.content),
+      defaultExampleKey: exampleData.defaultKey,
+      exampleOptions: exampleData.options as ResponseExampleOption[],
+      exampleValue: exampleData.value,
+      hasExampleValue: exampleData.hasValue,
       response,
       schema: resolved && hasRenderableSchema(resolved) ? resolved : null,
+    };
+  });
+});
+
+watch(
+  responsePanelSources,
+  (panels) => {
+    const nextSelection: Record<string, string> = {};
+
+    panels.forEach((panel) => {
+      if (panel.exampleOptions.length <= 0) {
+        return;
+      }
+
+      const currentSelection = responseExampleSelection.value[panel.code];
+      nextSelection[panel.code] = panel.exampleOptions.some(
+        (item) => item.key === currentSelection,
+      )
+        ? (currentSelection ?? panel.defaultExampleKey)
+        : panel.defaultExampleKey;
+    });
+
+    responseExampleSelection.value = nextSelection;
+  },
+  { immediate: true },
+);
+
+const responsePanels = computed(() => {
+  return responsePanelSources.value.map((panel) => {
+    if (panel.exampleOptions.length <= 0) {
+      return panel;
+    }
+
+    const selectedKey =
+      responseExampleSelection.value[panel.code] || panel.defaultExampleKey;
+    const selectedOption =
+      panel.exampleOptions.find((item) => item.key === selectedKey) ||
+      panel.exampleOptions[0];
+
+    return {
+      ...panel,
+      exampleValue: selectedOption?.value,
+      hasExampleValue: Boolean(selectedOption),
+      selectedExampleKey: selectedOption?.key || '',
     };
   });
 });
@@ -545,6 +911,13 @@ const handleTest = () => {
 
 const toggleResponseExample = (code: string) => {
   responseExampleOpen.value[code] = !responseExampleOpen.value[code];
+};
+
+const handleResponseExampleSelect = (code: string, value: string) => {
+  responseExampleSelection.value = {
+    ...responseExampleSelection.value,
+    [code]: value,
+  };
 };
 
 const handleResponseSchemaVariantChange = (
@@ -811,6 +1184,32 @@ defineExpose({
 
             <div class="response-content">
               <div class="response-content__toolbar">
+                <div
+                  v-if="
+                    responseExampleOpen[panel.code] &&
+                    panel.exampleOptions.length > 1
+                  "
+                  class="response-content__actions"
+                >
+                  <ElSelect
+                    :model-value="responseExampleSelection[panel.code]"
+                    size="small"
+                    class="response-example-select"
+                    popper-class="response-example-select__popper"
+                    placeholder="选择示例"
+                    @update:model-value="
+                      handleResponseExampleSelect(panel.code, $event)
+                    "
+                  >
+                    <ElOption
+                      v-for="item in panel.exampleOptions"
+                      :key="item.key"
+                      :label="item.label"
+                      :value="item.key"
+                    />
+                  </ElSelect>
+                </div>
+
                 <ElButton
                   size="small"
                   class="example-toggle-button"
@@ -845,12 +1244,18 @@ defineExpose({
                 </div>
 
                 <div
-                  v-if="responseExampleOpen[panel.code] && panel.schema"
+                  v-if="
+                    responseExampleOpen[panel.code] &&
+                    (panel.schema || panel.hasExampleValue)
+                  "
                   class="schema-layout__aside"
                 >
                   <JsonViewer
                     class="json-panel app-json-schema-viewer"
                     :schema="getResponsePreviewSchema(panel.code, panel.schema)"
+                    :value="
+                      panel.hasExampleValue ? panel.exampleValue : undefined
+                    "
                     mode="response"
                   />
                 </div>
@@ -1379,6 +1784,51 @@ defineExpose({
   margin-bottom: 2px;
 }
 
+.response-content__actions {
+  display: inline-flex;
+  flex: 1;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.response-example-select {
+  width: min(240px, 100%);
+  min-width: 168px;
+}
+
+.response-example-select :deep(.el-select__wrapper) {
+  min-height: 30px;
+  padding: 0 10px;
+  background: color-mix(
+    in srgb,
+    var(--doc-panel-bg) 90%,
+    var(--el-fill-color-light) 10%
+  );
+  border-radius: var(--doc-chip-radius);
+  box-shadow: inset 0 0 0 1px var(--el-border-color-lighter);
+  transition: all 0.2s ease;
+}
+
+.response-example-select:hover :deep(.el-select__wrapper),
+.response-example-select :deep(.el-select__wrapper.is-focused) {
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--el-color-primary) 35%, transparent);
+}
+
+.response-example-select :deep(.el-select__selected-item),
+.response-example-select :deep(.el-select__placeholder) {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.response-example-select :deep(.el-select__selected-item) {
+  color: var(--el-text-color-primary);
+}
+
+:deep(.response-example-select__popper .el-select-dropdown__item) {
+  font-size: 12px;
+}
+
 .empty-hint {
   display: inline-flex;
   align-items: center;
@@ -1410,8 +1860,13 @@ defineExpose({
 
   .hero-panel__tags,
   .sub-panel__actions,
-  .sub-panel__title-wrap {
+  .sub-panel__title-wrap,
+  .response-content__actions {
     justify-content: flex-start;
+  }
+
+  .response-example-select {
+    width: 100%;
   }
 
   .schema-layout--open {
