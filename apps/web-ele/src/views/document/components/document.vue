@@ -985,6 +985,17 @@ const activeTypeCode = computed(() => {
     : responseTypeCode.value;
 });
 
+const codeDialogBodyStyle = computed(() => {
+  const lineCount = Math.max(1, activeTypeCode.value.split('\n').length);
+  const estimatedHeight = 48 + lineCount * 20;
+  const clampedHeight = Math.min(Math.max(estimatedHeight, 132), 560);
+
+  return {
+    height: `min(${clampedHeight}px, calc(100vh - 128px))`,
+    maxHeight: 'calc(100vh - 128px)',
+  };
+});
+
 async function handleCopyBaseUrl() {
   if (!baseUrl.value) return;
   const copied = await copyText(baseUrl.value);
@@ -1428,7 +1439,7 @@ defineExpose({
         </div>
       </template>
 
-      <div class="type-code-dialog__body">
+      <div class="type-code-dialog__body" :style="codeDialogBodyStyle">
         <MarkdownCodeBlock
           class="type-code-dialog__viewer"
           :code="activeTypeCode"
@@ -1759,7 +1770,6 @@ defineExpose({
   font-weight: 700;
   color: var(--el-text-color-secondary);
   letter-spacing: 0.01em;
-  pointer-events: none;
   cursor: pointer;
   background: color-mix(
     in srgb,
@@ -1768,21 +1778,10 @@ defineExpose({
   );
   border: 1px solid color-mix(in srgb, var(--el-border-color) 92%, transparent);
   border-radius: var(--doc-chip-radius);
-  opacity: 0;
-  transform: translateY(2px);
   transition:
-    opacity 0.16s ease,
-    transform 0.16s ease,
     color 0.16s ease,
     border-color 0.16s ease,
     background-color 0.16s ease;
-}
-
-.section-panel__header:hover .section-panel__code-button,
-.section-panel__header:focus-within .section-panel__code-button {
-  pointer-events: auto;
-  opacity: 1;
-  transform: translateY(0);
 }
 
 .section-panel__code-button:hover {
@@ -2045,7 +2044,7 @@ defineExpose({
 
 .response-content__toolbar {
   justify-content: flex-end;
-  margin-bottom: 1px;
+  margin-bottom: 6px;
 }
 
 .response-collapse :deep(.el-collapse-item__content),
@@ -2146,9 +2145,6 @@ defineExpose({
 }
 
 :deep(.type-code-dialog .el-dialog__body) {
-  display: flex;
-  flex: 1;
-  min-height: 0;
   padding: 12px 20px 20px;
   overflow: hidden;
 }
@@ -2166,10 +2162,19 @@ defineExpose({
 }
 
 .type-code-dialog__copy-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0;
   color: var(--el-text-color-secondary);
-  background: color-mix(in srgb, var(--el-bg-color) 92%, transparent);
-  border-radius: calc(var(--radius) * 0.56);
-  box-shadow: 0 8px 22px rgb(15 23 42 / 8%);
+  background: color-mix(in srgb, var(--el-bg-color) 94%, transparent);
+  border: 1px solid color-mix(in srgb, var(--el-border-color) 82%, transparent);
+  border-radius: 10px;
+  box-shadow: 0 10px 24px rgb(15 23 42 / 10%);
+  backdrop-filter: blur(10px);
 }
 
 .type-code-dialog__copy-button:hover {
@@ -2182,18 +2187,14 @@ defineExpose({
 }
 
 .type-code-dialog__body {
-  display: flex;
-  flex: 1;
-  height: min(70vh, calc(100vh - 128px));
-  min-height: 0;
+  position: relative;
   overflow: hidden;
 }
 
 .type-code-dialog__viewer {
-  flex: 1;
+  height: 100%;
   width: 100%;
   min-width: 0;
-  height: 100%;
   min-height: 0;
 }
 

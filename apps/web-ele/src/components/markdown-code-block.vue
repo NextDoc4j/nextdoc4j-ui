@@ -126,11 +126,6 @@ const renderedHtml = computed(() => {
   border-radius: calc(var(--radius) * 0.94);
 }
 
-.markdown-code-block--with-toolbar .markdown-code-block__body :deep(pre) {
-  padding-top: 52px;
-  padding-right: 56px;
-}
-
 .markdown-code-block__body :deep(pre > code) {
   display: block;
   min-width: max-content;
