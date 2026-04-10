@@ -704,7 +704,7 @@ const showSchemaStack = computed(() => {
 }
 
 .schema-item {
-  padding: 12px 0;
+  padding: 10px 0;
   border-bottom: 1px solid var(--el-border-color-lighter);
 }
 
@@ -804,34 +804,35 @@ const showSchemaStack = computed(() => {
 }
 
 .schema-item__description {
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
 .schema-item__details {
   display: grid;
-  gap: 8px;
-  margin-top: 10px;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 8px;
+  row-gap: 6px;
+  margin-top: 8px;
 }
 
 .schema-item__detail-row {
-  display: grid;
-  grid-template-columns: 68px minmax(0, 1fr);
-  gap: 10px;
-  align-items: center;
-  min-width: 0;
+  display: contents;
 }
 
 .schema-item__detail-label {
+  align-self: start;
   font-size: 12px;
   font-weight: 600;
+  line-height: 1.45;
   color: var(--el-text-color-secondary);
+  white-space: nowrap;
 }
 
 .schema-item__detail-content {
   display: flex;
   flex: 1 1 auto;
   flex-wrap: wrap;
-  gap: 6px 8px;
+  gap: 4px 6px;
   align-items: center;
   min-width: 0;
 }
@@ -847,13 +848,13 @@ const showSchemaStack = computed(() => {
 .meta-chip {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   max-width: 100%;
-  min-height: 26px;
-  padding: 3px 9px;
+  min-height: 22px;
+  padding: 1px 6px;
   font-size: 11.5px;
   font-weight: var(--field-chip-value-weight);
-  line-height: 1.45;
+  line-height: 1.35;
   color: var(--field-chip-text);
   overflow-wrap: anywhere;
   white-space: normal;
@@ -870,7 +871,7 @@ const showSchemaStack = computed(() => {
 .enum-entry {
   display: inline-flex;
   flex-wrap: wrap;
-  gap: 4px 6px;
+  gap: 3px 5px;
   align-items: center;
   min-width: 0;
   max-width: 100%;
@@ -878,7 +879,7 @@ const showSchemaStack = computed(() => {
 
 .enum-entry__description {
   font-size: 12px;
-  line-height: 1.55;
+  line-height: 1.45;
   color: var(--el-text-color-secondary);
   overflow-wrap: anywhere;
   white-space: normal;
@@ -917,6 +918,17 @@ const showSchemaStack = computed(() => {
 }
 
 @media (max-width: 768px) {
+  .schema-item__details {
+    grid-template-columns: 1fr;
+    row-gap: 4px;
+  }
+
+  .schema-item__detail-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
   .schema-item__headline {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -931,11 +943,6 @@ const showSchemaStack = computed(() => {
 
   .schema-item__detail-label {
     min-width: 0;
-  }
-
-  .schema-item__detail-row {
-    grid-template-columns: 1fr;
-    gap: 4px;
   }
 }
 </style>

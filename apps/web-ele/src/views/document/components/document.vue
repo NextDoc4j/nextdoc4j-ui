@@ -1294,6 +1294,12 @@ defineExpose({
     var(--el-bg-color) 78%,
     var(--el-fill-color-light) 22%
   );
+  --doc-section-outer-bg: color-mix(
+    in srgb,
+    var(--el-bg-color) 74%,
+    var(--el-fill-color-light) 26%
+  );
+  --doc-section-inner-bg: #fff;
   --doc-panel-border: color-mix(
     in srgb,
     var(--el-text-color-primary) 12%,
@@ -1344,6 +1350,16 @@ defineExpose({
     var(--el-bg-color) 78%,
     var(--el-fill-color-light) 22%
   );
+  --doc-section-outer-bg: color-mix(
+    in srgb,
+    var(--el-bg-color) 76%,
+    var(--el-fill-color-light) 24%
+  );
+  --doc-section-inner-bg: color-mix(
+    in srgb,
+    var(--el-bg-color) 95%,
+    var(--el-fill-color-light) 5%
+  );
   --doc-panel-border: color-mix(
     in srgb,
     var(--el-text-color-primary) 22%,
@@ -1374,6 +1390,10 @@ defineExpose({
 .hero-panel,
 .section-panel {
   padding: 16px;
+}
+
+.section-panel {
+  background: var(--doc-section-outer-bg);
 }
 
 .hero-panel__top,
@@ -1544,7 +1564,7 @@ defineExpose({
 .sub-panel {
   min-width: 0;
   padding: 12px;
-  background: var(--doc-soft-bg);
+  background: var(--doc-section-inner-bg);
   border: 1px solid var(--doc-sub-panel-border);
   border-radius: var(--doc-radius-sm);
 }
@@ -1668,7 +1688,7 @@ defineExpose({
 }
 
 .json-panel {
-  background: var(--doc-soft-bg-alt);
+  background: var(--doc-section-inner-bg);
   border: 1px solid var(--el-border-color-lighter);
   border-radius: var(--doc-radius-xs);
 }
@@ -1718,7 +1738,7 @@ defineExpose({
 .response-collapse__item {
   padding: 2px 10px;
   margin-bottom: 6px;
-  background: var(--doc-soft-bg);
+  background: var(--doc-section-inner-bg);
   border: 1px solid var(--el-border-color-lighter);
   border-radius: var(--doc-radius-sm);
 }
@@ -1836,7 +1856,7 @@ defineExpose({
   padding: 0 12px;
   font-size: 13px;
   color: var(--el-text-color-secondary);
-  background: var(--el-fill-color-light);
+  background: var(--doc-section-inner-bg);
   border: 1px solid var(--el-border-color-lighter);
   border-radius: var(--doc-radius-xs);
 }
