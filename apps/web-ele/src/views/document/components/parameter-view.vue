@@ -257,8 +257,7 @@ const formatValue = (value: unknown) => {
 .parameter-item__details {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
-  column-gap: 8px;
-  row-gap: 6px;
+  gap: 6px 8px;
   margin-top: 8px;
 }
 
