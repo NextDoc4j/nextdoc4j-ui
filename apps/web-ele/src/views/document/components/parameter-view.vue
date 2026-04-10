@@ -128,11 +128,7 @@ const formatValue = (value: unknown) => {
       >
         <span class="parameter-item__detail-label">约束:</span>
         <div class="parameter-item__detail-content">
-          <span
-            v-for="item in constraintTokens"
-            :key="item"
-            class="meta-chip"
-          >
+          <span v-for="item in constraintTokens" :key="item" class="meta-chip">
             {{ item }}
           </span>
         </div>
@@ -227,8 +223,8 @@ const formatValue = (value: unknown) => {
   top: 0;
   right: 0;
   margin-left: 0;
-  font-style: normal;
   font-size: 10px;
+  font-style: normal;
   font-weight: 700;
   line-height: 1;
   color: var(--field-required);
@@ -291,18 +287,18 @@ const formatValue = (value: unknown) => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 26px;
   max-width: 100%;
+  min-height: 26px;
   padding: 3px 10px;
   font-size: 11.5px;
   font-weight: var(--field-chip-value-weight);
   line-height: 1.45;
   color: var(--field-chip-text);
+  overflow-wrap: anywhere;
+  white-space: normal;
   background: var(--field-chip-bg);
   border: 1px solid var(--field-chip-border);
   border-radius: var(--field-chip-radius);
-  overflow-wrap: anywhere;
-  white-space: normal;
 }
 
 .meta-chip--mono {

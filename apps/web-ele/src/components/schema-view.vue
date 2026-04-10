@@ -516,7 +516,8 @@ const showSchemaStack = computed(() => {
             v-if="
               getFlagTokens(value, getNodePath(String(key))).length > 0 ||
               getConstraintTokens(value, getNodePath(String(key))).length > 0 ||
-              getPropertyEnumItems(value, getNodePath(String(key))).length > 0 ||
+              getPropertyEnumItems(value, getNodePath(String(key))).length >
+                0 ||
               getExampleValue(value, getNodePath(String(key))) !== undefined ||
               getPatternValue(value, getNodePath(String(key)))
             "
@@ -575,11 +576,10 @@ const showSchemaStack = computed(() => {
                   :key="item.value"
                   class="enum-entry"
                 >
-                  <span class="meta-chip meta-chip--mono">{{ item.value }}</span>
-                  <span
-                    v-if="item.description"
-                    class="enum-entry__description"
-                  >
+                  <span class="meta-chip meta-chip--mono">{{
+                    item.value
+                  }}</span>
+                  <span v-if="item.description" class="enum-entry__description">
                     - {{ item.description }}
                   </span>
                 </span>
@@ -587,20 +587,26 @@ const showSchemaStack = computed(() => {
             </div>
 
             <div
-              v-if="getExampleValue(value, getNodePath(String(key))) !== undefined"
+              v-if="
+                getExampleValue(value, getNodePath(String(key))) !== undefined
+              "
               class="schema-item__detail-row"
             >
               <span class="schema-item__detail-label">示例:</span>
               <div class="schema-item__detail-content">
                 <ElTooltip
                   :content="
-                    formatValue(getExampleValue(value, getNodePath(String(key))))
+                    formatValue(
+                      getExampleValue(value, getNodePath(String(key))),
+                    )
                   "
                   placement="top"
                 >
                   <span class="meta-chip meta-chip--mono">
                     {{
-                      formatValue(getExampleValue(value, getNodePath(String(key))))
+                      formatValue(
+                        getExampleValue(value, getNodePath(String(key))),
+                      )
                     }}
                   </span>
                 </ElTooltip>
@@ -770,8 +776,8 @@ const showSchemaStack = computed(() => {
   top: 0;
   right: 0;
   margin-left: 0;
-  font-style: normal;
   font-size: 10px;
+  font-style: normal;
   font-weight: 700;
   line-height: 1;
   color: var(--field-required);
@@ -842,18 +848,18 @@ const showSchemaStack = computed(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 26px;
   max-width: 100%;
+  min-height: 26px;
   padding: 3px 9px;
   font-size: 11.5px;
   font-weight: var(--field-chip-value-weight);
   line-height: 1.45;
   color: var(--field-chip-text);
+  overflow-wrap: anywhere;
+  white-space: normal;
   background: var(--field-chip-bg);
   border: 1px solid var(--field-chip-border);
   border-radius: var(--field-chip-radius);
-  overflow-wrap: anywhere;
-  white-space: normal;
 }
 
 .meta-chip--mono {
