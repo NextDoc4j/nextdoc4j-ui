@@ -693,6 +693,7 @@ const showSchemaStack = computed(() => {
 
 .schema-stack {
   display: grid;
+  width: 100%;
 }
 
 .composition-switch__buttons {
@@ -704,19 +705,17 @@ const showSchemaStack = computed(() => {
 }
 
 .schema-item {
+  box-sizing: border-box;
+  width: 100%;
   padding: 10px 0;
   border-bottom: 1px solid var(--el-border-color-lighter);
-}
-
-.schema-item:last-child {
-  padding-bottom: 0;
-  border-bottom: none;
 }
 
 .schema-item__top {
   display: flex;
   gap: 8px;
   align-items: flex-start;
+  width: 100%;
 }
 
 .schema-item__toggle {
@@ -736,6 +735,7 @@ const showSchemaStack = computed(() => {
 
 .schema-item__content {
   flex: 1;
+  width: 100%;
   min-width: 0;
 }
 
@@ -819,7 +819,7 @@ const showSchemaStack = computed(() => {
 }
 
 .schema-item__detail-label {
-  align-self: start;
+  align-self: center;
   font-size: 12px;
   font-weight: 600;
   line-height: 1.45;
@@ -910,9 +910,11 @@ const showSchemaStack = computed(() => {
 }
 
 .schema-item__children {
-  padding-left: 14px;
+  box-sizing: border-box;
+  width: 100%;
+  padding-left: 10px;
   margin-top: 12px;
-  margin-left: 8px;
+  margin-left: 0;
   border-left: 1px solid var(--el-border-color-lighter);
 }
 

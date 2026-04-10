@@ -8,7 +8,6 @@ import { useRoute } from 'vue-router';
 import { ApiTestRun, ApiTestRunning, SvgApiPrefixIcon } from '@vben/icons';
 import { usePreferences } from '@vben/preferences';
 
-import { useClipboard } from '@vueuse/core';
 import {
   ElButton,
   ElCollapse,
@@ -24,6 +23,7 @@ import JsonViewer from '#/components/json-viewer/index.vue';
 import SchemaView from '#/components/schema-view.vue';
 import { getMethodStyle } from '#/constants/methods';
 import { useApiStore } from '#/store';
+import { copyText } from '#/utils/clipboard';
 import {
   adaptSchemaForView,
   hasRenderableSchema,
@@ -886,18 +886,24 @@ const hasAnyParameters = computed(() => {
   );
 });
 
-const { copy: copyToClipboard } = useClipboard();
-
 async function handleCopyBaseUrl() {
   if (!baseUrl.value) return;
-  await copyToClipboard(baseUrl.value);
-  ElMessage.success('Base URL 已复制');
+  const copied = await copyText(baseUrl.value);
+  if (copied) {
+    ElMessage.success('Base URL 已复制');
+    return;
+  }
+  ElMessage.error('Base URL 复制失败');
 }
 
 async function handleCopyPath() {
   if (!apiInfo.value.path) return;
-  await copyToClipboard(apiInfo.value.path);
-  ElMessage.success('Path 已复制');
+  const copied = await copyText(apiInfo.value.path);
+  if (copied) {
+    ElMessage.success('Path 已复制');
+    return;
+  }
+  ElMessage.error('Path 复制失败');
 }
 
 const handleTest = () => {
@@ -1497,22 +1503,21 @@ defineExpose({
 
 .endpoint-prefix {
   justify-content: center;
-  width: auto;
-  height: auto;
+  width: 26px;
+  height: 26px;
   padding: 0;
-  color: color-mix(in srgb, var(--el-color-primary) 88%, #fff 12%);
+  color: var(--el-text-color-secondary);
   cursor: pointer;
   background: transparent;
   border: none;
-  border-radius: 0;
+  border-radius: var(--doc-chip-radius);
   box-shadow: none;
-  transition: all 0.2s ease;
+  transition: all 0.16s ease;
 }
 
 .endpoint-prefix__icon {
-  width: 19px;
-  height: 19px;
-  opacity: 0.9;
+  width: 16px;
+  height: 16px;
 }
 
 .endpoint-path {
@@ -1540,8 +1545,12 @@ defineExpose({
 
 .endpoint-prefix:hover {
   color: var(--el-color-primary);
-  background: transparent;
-  transform: scale(1.04);
+  background: color-mix(
+    in srgb,
+    var(--el-color-primary-light-9) 65%,
+    transparent
+  );
+  transform: none;
 }
 
 .section-panel__header {
@@ -1796,12 +1805,20 @@ defineExpose({
 }
 
 .response-content {
+  width: 100%;
   margin-top: 1px;
 }
 
 .response-content__toolbar {
   justify-content: flex-end;
   margin-bottom: 1px;
+}
+
+.response-collapse :deep(.el-collapse-item__content),
+.response-collapse :deep(.el-collapse-item__wrap),
+.response-content .schema-layout,
+.response-content .schema-layout__main {
+  width: 100%;
 }
 
 .response-content__actions {

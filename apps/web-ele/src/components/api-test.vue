@@ -58,6 +58,7 @@ import {
   detectBase64ImagesInData,
   formatDetectedImageSize,
 } from '#/utils/base64-image';
+import { copyText } from '#/utils/clipboard';
 import { adaptSchemaForView, hasRenderableSchema } from '#/utils/schema';
 
 import bodyParams from './body-params.vue';
@@ -867,6 +868,18 @@ const layoutGridStyle = computed(() => {
     }fr)`,
   };
 });
+
+async function handleCopyBaseUrl() {
+  if (!baseUrl.value) {
+    return;
+  }
+  const copied = await copyText(baseUrl.value);
+  if (copied) {
+    ElMessage.success('Base URL 已复制');
+    return;
+  }
+  ElMessage.error('Base URL 复制失败');
+}
 
 const normalizeResizeRatio = (value: number) => {
   if (Number.isNaN(value)) return paneRatio.value;
@@ -2058,7 +2071,11 @@ onBeforeUnmount(() => {
               {{ method?.toUpperCase() }}
             </span>
             <ElTooltip v-if="baseUrl" placement="top" :content="baseUrl">
-              <ElButton text class="debug-prefix-button">
+              <ElButton
+                text
+                class="debug-prefix-button"
+                @click="handleCopyBaseUrl"
+              >
                 <SvgApiPrefixIcon class="size-4" />
               </ElButton>
             </ElTooltip>
@@ -3394,23 +3411,31 @@ onBeforeUnmount(() => {
   box-shadow: none !important;
 }
 
+:deep(.debug-request-input .el-input__prefix) {
+  margin-right: 10px;
+}
+
+:deep(.debug-request-input .el-input__prefix-inner) {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
 .method-pill {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 58px;
-  height: 23px;
-  padding: 0 9px;
-  font-size: 11.5px;
-  font-weight: 700;
-  letter-spacing: 0.01em;
+  min-width: 72px;
+  height: 32px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 800;
   border-radius: var(--debug-chip-radius);
 }
 
 .debug-prefix-button {
   width: 26px;
   height: 26px;
-  margin-left: 8px;
   color: var(--el-text-color-secondary);
   border-radius: var(--debug-chip-radius);
   transition: all 0.16s ease;

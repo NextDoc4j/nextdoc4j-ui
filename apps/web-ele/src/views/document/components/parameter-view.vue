@@ -266,7 +266,7 @@ const formatValue = (value: unknown) => {
 }
 
 .parameter-item__detail-label {
-  align-self: start;
+  align-self: center;
   font-size: 12px;
   font-weight: 600;
   line-height: 1.45;

@@ -8,6 +8,7 @@ import { usePreferredDark } from '@vueuse/core';
 import { ElImage, ElMessage, ElTooltip } from 'element-plus';
 
 import monaco from '#/monaco';
+import { copyText } from '#/utils/clipboard';
 
 const props = withDefaults(
   defineProps<{
@@ -413,12 +414,12 @@ const handleFormat = () => {
 };
 
 const handleCopy = async () => {
-  try {
-    await navigator.clipboard.writeText(editor.getValue());
+  const copied = await copyText(editor.getValue());
+  if (copied) {
     ElMessage.success('复制成功');
-  } catch {
-    ElMessage.error('复制失败');
+    return;
   }
+  ElMessage.error('复制失败');
 };
 
 // 关键修改 3：增加点击全区域聚焦功能

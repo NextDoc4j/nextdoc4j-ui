@@ -7,7 +7,6 @@ import { computed, ref } from 'vue';
 import { SvgApiPrefixIcon, SvgCopyIcon } from '@vben/icons';
 import { usePreferences } from '@vben/preferences';
 
-import { useClipboard } from '@vueuse/core';
 import {
   ElButton,
   ElEmpty,
@@ -24,6 +23,7 @@ import {
   buildCodeExampleContext,
   renderCodeExample,
 } from '#/utils/api-code-example';
+import { copyText } from '#/utils/clipboard';
 
 import PathSegment from './path-segment.vue';
 
@@ -36,7 +36,6 @@ const props = defineProps<{
 const { isDark } = usePreferences();
 const apiStore = useApiStore();
 const activeLanguage = ref<CodeExampleLanguage>('javascript');
-const { copy: copyToClipboard } = useClipboard();
 
 const codeContext = computed(() => {
   return buildCodeExampleContext({
@@ -64,19 +63,31 @@ const baseUrl = computed(() => apiStore.openApi?.servers?.[0]?.url || '');
 
 async function handleCopyBaseUrl() {
   if (!baseUrl.value) return;
-  await copyToClipboard(baseUrl.value);
-  ElMessage.success('Base URL 已复制');
+  const copied = await copyText(baseUrl.value);
+  if (copied) {
+    ElMessage.success('Base URL 已复制');
+    return;
+  }
+  ElMessage.error('Base URL 复制失败');
 }
 
 async function handleCopyPath() {
   if (!pathLabel.value) return;
-  await copyToClipboard(pathLabel.value);
-  ElMessage.success('Path 已复制');
+  const copied = await copyText(pathLabel.value);
+  if (copied) {
+    ElMessage.success('Path 已复制');
+    return;
+  }
+  ElMessage.error('Path 复制失败');
 }
 
 async function handleCopyCode() {
-  await copyToClipboard(generatedCode.value || '');
-  ElMessage.success('代码已复制');
+  const copied = await copyText(generatedCode.value || '');
+  if (copied) {
+    ElMessage.success('代码已复制');
+    return;
+  }
+  ElMessage.error('代码复制失败');
 }
 </script>
 
@@ -223,20 +234,19 @@ async function handleCopyCode() {
 
 .endpoint-prefix {
   justify-content: center;
-  width: auto;
-  height: auto;
+  width: 26px;
+  height: 26px;
   padding: 0;
-  color: color-mix(in srgb, var(--el-color-primary) 88%, #fff 12%);
+  color: var(--el-text-color-secondary);
   cursor: pointer;
-  border-radius: 0;
+  border-radius: calc(var(--radius) * 0.62);
   box-shadow: none;
-  transition: all 0.2s ease;
+  transition: all 0.16s ease;
 }
 
 .endpoint-prefix__icon {
-  width: 19px;
-  height: 19px;
-  opacity: 0.9;
+  width: 16px;
+  height: 16px;
 }
 
 .endpoint-path-wrap {
@@ -270,8 +280,12 @@ async function handleCopyCode() {
 
 .endpoint-prefix:hover {
   color: var(--el-color-primary);
-  background: transparent;
-  transform: scale(1.04);
+  background: color-mix(
+    in srgb,
+    var(--el-color-primary-light-9) 65%,
+    transparent
+  );
+  transform: none;
 }
 
 .code-example-page__editor {
