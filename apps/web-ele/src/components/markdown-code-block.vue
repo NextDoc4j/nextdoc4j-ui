@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, useSlots } from 'vue';
 
 import DOMPurify from 'dompurify';
 import hljs from 'highlight.js';
@@ -20,6 +20,8 @@ const props = withDefaults(
   },
 );
 
+const slots = useSlots();
+
 const md = new MarkdownIt({
   html: false,
   xhtmlOut: true,
@@ -37,6 +39,7 @@ const md = new MarkdownIt({
 });
 
 const theme = computed(() => (props.dark ? 'dark' : 'light'));
+const hasToolbar = computed(() => Boolean(slots.toolbar));
 
 const fencedMarkdown = computed(() => {
   const content = props.code || '';
@@ -54,26 +57,58 @@ const renderedHtml = computed(() => {
 </script>
 
 <template>
-  <div class="markdown-code-block">
-    <div
-      class="markdown-body markdown-code-block__body"
-      :data-theme="theme"
-      v-html="renderedHtml"
-    ></div>
+  <div
+    class="markdown-code-block"
+    :class="{ 'markdown-code-block--with-toolbar': hasToolbar }"
+  >
+    <div v-if="hasToolbar" class="markdown-code-block__toolbar">
+      <slot name="toolbar"></slot>
+    </div>
+    <div class="markdown-code-block__scroller">
+      <div
+        class="markdown-body markdown-code-block__body"
+        :data-theme="theme"
+        v-html="renderedHtml"
+      ></div>
+    </div>
   </div>
 </template>
 
 <style scoped lang="scss">
 .markdown-code-block {
+  position: relative;
   display: flex;
   flex: 1;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.markdown-code-block__toolbar {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 1;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.markdown-code-block__scroller {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
   min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .markdown-code-block__body {
   width: 100%;
   min-width: 0;
+  min-height: 100%;
   background: transparent;
 }
 
@@ -89,6 +124,11 @@ const renderedHtml = computed(() => {
   margin: 0;
   overflow: auto;
   border-radius: calc(var(--radius) * 0.94);
+}
+
+.markdown-code-block--with-toolbar .markdown-code-block__body :deep(pre) {
+  padding-top: 52px;
+  padding-right: 56px;
 }
 
 .markdown-code-block__body :deep(pre > code) {

@@ -913,24 +913,6 @@ const hasAnyParameters = computed(() => {
   );
 });
 
-const activeResponsePanel = computed(() => {
-  return (
-    responsePanels.value.find(
-      (item) => item.code === activeResponseCode.value,
-    ) ||
-    responsePanels.value[0] ||
-    null
-  );
-});
-
-const activeResponsePreviewSchema = computed(() => {
-  const panel = activeResponsePanel.value;
-  if (!panel?.schema) {
-    return null;
-  }
-  return getResponsePreviewSchema(panel.code, panel.schema);
-});
-
 const requestTypeCode = computed(() => {
   if (!hasAnyParameters.value || !apiInfo.value) {
     return '';
@@ -946,11 +928,38 @@ const requestTypeCode = computed(() => {
 });
 
 const responseTypeCode = computed(() => {
-  const panel = activeResponsePanel.value;
-  const previewSchema = activeResponsePreviewSchema.value;
-  const sourceSchema = panel?.originalSchema || panel?.schema;
+  if (!apiInfo.value) {
+    return '';
+  }
 
-  if (!sourceSchema || !previewSchema || !apiInfo.value) {
+  const responseOverrides: Array<{
+    adaptedSchema: any;
+    code: string;
+    metadata: {
+      description?: string;
+      refName?: string;
+      title?: string;
+    };
+    schema: any;
+  }> = [];
+
+  for (const panel of responsePanels.value) {
+    const previewSchema = getResponsePreviewSchema(panel.code, panel.schema);
+    const sourceSchema = panel.originalSchema || panel.schema;
+
+    if (!sourceSchema || !previewSchema) {
+      continue;
+    }
+
+    responseOverrides.push({
+      adaptedSchema: previewSchema,
+      code: panel.code,
+      metadata: buildSchemaMetadata(sourceSchema),
+      schema: sourceSchema,
+    });
+  }
+
+  if (responseOverrides.length <= 0) {
     return '';
   }
 
@@ -958,11 +967,7 @@ const responseTypeCode = computed(() => {
     info: apiInfo.value,
     requestBodyType: requestBodyType.value,
     requestBodyVariantState: requestBodyVariantState.value,
-    responseOverride: {
-      adaptedSchema: previewSchema,
-      metadata: buildSchemaMetadata(sourceSchema),
-      schema: sourceSchema,
-    },
+    responseOverrides,
     schemaMap: schemaMap.value,
     scope: 'response',
   });
@@ -1410,32 +1415,39 @@ defineExpose({
 
     <ElDialog
       v-model="codeDialogVisible"
+      align-center
       append-to-body
       destroy-on-close
       class="type-code-dialog"
+      modal-class="type-code-dialog-overlay"
       width="min(860px, calc(100vw - 32px))"
     >
       <template #header>
         <div class="type-code-dialog__header">
           <div class="type-code-dialog__title">{{ codeDialogTitle }}</div>
-          <ElTooltip content="复制代码" placement="top">
-            <ElButton
-              text
-              class="type-code-dialog__copy-button"
-              @click="handleCopyGeneratedCode"
-            >
-              <SvgCopyIcon class="size-4" />
-            </ElButton>
-          </ElTooltip>
         </div>
       </template>
 
-      <MarkdownCodeBlock
-        class="type-code-dialog__viewer"
-        :code="activeTypeCode"
-        :dark="isDark"
-        language="typescript"
-      />
+      <div class="type-code-dialog__body">
+        <MarkdownCodeBlock
+          class="type-code-dialog__viewer"
+          :code="activeTypeCode"
+          :dark="isDark"
+          language="typescript"
+        >
+          <template #toolbar>
+            <ElTooltip content="复制代码" placement="top">
+              <ElButton
+                text
+                class="type-code-dialog__copy-button"
+                @click="handleCopyGeneratedCode"
+              >
+                <SvgCopyIcon class="size-4" />
+              </ElButton>
+            </ElTooltip>
+          </template>
+        </MarkdownCodeBlock>
+      </div>
     </ElDialog>
   </div>
 </template>
@@ -2100,24 +2112,51 @@ defineExpose({
   border-radius: var(--doc-radius-xs);
 }
 
+:global(.type-code-dialog-overlay) {
+  overflow: hidden;
+}
+
+:global(.type-code-dialog-overlay .el-overlay-dialog) {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  overflow: hidden;
+}
+
 :deep(.type-code-dialog) {
   border-radius: calc(var(--radius) * 1.08);
 }
 
+:deep(.type-code-dialog .el-dialog) {
+  display: flex;
+  flex-direction: column;
+  width: min(860px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  margin: 0 auto;
+  overflow: hidden;
+}
+
 :deep(.type-code-dialog .el-dialog__header) {
+  flex: none;
   padding: 18px 20px 0;
   margin: 0;
 }
 
 :deep(.type-code-dialog .el-dialog__body) {
+  display: flex;
+  flex: 1;
+  min-height: 0;
   padding: 12px 20px 20px;
+  overflow: hidden;
 }
 
 .type-code-dialog__header {
   display: flex;
-  gap: 12px;
   align-items: center;
-  justify-content: space-between;
+  min-width: 0;
 }
 
 .type-code-dialog__title {
@@ -2128,14 +2167,39 @@ defineExpose({
 
 .type-code-dialog__copy-button {
   color: var(--el-text-color-secondary);
+  background: color-mix(in srgb, var(--el-bg-color) 92%, transparent);
+  border-radius: calc(var(--radius) * 0.56);
+  box-shadow: 0 8px 22px rgb(15 23 42 / 8%);
 }
 
 .type-code-dialog__copy-button:hover {
   color: var(--el-color-primary);
+  background: color-mix(
+    in srgb,
+    var(--el-color-primary-light-9) 86%,
+    var(--el-bg-color) 14%
+  );
+}
+
+.type-code-dialog__body {
+  display: flex;
+  flex: 1;
+  height: min(70vh, calc(100vh - 128px));
+  min-height: 0;
+  overflow: hidden;
 }
 
 .type-code-dialog__viewer {
-  min-height: 220px;
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+}
+
+.type-code-dialog__body :deep(.markdown-code-block),
+.type-code-dialog__body :deep(.markdown-code-block__scroller) {
+  height: 100%;
 }
 
 @media (max-width: 768px) {

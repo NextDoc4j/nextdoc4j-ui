@@ -52,6 +52,11 @@ interface ExampleRootSchema {
   originalSchema?: SchemaObject;
 }
 
+interface ResponseDefinitionGroup extends ExampleRootSchema {
+  codes: string[];
+  signature: string;
+}
+
 interface SchemaMetadata {
   description?: string;
   refName?: string;
@@ -837,6 +842,17 @@ const buildMetadataCommentLines = (metadata?: SchemaMetadata) => {
   return [];
 };
 
+const buildResponseCommentLines = (
+  metadata?: SchemaMetadata,
+  codes: string[] = [],
+) => {
+  const lines = buildMetadataCommentLines(metadata);
+  if (codes.length > 0) {
+    lines.push(`状态码：${codes.join(', ')}`);
+  }
+  return [...new Set(lines.filter(Boolean))];
+};
+
 const resolveSchemaSource = (
   schema: any,
   schemaMap: Record<string, SchemaObject>,
@@ -922,12 +938,164 @@ const wrapArrayType = (type: string) => {
     : `Array<${normalized}>`;
 };
 
+const buildSchemaShapeSignature = (schema: any) => {
+  const stack = new WeakSet<object>();
+
+  const visit = (value: any): string => {
+    if (value === null) {
+      return 'null';
+    }
+    if (value === undefined) {
+      return 'undefined';
+    }
+    if (typeof value !== 'object') {
+      return JSON.stringify(value);
+    }
+    if (stack.has(value)) {
+      return `circular:${value?.title || value?.type || 'object'}`;
+    }
+
+    stack.add(value);
+    try {
+      const nullable = value?.nullable ? '|null' : '';
+
+      if (value?.['x-nextdoc4j-circular-ref'] || value?.type === 'ref') {
+        return `ref:${value?.title || value?.$ref || 'anonymous'}${nullable}`;
+      }
+
+      if (Array.isArray(value?.enum) && value.enum.length > 0) {
+        return `enum(${value.enum.map((item: any) => JSON.stringify(item)).join('|')})${nullable}`;
+      }
+
+      if (Array.isArray(value?.oneOf) && value.oneOf.length > 0) {
+        return `oneOf(${value.oneOf
+          .map((item: any) => visit(item))
+          .sort()
+          .join('|')})${nullable}`;
+      }
+
+      if (Array.isArray(value?.anyOf) && value.anyOf.length > 0) {
+        return `anyOf(${value.anyOf
+          .map((item: any) => visit(item))
+          .sort()
+          .join('|')})${nullable}`;
+      }
+
+      if (Array.isArray(value?.allOf) && value.allOf.length > 0) {
+        return `allOf(${value.allOf
+          .map((item: any) => visit(item))
+          .sort()
+          .join('&')})${nullable}`;
+      }
+
+      if (
+        (value?.properties && typeof value.properties === 'object') ||
+        value?.additionalProperties !== undefined
+      ) {
+        const requiredSet = new Set<string>(value?.required || []);
+        const propertySignature = Object.keys(value?.properties || {})
+          .sort()
+          .map((key) => {
+            return `${JSON.stringify(key)}${requiredSet.has(key) ? '!' : '?'}:${visit(value.properties[key])}`;
+          })
+          .join(',');
+        let additionalSignature = '';
+        if (value?.additionalProperties === true) {
+          additionalSignature = '|additional:true';
+        } else if (value?.additionalProperties === false) {
+          additionalSignature = '|additional:false';
+        } else if (value?.additionalProperties !== undefined) {
+          additionalSignature = `|additional:${visit(value.additionalProperties)}`;
+        }
+
+        return `object{${propertySignature}}${additionalSignature}${nullable}`;
+      }
+
+      if (
+        `${value?.type || ''}`.toLowerCase() === 'array' ||
+        value?.items ||
+        (Array.isArray(value?.prefixItems) && value.prefixItems.length > 0)
+      ) {
+        const itemSignature = value?.items ? visit(value.items) : 'unknown';
+        const prefixSignature = Array.isArray(value?.prefixItems)
+          ? `|prefix:${value.prefixItems.map((item: any) => visit(item)).join(',')}`
+          : '';
+        return `array<${itemSignature}>${prefixSignature}${nullable}`;
+      }
+
+      return `${value?.type || 'unknown'}:${value?.format || ''}${nullable}`;
+    } finally {
+      stack.delete(value);
+    }
+  };
+
+  return visit(schema);
+};
+
 const createDeclarationState = (schemaMap: Record<string, SchemaObject>) => {
   return {
     blocksByName: new Map<string, string>(),
     order: [],
     schemaMap,
   } satisfies DeclarationState;
+};
+
+const buildResponseDefinitionGroups = (
+  responseDefinitions: Array<
+    | null
+    | undefined
+    | {
+        adaptedSchema?: any;
+        code?: string;
+        metadata?: SchemaMetadata;
+        schema: any;
+      }
+  >,
+): ResponseDefinitionGroup[] => {
+  const groups: ResponseDefinitionGroup[] = [];
+
+  responseDefinitions.forEach((item) => {
+    if (!item?.schema) {
+      return;
+    }
+
+    const adaptedSchema =
+      item.adaptedSchema ||
+      adaptSchemaForView(item.schema, {
+        mode: 'response',
+      });
+
+    if (!adaptedSchema) {
+      return;
+    }
+
+    const signature = buildSchemaShapeSignature(adaptedSchema);
+    const existingGroup = groups.find((group) => group.signature === signature);
+
+    if (existingGroup) {
+      if (item.code && !existingGroup.codes.includes(item.code)) {
+        existingGroup.codes.push(item.code);
+      }
+      return;
+    }
+
+    groups.push({
+      adaptedSchema,
+      codes: item.code ? [item.code] : [],
+      metadata: item.metadata,
+      originalSchema: item.schema,
+      signature,
+    });
+  });
+
+  return groups;
+};
+
+const buildResponseTypeName = (codes: string[], index: number) => {
+  if (codes.length <= 0) {
+    return index === 0 ? 'Response' : `Response${index + 1}`;
+  }
+  return toTypeName(`Response ${codes[0]}`);
 };
 
 const pickDeclarationName = (
@@ -1362,11 +1530,25 @@ const buildRenderArguments = (context: CodeExampleContext) => {
 const buildTypeSections = (
   context: CodeExampleContext,
   scope: TypeDefinitionScope = 'all',
+  responseGroups?: ResponseDefinitionGroup[],
 ) => {
   const lines: string[] = [];
   const state = createDeclarationState(context.schemaMap);
   const includeRequest = scope === 'all' || scope === 'request';
   const includeResponse = scope === 'all' || scope === 'response';
+  const effectiveResponseGroups =
+    responseGroups ||
+    (context.response
+      ? [
+          {
+            ...context.response,
+            codes: [],
+            signature: buildSchemaShapeSignature(
+              context.response.adaptedSchema,
+            ),
+          },
+        ]
+      : []);
 
   const pushSection = (label: string, render: () => string) => {
     const startIndex = state.order.length;
@@ -1409,18 +1591,30 @@ const buildTypeSections = (
     );
   }
 
-  if (includeResponse && context.response) {
-    const responseSchema = context.response;
-    pushSection('response', () =>
-      renderNamedDeclarationBlock(
-        'Response',
-        responseSchema.originalSchema,
-        responseSchema.adaptedSchema,
-        state,
-        'response',
-        buildMetadataCommentLines(responseSchema.metadata),
-      ),
-    );
+  if (includeResponse && effectiveResponseGroups.length > 0) {
+    const useSharedResponseName = effectiveResponseGroups.length === 1;
+
+    effectiveResponseGroups.forEach((responseSchema, index) => {
+      pushSection(
+        responseSchema.codes.length > 0
+          ? `response ${responseSchema.codes.join(', ')}`
+          : 'response',
+        () =>
+          renderNamedDeclarationBlock(
+            useSharedResponseName
+              ? 'Response'
+              : buildResponseTypeName(responseSchema.codes, index),
+            responseSchema.originalSchema,
+            responseSchema.adaptedSchema,
+            state,
+            'response',
+            buildResponseCommentLines(
+              responseSchema.metadata,
+              responseSchema.codes,
+            ),
+          ),
+      );
+    });
   }
 
   return lines;
@@ -1452,6 +1646,7 @@ export function renderTypeDefinitions(
   input: CodeExampleInput & {
     responseOverride?: null | {
       adaptedSchema?: any;
+      code?: string;
       metadata?: {
         description?: string;
         refName?: string;
@@ -1459,10 +1654,33 @@ export function renderTypeDefinitions(
       };
       schema: any;
     };
+    responseOverrides?: Array<{
+      adaptedSchema?: any;
+      code?: string;
+      metadata?: {
+        description?: string;
+        refName?: string;
+        title?: string;
+      };
+      schema: any;
+    }>;
     scope?: TypeDefinitionScope;
   },
 ) {
   const context = buildCodeExampleContext(input);
+  let responseGroups: ResponseDefinitionGroup[] | undefined;
+
+  if (input.responseOverrides !== undefined) {
+    responseGroups = buildResponseDefinitionGroups(input.responseOverrides);
+    const [firstResponseGroup] = responseGroups;
+    context.response = firstResponseGroup
+      ? {
+          adaptedSchema: firstResponseGroup.adaptedSchema,
+          metadata: firstResponseGroup.metadata,
+          originalSchema: firstResponseGroup.originalSchema,
+        }
+      : null;
+  }
 
   if (input.responseOverride !== undefined) {
     const responseOverride = input.responseOverride;
@@ -1477,9 +1695,15 @@ export function renderTypeDefinitions(
           originalSchema: responseOverride.schema,
         }
       : null;
+    responseGroups =
+      responseOverride === null
+        ? []
+        : buildResponseDefinitionGroups([responseOverride]);
   }
 
-  return buildTypeSections(context, input.scope).join('\n').trim();
+  return buildTypeSections(context, input.scope, responseGroups)
+    .join('\n')
+    .trim();
 }
 
 export function renderCodeExample(
