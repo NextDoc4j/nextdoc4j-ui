@@ -238,6 +238,10 @@ const toggleFold = (path: string, value: any) => {
   }
 };
 
+const handleNodeToggle = (value: any, path: string) => {
+  toggleFold(path, value);
+};
+
 const getConstraintTokens = (value: any, path: string) => {
   const source = getDisplaySchema(value, path);
   const parts: string[] = [];
@@ -460,7 +464,35 @@ const showSchemaStack = computed(() => {
 
         <div class="schema-item__content">
           <div class="schema-item__headline">
-            <div class="schema-item__headline-main">
+            <div
+              class="schema-item__headline-main"
+              :class="{
+                'schema-item__headline-main--interactive': isExpandable(
+                  value,
+                  getNodePath(String(key)),
+                ),
+              }"
+              :role="
+                isExpandable(value, getNodePath(String(key)))
+                  ? 'button'
+                  : undefined
+              "
+              :tabindex="
+                isExpandable(value, getNodePath(String(key))) ? 0 : undefined
+              "
+              :aria-expanded="
+                isExpandable(value, getNodePath(String(key)))
+                  ? `${!foldState[getNodePath(String(key))]}`
+                  : undefined
+              "
+              @click="handleNodeToggle(value, getNodePath(String(key)))"
+              @keydown.enter.prevent="
+                handleNodeToggle(value, getNodePath(String(key)))
+              "
+              @keydown.space.prevent="
+                handleNodeToggle(value, getNodePath(String(key)))
+              "
+            >
               <div
                 class="schema-item__name"
                 :class="{
@@ -521,7 +553,33 @@ const showSchemaStack = computed(() => {
           <div
             v-if="getHtmlDescription(value, getNodePath(String(key)))"
             class="schema-item__description prose prose-sm max-w-none"
+            :class="{
+              'schema-item__description--interactive': isExpandable(
+                value,
+                getNodePath(String(key)),
+              ),
+            }"
+            :role="
+              isExpandable(value, getNodePath(String(key)))
+                ? 'button'
+                : undefined
+            "
+            :tabindex="
+              isExpandable(value, getNodePath(String(key))) ? 0 : undefined
+            "
+            :aria-expanded="
+              isExpandable(value, getNodePath(String(key)))
+                ? `${!foldState[getNodePath(String(key))]}`
+                : undefined
+            "
             v-html="getHtmlDescription(value, getNodePath(String(key)))"
+            @click="handleNodeToggle(value, getNodePath(String(key)))"
+            @keydown.enter.prevent="
+              handleNodeToggle(value, getNodePath(String(key)))
+            "
+            @keydown.space.prevent="
+              handleNodeToggle(value, getNodePath(String(key)))
+            "
           ></div>
 
           <div
@@ -606,22 +664,13 @@ const showSchemaStack = computed(() => {
             >
               <span class="schema-item__detail-label">示例:</span>
               <div class="schema-item__detail-content">
-                <ElTooltip
-                  :content="
+                <span class="meta-chip meta-chip--mono">
+                  {{
                     formatValue(
                       getExampleValue(value, getNodePath(String(key))),
                     )
-                  "
-                  placement="top"
-                >
-                  <span class="meta-chip meta-chip--mono">
-                    {{
-                      formatValue(
-                        getExampleValue(value, getNodePath(String(key))),
-                      )
-                    }}
-                  </span>
-                </ElTooltip>
+                  }}
+                </span>
               </div>
             </div>
 
@@ -631,14 +680,9 @@ const showSchemaStack = computed(() => {
             >
               <span class="schema-item__detail-label">正则匹配:</span>
               <div class="schema-item__detail-content">
-                <ElTooltip
-                  :content="getPatternValue(value, getNodePath(String(key)))"
-                  placement="top"
-                >
-                  <span class="meta-chip meta-chip--mono">
-                    {{ getPatternValue(value, getNodePath(String(key))) }}
-                  </span>
-                </ElTooltip>
+                <span class="meta-chip meta-chip--mono">
+                  {{ getPatternValue(value, getNodePath(String(key))) }}
+                </span>
               </div>
             </div>
           </div>
@@ -819,6 +863,36 @@ const showSchemaStack = computed(() => {
   min-width: 0;
 }
 
+.schema-item__headline-main--interactive,
+.schema-item__description--interactive {
+  cursor: pointer;
+}
+
+.schema-item__headline-main--interactive {
+  padding: 1px 0;
+  border-radius: calc(var(--field-chip-radius) * 0.78);
+  transition:
+    color 0.16s ease,
+    background-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.schema-item__headline-main--interactive:hover,
+.schema-item__description--interactive:hover {
+  background: color-mix(
+    in srgb,
+    var(--el-color-primary-light-9) 56%,
+    transparent
+  );
+}
+
+.schema-item__headline-main--interactive:focus-visible,
+.schema-item__description--interactive:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--el-color-primary-light-8) 70%, transparent);
+}
+
 .schema-item__name {
   position: relative;
   display: inline-block;
@@ -869,6 +943,13 @@ const showSchemaStack = computed(() => {
 
 .schema-item__description {
   margin-top: 6px;
+}
+
+.schema-item__description--interactive {
+  border-radius: calc(var(--field-chip-radius) * 0.78);
+  transition:
+    background-color 0.16s ease,
+    box-shadow 0.16s ease;
 }
 
 .schema-item__details {

@@ -19,9 +19,6 @@ import Loading from '#/components/loading.vue';
 const ApiTestPanel = defineAsyncComponent(
   () => import('#/components/api-test.vue'),
 );
-const ApiCodeExamplePanel = defineAsyncComponent(
-  () => import('./components/api-code-example.vue'),
-);
 const DocumentPanel = defineAsyncComponent(
   () => import('./components/document.vue'),
 );
@@ -40,7 +37,7 @@ interface DebugTriggerPayload {
   requestBodyVariantState?: Record<string, number>;
 }
 
-const activeView = ref<'code' | 'debug' | 'detail'>('detail');
+const activeView = ref<'debug' | 'detail'>('detail');
 const method = ref('');
 const path = ref('');
 const parameters = ref<any[]>([]);
@@ -156,34 +153,6 @@ const debugReady = computed(() =>
               :request-body-type="requestBodyType"
               :request-body-variant-state="requestBodyVariantState"
               @cancel="handleClose"
-            />
-            <div
-              v-else
-              class="document-empty flex h-full items-center justify-center"
-            >
-              <ElEmpty description="未获取到当前接口信息，请先进入详情页" />
-            </div>
-          </template>
-          <template #fallback>
-            <Loading />
-          </template>
-        </Suspense>
-      </ElTabPane>
-
-      <ElTabPane name="code" lazy>
-        <template #label>
-          <div class="document-tab-label">
-            <span class="document-tab-label__title">代码示例</span>
-          </div>
-        </template>
-
-        <Suspense>
-          <template #default>
-            <ApiCodeExamplePanel
-              v-if="debugReady && info"
-              :info="info"
-              :request-body-type="requestBodyType"
-              :request-body-variant-state="requestBodyVariantState"
             />
             <div
               v-else
@@ -331,6 +300,5 @@ const debugReady = computed(() =>
   border-radius: var(--doc-radius-xl);
 }
 </style>
-
 
 

@@ -2076,7 +2076,7 @@ onBeforeUnmount(() => {
                 class="debug-prefix-button"
                 @click="handleCopyBaseUrl"
               >
-                <SvgApiPrefixIcon class="size-4" />
+                <SvgApiPrefixIcon class="debug-prefix-button__icon" />
               </ElButton>
             </ElTooltip>
           </template>
@@ -3434,11 +3434,16 @@ onBeforeUnmount(() => {
 }
 
 .debug-prefix-button {
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
   color: var(--el-text-color-secondary);
   border-radius: var(--debug-chip-radius);
   transition: all 0.16s ease;
+}
+
+.debug-prefix-button__icon {
+  width: 18px;
+  height: 18px;
 }
 
 .debug-prefix-button:hover {
@@ -3451,10 +3456,12 @@ onBeforeUnmount(() => {
 }
 
 .debug-send-button {
-  min-width: 84px;
-  height: 38px;
+  min-width: 78px;
+  height: 32px;
+  padding: 0 14px;
+  font-size: 12px;
   font-weight: 700;
-  border-radius: var(--debug-radius-sm);
+  border-radius: var(--debug-chip-radius);
   box-shadow: 0 4px 10px
     color-mix(in srgb, var(--el-color-primary) 20%, transparent);
   transition: transform 0.16s ease;

@@ -5,13 +5,19 @@ import type { SecurityMetadata } from '#/utils/securityexpand';
 import { computed, onBeforeMount, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 
-import { ApiTestRun, ApiTestRunning, SvgApiPrefixIcon } from '@vben/icons';
+import {
+  ApiTestRun,
+  ApiTestRunning,
+  SvgApiPrefixIcon,
+  SvgCopyIcon,
+} from '@vben/icons';
 import { usePreferences } from '@vben/preferences';
 
 import {
   ElButton,
   ElCollapse,
   ElCollapseItem,
+  ElDialog,
   ElMessage,
   ElOption,
   ElSelect,
@@ -20,9 +26,11 @@ import {
 } from 'element-plus';
 
 import JsonViewer from '#/components/json-viewer/index.vue';
+import MarkdownCodeBlock from '#/components/markdown-code-block.vue';
 import SchemaView from '#/components/schema-view.vue';
 import { getMethodStyle } from '#/constants/methods';
 import { useApiStore } from '#/store';
+import { renderTypeDefinitions } from '#/utils/api-code-example';
 import { copyText } from '#/utils/clipboard';
 import {
   adaptSchemaForView,
@@ -54,6 +62,8 @@ interface ResponseExampleOption {
   value: unknown;
 }
 
+type CodeDialogScope = 'request' | 'response';
+
 defineOptions({
   name: 'DocumentView',
 });
@@ -79,6 +89,8 @@ const requestExampleOpen = ref(false);
 const responseExampleOpen = ref<Record<string, boolean>>({});
 const responseExampleSelection = ref<Record<string, string>>({});
 const responseVariantState = ref<Record<string, Record<string, number>>>({});
+const codeDialogVisible = ref(false);
+const codeDialogScope = ref<CodeDialogScope>('request');
 
 const displayTags = computed(() => {
   const tags = apiInfo.value?.tags?.filter(Boolean) ?? [];
@@ -118,6 +130,10 @@ const parametersInQuery = computed(() => {
 
 const securitySchemeMap = computed<Record<string, SecuritySchemeObject>>(() => {
   return apiStore.openApi?.components?.securitySchemes || {};
+});
+
+const schemaMap = computed(() => {
+  return apiStore.openApi?.components?.schemas || {};
 });
 
 const authMethods = computed<AuthMethodItem[]>(() => {
@@ -203,6 +219,16 @@ const showSecurityPanel = computed(() => {
 
 const toSchemaTitle = (schema: any, fallback: string) => {
   return schema?.title || parseSchemaRefName(schema?.$ref) || fallback;
+};
+
+const buildSchemaMetadata = (schema: any) => {
+  const refName = parseSchemaRefName(schema?.$ref);
+  const refSchema = refName ? schemaMap.value[refName] : null;
+  return {
+    description: refSchema?.description || schema?.description || '',
+    refName,
+    title: refName || refSchema?.title || schema?.title || '',
+  };
 };
 
 const buildRequestBodyVariantKey = (schema: any, index: number) => {
@@ -828,6 +854,7 @@ const responsePanelSources = computed(() => {
       exampleOptions: exampleData.options as ResponseExampleOption[],
       exampleValue: exampleData.value,
       hasExampleValue: exampleData.hasValue,
+      originalSchema: schema || null,
       response,
       schema: resolved && hasRenderableSchema(resolved) ? resolved : null,
     };
@@ -886,6 +913,71 @@ const hasAnyParameters = computed(() => {
   );
 });
 
+const activeResponsePanel = computed(() => {
+  return (
+    responsePanels.value.find((item) => item.code === activeResponseCode.value) ||
+    responsePanels.value[0] ||
+    null
+  );
+});
+
+const activeResponsePreviewSchema = computed(() => {
+  const panel = activeResponsePanel.value;
+  if (!panel?.schema) {
+    return null;
+  }
+  return getResponsePreviewSchema(panel.code, panel.schema);
+});
+
+const requestTypeCode = computed(() => {
+  if (!hasAnyParameters.value || !apiInfo.value) {
+    return '';
+  }
+
+  return renderTypeDefinitions({
+    info: apiInfo.value,
+    requestBodyType: requestBodyType.value,
+    requestBodyVariantState: requestBodyVariantState.value,
+    schemaMap: schemaMap.value,
+    scope: 'request',
+  });
+});
+
+const responseTypeCode = computed(() => {
+  const panel = activeResponsePanel.value;
+  const previewSchema = activeResponsePreviewSchema.value;
+  const sourceSchema = panel?.originalSchema || panel?.schema;
+
+  if (!sourceSchema || !previewSchema || !apiInfo.value) {
+    return '';
+  }
+
+  return renderTypeDefinitions({
+    info: apiInfo.value,
+    requestBodyType: requestBodyType.value,
+    requestBodyVariantState: requestBodyVariantState.value,
+    responseOverride: {
+      adaptedSchema: previewSchema,
+      metadata: buildSchemaMetadata(sourceSchema),
+      schema: sourceSchema,
+    },
+    schemaMap: schemaMap.value,
+    scope: 'response',
+  });
+});
+
+const codeDialogTitle = computed(() => {
+  return codeDialogScope.value === 'request'
+    ? '请求参数 TS 实体'
+    : '响应参数 TS 实体';
+});
+
+const activeTypeCode = computed(() => {
+  return codeDialogScope.value === 'request'
+    ? requestTypeCode.value
+    : responseTypeCode.value;
+});
+
 async function handleCopyBaseUrl() {
   if (!baseUrl.value) return;
   const copied = await copyText(baseUrl.value);
@@ -904,6 +996,26 @@ async function handleCopyPath() {
     return;
   }
   ElMessage.error('Path 复制失败');
+}
+
+const openTypeCodeDialog = (scope: CodeDialogScope) => {
+  const nextCode = scope === 'request' ? requestTypeCode.value : responseTypeCode.value;
+  if (!nextCode) {
+    ElMessage.warning('当前暂无可生成的 TS 实体');
+    return;
+  }
+
+  codeDialogScope.value = scope;
+  codeDialogVisible.value = true;
+};
+
+async function handleCopyGeneratedCode() {
+  const copied = await copyText(activeTypeCode.value || '');
+  if (copied) {
+    ElMessage.success('TS 代码已复制');
+    return;
+  }
+  ElMessage.error('TS 代码复制失败');
 }
 
 const handleTest = () => {
@@ -1050,6 +1162,16 @@ defineExpose({
       <section v-if="hasAnyParameters" class="panel section-panel">
         <div class="section-panel__header">
           <div class="section-panel__title">请求参数</div>
+          <div class="section-panel__actions">
+            <button
+              v-if="requestTypeCode"
+              type="button"
+              class="section-panel__code-button"
+              @click="openTypeCodeDialog('request')"
+            >
+              TS 代码
+            </button>
+          </div>
         </div>
 
         <div class="section-panel__stack">
@@ -1160,6 +1282,16 @@ defineExpose({
       <section class="panel section-panel">
         <div class="section-panel__header">
           <div class="section-panel__title">响应参数</div>
+          <div class="section-panel__actions">
+            <button
+              v-if="responseTypeCode"
+              type="button"
+              class="section-panel__code-button"
+              @click="openTypeCodeDialog('response')"
+            >
+              TS 代码
+            </button>
+          </div>
         </div>
 
         <ElCollapse
@@ -1272,6 +1404,36 @@ defineExpose({
         <div v-else class="empty-hint">暂无可展示的响应结构</div>
       </section>
     </div>
+
+    <ElDialog
+      v-model="codeDialogVisible"
+      append-to-body
+      destroy-on-close
+      class="type-code-dialog"
+      width="min(860px, calc(100vw - 32px))"
+    >
+      <template #header>
+        <div class="type-code-dialog__header">
+          <div class="type-code-dialog__title">{{ codeDialogTitle }}</div>
+          <ElTooltip content="复制代码" placement="top">
+            <ElButton
+              text
+              class="type-code-dialog__copy-button"
+              @click="handleCopyGeneratedCode"
+            >
+              <SvgCopyIcon class="size-4" />
+            </ElButton>
+          </ElTooltip>
+        </div>
+      </template>
+
+      <MarkdownCodeBlock
+        class="type-code-dialog__viewer"
+        :code="activeTypeCode"
+        :dark="isDark"
+        language="typescript"
+      />
+    </ElDialog>
   </div>
 </template>
 
@@ -1503,8 +1665,8 @@ defineExpose({
 
 .endpoint-prefix {
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
   padding: 0;
   color: var(--el-text-color-secondary);
   cursor: pointer;
@@ -1516,8 +1678,8 @@ defineExpose({
 }
 
 .endpoint-prefix__icon {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
 }
 
 .endpoint-path {
@@ -1557,12 +1719,69 @@ defineExpose({
   margin-bottom: 10px;
 }
 
+.section-panel__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
 .section-panel__title,
 .sub-panel__title {
   font-size: 15px;
   font-weight: 800;
   line-height: 1.2;
   color: var(--el-text-color-primary);
+}
+
+.section-panel__code-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 66px;
+  height: 28px;
+  padding: 0 10px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--el-text-color-secondary);
+  letter-spacing: 0.01em;
+  pointer-events: none;
+  cursor: pointer;
+  background: color-mix(
+    in srgb,
+    var(--el-bg-color) 86%,
+    var(--el-fill-color-light) 14%
+  );
+  border: 1px solid color-mix(in srgb, var(--el-border-color) 92%, transparent);
+  border-radius: var(--doc-chip-radius);
+  opacity: 0;
+  transform: translateY(2px);
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease,
+    color 0.16s ease,
+    border-color 0.16s ease,
+    background-color 0.16s ease;
+}
+
+.section-panel__header:hover .section-panel__code-button,
+.section-panel__header:focus-within .section-panel__code-button {
+  pointer-events: auto;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.section-panel__code-button:hover {
+  color: var(--el-color-primary);
+  background: color-mix(
+    in srgb,
+    var(--el-color-primary-light-9) 72%,
+    var(--el-bg-color) 28%
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--el-color-primary-light-7) 82%,
+    transparent
+  );
 }
 
 .section-panel__stack {
@@ -1878,6 +2097,44 @@ defineExpose({
   border-radius: var(--doc-radius-xs);
 }
 
+:deep(.type-code-dialog) {
+  border-radius: calc(var(--radius) * 1.08);
+}
+
+:deep(.type-code-dialog .el-dialog__header) {
+  padding: 18px 20px 0;
+  margin: 0;
+}
+
+:deep(.type-code-dialog .el-dialog__body) {
+  padding: 12px 20px 20px;
+}
+
+.type-code-dialog__header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.type-code-dialog__title {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--el-text-color-primary);
+}
+
+.type-code-dialog__copy-button {
+  color: var(--el-text-color-secondary);
+}
+
+.type-code-dialog__copy-button:hover {
+  color: var(--el-color-primary);
+}
+
+.type-code-dialog__viewer {
+  min-height: 220px;
+}
+
 @media (max-width: 768px) {
   .hero-panel,
   .section-panel {
@@ -1889,6 +2146,7 @@ defineExpose({
   }
 
   .hero-panel__top,
+  .section-panel__header,
   .sub-panel__header,
   .response-content__toolbar {
     flex-direction: column;
@@ -1896,10 +2154,17 @@ defineExpose({
   }
 
   .hero-panel__tags,
+  .section-panel__actions,
   .sub-panel__actions,
   .sub-panel__title-wrap,
   .response-content__actions {
     justify-content: flex-start;
+  }
+
+  .section-panel__code-button {
+    pointer-events: auto;
+    opacity: 1;
+    transform: none;
   }
 
   .response-example-select {

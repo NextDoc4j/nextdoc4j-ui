@@ -3,8 +3,6 @@ import type { Parameter } from '#/typings/openApi';
 
 import { computed } from 'vue';
 
-import { ElTooltip } from 'element-plus';
-
 import { getEnumItems } from '#/utils/enumexpand';
 import { getSchemaTypeLabel, resolveSchema } from '#/utils/schema';
 
@@ -156,20 +154,16 @@ const formatValue = (value: unknown) => {
       >
         <span class="parameter-item__detail-label">示例:</span>
         <div class="parameter-item__detail-content">
-          <ElTooltip :content="formatValue(exampleValue)" placement="top">
-            <span class="meta-chip meta-chip--mono">
-              {{ formatValue(exampleValue) }}
-            </span>
-          </ElTooltip>
+          <span class="meta-chip meta-chip--mono">
+            {{ formatValue(exampleValue) }}
+          </span>
         </div>
       </div>
 
       <div v-if="patternValue" class="parameter-item__detail-row">
         <span class="parameter-item__detail-label">正则匹配:</span>
         <div class="parameter-item__detail-content">
-          <ElTooltip :content="patternValue" placement="top">
-            <span class="meta-chip meta-chip--mono">{{ patternValue }}</span>
-          </ElTooltip>
+          <span class="meta-chip meta-chip--mono">{{ patternValue }}</span>
         </div>
       </div>
     </div>

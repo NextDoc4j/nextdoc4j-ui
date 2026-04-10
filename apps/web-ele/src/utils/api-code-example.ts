@@ -84,6 +84,8 @@ interface RenderArgument {
   type: string;
 }
 
+type TypeDefinitionScope = 'all' | 'request' | 'response';
+
 const x2js = new X2JS({
   arrayAccessForm: 'none',
   attributePrefix: '_',
@@ -1357,9 +1359,14 @@ const buildRenderArguments = (context: CodeExampleContext) => {
   return args;
 };
 
-const buildTypeSections = (context: CodeExampleContext) => {
+const buildTypeSections = (
+  context: CodeExampleContext,
+  scope: TypeDefinitionScope = 'all',
+) => {
   const lines: string[] = [];
   const state = createDeclarationState(context.schemaMap);
+  const includeRequest = scope === 'all' || scope === 'request';
+  const includeResponse = scope === 'all' || scope === 'response';
 
   const pushSection = (label: string, render: () => string) => {
     const startIndex = state.order.length;
@@ -1376,19 +1383,19 @@ const buildTypeSections = (context: CodeExampleContext) => {
     lines.push('');
   };
 
-  if (context.pathEntries.length > 0) {
+  if (includeRequest && context.pathEntries.length > 0) {
     pushSection('path', () =>
       renderEntriesInterfaceBlock('Path', context.pathEntries, state),
     );
   }
 
-  if (context.queryEntries.length > 0) {
+  if (includeRequest && context.queryEntries.length > 0) {
     pushSection('query', () =>
       renderEntriesInterfaceBlock('Query', context.queryEntries, state),
     );
   }
 
-  if (context.body) {
+  if (includeRequest && context.body) {
     const requestBody = context.body;
     pushSection('body', () =>
       renderNamedDeclarationBlock(
@@ -1402,7 +1409,7 @@ const buildTypeSections = (context: CodeExampleContext) => {
     );
   }
 
-  if (context.response) {
+  if (includeResponse && context.response) {
     const responseSchema = context.response;
     pushSection('response', () =>
       renderNamedDeclarationBlock(
@@ -1439,6 +1446,40 @@ export function buildCodeExampleContext(
     response: resolvePrimaryResponseSchema(input.info.responses, schemaMap),
     schemaMap,
   };
+}
+
+export function renderTypeDefinitions(
+  input: CodeExampleInput & {
+    responseOverride?: null | {
+      adaptedSchema?: any;
+      metadata?: {
+        description?: string;
+        refName?: string;
+        title?: string;
+      };
+      schema: any;
+    };
+    scope?: TypeDefinitionScope;
+  },
+) {
+  const context = buildCodeExampleContext(input);
+
+  if (input.responseOverride !== undefined) {
+    const responseOverride = input.responseOverride;
+    context.response = responseOverride
+      ? {
+          adaptedSchema:
+            responseOverride.adaptedSchema ||
+            adaptSchemaForView(responseOverride.schema, {
+              mode: 'response',
+            }),
+          metadata: responseOverride.metadata,
+          originalSchema: responseOverride.schema,
+        }
+      : null;
+  }
+
+  return buildTypeSections(context, input.scope).join('\n').trim();
 }
 
 export function renderCodeExample(
