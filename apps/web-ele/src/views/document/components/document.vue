@@ -915,7 +915,9 @@ const hasAnyParameters = computed(() => {
 
 const activeResponsePanel = computed(() => {
   return (
-    responsePanels.value.find((item) => item.code === activeResponseCode.value) ||
+    responsePanels.value.find(
+      (item) => item.code === activeResponseCode.value,
+    ) ||
     responsePanels.value[0] ||
     null
   );
@@ -999,7 +1001,8 @@ async function handleCopyPath() {
 }
 
 const openTypeCodeDialog = (scope: CodeDialogScope) => {
-  const nextCode = scope === 'request' ? requestTypeCode.value : responseTypeCode.value;
+  const nextCode =
+    scope === 'request' ? requestTypeCode.value : responseTypeCode.value;
   if (!nextCode) {
     ElMessage.warning('当前暂无可生成的 TS 实体');
     return;

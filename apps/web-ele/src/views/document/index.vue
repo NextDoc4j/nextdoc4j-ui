@@ -74,8 +74,7 @@ const syncDebugState = (
     selectedRequestBodyType ?? detailPayload?.requestBodyType ?? '';
   requestBodyVariantState.value = {
     ...(selectedRequestBodyVariantState ??
-      detailPayload?.requestBodyVariantState ??
-      {}),
+      detailPayload?.requestBodyVariantState),
   };
   return true;
 };
@@ -300,5 +299,3 @@ const debugReady = computed(() =>
   border-radius: var(--doc-radius-xl);
 }
 </style>
-
-
