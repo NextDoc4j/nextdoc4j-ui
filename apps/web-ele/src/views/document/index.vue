@@ -4,6 +4,8 @@ import type { ApiInfo } from '#/typings/openApi';
 import {
   computed,
   defineAsyncComponent,
+  onBeforeUnmount,
+  onMounted,
   nextTick,
   ref,
   shallowRef,
@@ -16,9 +18,8 @@ import { ElEmpty, ElTabPane, ElTabs } from 'element-plus';
 
 import Loading from '#/components/loading.vue';
 
-const ApiTestPanel = defineAsyncComponent(
-  () => import('#/components/api-test.vue'),
-);
+const loadApiTestPanel = () => import('#/components/api-test.vue');
+const ApiTestPanel = defineAsyncComponent(loadApiTestPanel);
 const DocumentPanel = defineAsyncComponent(
   () => import('./components/document.vue'),
 );
@@ -50,6 +51,54 @@ const info = ref<ApiInfo | null>(null);
 
 const documentRef = shallowRef<DocumentExpose | null>(null);
 const { isDark } = usePreferences();
+let apiTestPanelPreloadPromise: null | Promise<unknown> = null;
+let debugPreloadTimer: null | number = null;
+let debugPreloadIdleHandle: null | number = null;
+
+const preloadApiTestPanel = () => {
+  apiTestPanelPreloadPromise ||= loadApiTestPanel();
+  return apiTestPanelPreloadPromise;
+};
+
+const clearDebugPreloadTask = () => {
+  if (debugPreloadTimer !== null) {
+    window.clearTimeout(debugPreloadTimer);
+    debugPreloadTimer = null;
+  }
+
+  if (
+    debugPreloadIdleHandle !== null &&
+    'cancelIdleCallback' in window &&
+    typeof window.cancelIdleCallback === 'function'
+  ) {
+    window.cancelIdleCallback(debugPreloadIdleHandle);
+    debugPreloadIdleHandle = null;
+  }
+};
+
+const scheduleDebugPanelPreload = () => {
+  if (typeof window === 'undefined' || apiTestPanelPreloadPromise) {
+    return;
+  }
+
+  const warmUp = () => {
+    debugPreloadTimer = null;
+    debugPreloadIdleHandle = null;
+    void preloadApiTestPanel();
+  };
+
+  if (
+    'requestIdleCallback' in window &&
+    typeof window.requestIdleCallback === 'function'
+  ) {
+    debugPreloadIdleHandle = window.requestIdleCallback(warmUp, {
+      timeout: 1200,
+    });
+    return;
+  }
+
+  debugPreloadTimer = window.setTimeout(warmUp, 360);
+};
 
 const syncDebugState = (
   payload?: ApiInfo,
@@ -85,6 +134,7 @@ const handleTest = (payload: DebugTriggerPayload) => {
     payload.requestBodyType,
     payload.requestBodyVariantState,
   );
+  void preloadApiTestPanel();
   activeView.value = 'debug';
 };
 const handleClose = () => {
@@ -103,6 +153,14 @@ watch(activeView, async (view) => {
 const debugReady = computed(() =>
   Boolean(info.value && method.value && path.value),
 );
+
+onMounted(() => {
+  scheduleDebugPanelPreload();
+});
+
+onBeforeUnmount(() => {
+  clearDebugPreloadTask();
+});
 </script>
 
 <template>

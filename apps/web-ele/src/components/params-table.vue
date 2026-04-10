@@ -7,7 +7,7 @@ import type {
   UploadRawFile,
 } from 'element-plus';
 
-import { computed } from 'vue';
+import { computed, watch } from 'vue';
 
 import { SvgCloseIcon } from '@vben/icons';
 
@@ -156,6 +156,37 @@ function getDescription(row: ParamItem) {
   return row.description?.trim() || '';
 }
 
+function normalizeEnumRowValue(row: ParamItem) {
+  const options = getEnumOptions(row).map((item) => item.value);
+  if (options.length <= 0) {
+    return;
+  }
+
+  const currentValue = row.value;
+  if (
+    currentValue === '' ||
+    currentValue === null ||
+    currentValue === undefined
+  ) {
+    row.value = options[0];
+    return;
+  }
+
+  if (options.some((option) => option === currentValue)) {
+    return;
+  }
+
+  const matchedOption = options.find(
+    (option) => String(option) === String(currentValue),
+  );
+  if (matchedOption !== undefined) {
+    row.value = matchedOption;
+    return;
+  }
+
+  row.value = options[0];
+}
+
 function remove(index: number) {
   // eslint-disable-next-line vue/no-mutating-props
   props.tableData.splice(index, 1);
@@ -209,6 +240,18 @@ const handleExceed = (
   ];
   row.value = row.type === 'array' ? [file] : file;
 };
+
+watch(
+  () => props.tableData,
+  (rows) => {
+    rows.forEach((row) => {
+      if (isEnumParam(row)) {
+        normalizeEnumRowValue(row);
+      }
+    });
+  },
+  { deep: true, immediate: true },
+);
 </script>
 
 <template>
@@ -482,7 +525,7 @@ const handleExceed = (
   min-height: 34px;
   padding-top: 5px;
   padding-bottom: 5px;
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--el-text-color-primary);
 }
@@ -491,7 +534,7 @@ const handleExceed = (
   min-height: 34px;
   padding-top: 4px;
   padding-bottom: 4px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--el-text-color-regular);
 }
 
@@ -539,7 +582,7 @@ const handleExceed = (
 .params-grid-table__cell :deep(.el-select__placeholder),
 .params-grid-table__cell :deep(.el-select__selected-item),
 .params-grid-table__cell :deep(.el-input__count-inner) {
-  font-size: 11px;
+  font-size: 14px;
   line-height: 1.3;
 }
 
@@ -547,8 +590,25 @@ const handleExceed = (
   color: var(--el-text-color-primary);
 }
 
+.params-grid-table__cell :deep(.el-select__wrapper) {
+  color: var(--el-text-color-primary);
+}
+
+.params-grid-table__cell :deep(.el-select__selected-item),
+.params-grid-table__cell :deep(.el-select__selected-item > span),
+.params-grid-table__cell
+  :deep(.el-select__selected-item.el-select__placeholder:not(.is-transparent)),
+.params-grid-table__cell
+  :deep(
+    .el-select__selected-item.el-select__placeholder:not(.is-transparent)
+      > span
+  ) {
+  color: var(--el-text-color-primary) !important;
+}
+
 .params-grid-table__cell :deep(.el-input__inner::placeholder),
-.params-grid-table__cell :deep(.el-select__placeholder) {
+.params-grid-table__cell :deep(.el-select__placeholder.is-transparent),
+.params-grid-table__cell :deep(.el-select__placeholder.is-transparent > span) {
   color: var(--el-text-color-placeholder);
 }
 
@@ -595,7 +655,7 @@ const handleExceed = (
   width: 100%;
   min-width: 0;
   max-width: 100%;
-  font-size: 11px;
+  font-size: 14px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
