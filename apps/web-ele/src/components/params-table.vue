@@ -88,9 +88,7 @@ const gridTemplateColumns = computed(() => {
   columns.push('minmax(0, 0.92fr)');
 
   if (props.showDescriptionColumn && props.showContentType) {
-    columns.push('minmax(0, 1fr)');
-    columns.push('minmax(0, 0.9fr)');
-    columns.push('minmax(0, 0.86fr)');
+    columns.push('minmax(0, 1fr)', 'minmax(0, 0.9fr)', 'minmax(0, 0.86fr)');
     return columns.join(' ');
   }
 
@@ -172,7 +170,7 @@ function normalizeEnumRowValue(row: ParamItem) {
     return;
   }
 
-  if (options.some((option) => option === currentValue)) {
+  if (options.includes(currentValue)) {
     return;
   }
 
@@ -306,7 +304,10 @@ watch(
           </div>
 
           <div class="params-grid-table__cell params-grid-table__cell--body">
-            <div v-if="row.format === 'binary'" class="params-grid-table__control">
+            <div
+              v-if="row.format === 'binary'"
+              class="params-grid-table__control"
+            >
               <ElUpload
                 v-model:file-list="row.fileList"
                 action="#"
@@ -496,10 +497,7 @@ watch(
 }
 
 .params-grid-table__row--header {
-  background: var(
-    --debug-soft-bg-strong,
-    var(--el-fill-color-light)
-  );
+  background: var(--debug-soft-bg-strong, var(--el-fill-color-light));
 }
 
 .params-grid-table__row:not(:last-child) .params-grid-table__cell {
@@ -600,8 +598,7 @@ watch(
   :deep(.el-select__selected-item.el-select__placeholder:not(.is-transparent)),
 .params-grid-table__cell
   :deep(
-    .el-select__selected-item.el-select__placeholder:not(.is-transparent)
-      > span
+    .el-select__selected-item.el-select__placeholder:not(.is-transparent) > span
   ) {
   color: var(--el-text-color-primary) !important;
 }
@@ -655,9 +652,9 @@ watch(
   width: 100%;
   min-width: 0;
   max-width: 100%;
-  font-size: 14px;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-size: 14px;
   white-space: nowrap;
 }
 

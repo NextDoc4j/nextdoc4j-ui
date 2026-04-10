@@ -4,9 +4,9 @@ import type { ApiInfo } from '#/typings/openApi';
 import {
   computed,
   defineAsyncComponent,
+  nextTick,
   onBeforeUnmount,
   onMounted,
-  nextTick,
   ref,
   shallowRef,
   watch,
