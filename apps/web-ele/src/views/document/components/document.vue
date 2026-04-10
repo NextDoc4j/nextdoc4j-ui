@@ -2192,9 +2192,9 @@ defineExpose({
 }
 
 .type-code-dialog__viewer {
-  height: 100%;
   width: 100%;
   min-width: 0;
+  height: 100%;
   min-height: 0;
 }
 
