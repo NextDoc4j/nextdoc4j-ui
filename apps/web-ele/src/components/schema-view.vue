@@ -238,7 +238,7 @@ const toggleFold = (path: string, value: any) => {
   }
 };
 
-const getConstraints = (value: any, path: string) => {
+const getConstraintTokens = (value: any, path: string) => {
   const source = getDisplaySchema(value, path);
   const parts: string[] = [];
 
@@ -259,17 +259,11 @@ const getConstraints = (value: any, path: string) => {
     parts.push(`<=${source.maximum}`);
   }
 
-  return parts.join(' 或 ');
+  return parts;
 };
 
 const getPropertyEnumItems = (value: any, path: string) => {
   return getEnumItems(getDisplaySchema(value, path));
-};
-
-const getEnumValueList = (value: any, path: string) => {
-  return getPropertyEnumItems(value, path)
-    .map((item) => String(item.value))
-    .join(', ');
 };
 
 const getTypeLabel = (value: any, path: string) => {
@@ -311,8 +305,37 @@ const isWriteOnly = (value: any, path: string) => {
   return schema?.writeOnly === true || accessMode === 'WRITE_ONLY';
 };
 
+const getFlagTokens = (value: any, path: string) => {
+  const tokens: string[] = [];
+
+  if (isNullable(value, path)) {
+    tokens.push('可空');
+  }
+  if (isDeprecated(value, path)) {
+    tokens.push('已弃用');
+  }
+  if (isReadOnly(value, path)) {
+    tokens.push('只读');
+  }
+  if (isWriteOnly(value, path)) {
+    tokens.push('只写');
+  }
+
+  return tokens;
+};
+
 const getDescription = (value: any, path: string) => {
   return value?.description || getDisplaySchema(value, path)?.description || '';
+};
+
+const getPlainDescription = (value: any, path: string) => {
+  const description = getDescription(value, path);
+  return description && !hasHtmlDescription(description) ? description : '';
+};
+
+const getHtmlDescription = (value: any, path: string) => {
+  const description = getDescription(value, path);
+  return description && hasHtmlDescription(description) ? description : '';
 };
 
 const hasVariantSelector = (item: any) => {
@@ -384,9 +407,9 @@ const showSchemaStack = computed(() => {
     <span class="schema-root-pill__title">
       {{ showRootArrayPill || showRootPrimitivePill ? '结构' : '根' }}
     </span>
-    <span class="schema-root-pill__value">{{
-      getTypeLabel(resolvedRootSchema, rootPath)
-    }}</span>
+    <span class="schema-root-pill__value">
+      {{ getTypeLabel(resolvedRootSchema, rootPath) }}
+    </span>
     <div v-if="rootHasVariantSelector" class="composition-switch__buttons">
       <ElTooltip
         v-for="(option, index) in getVariantOptions(data)"
@@ -425,85 +448,36 @@ const showSchemaStack = computed(() => {
 
         <div class="schema-item__content">
           <div class="schema-item__headline">
-            <div class="schema-item__name">
-              {{ key }}
-            </div>
-            <div class="schema-item__meta">
-              <span
-                class="meta-pill"
-                :class="
-                  isRequired(resolvedRootSchema, String(key), value)
-                    ? 'meta-pill--required'
-                    : 'meta-pill--optional'
-                "
+            <div class="schema-item__headline-main">
+              <div
+                class="schema-item__name"
+                :class="{
+                  'schema-item__name--required': isRequired(
+                    resolvedRootSchema,
+                    String(key),
+                    value,
+                  ),
+                }"
               >
-                {{
-                  isRequired(resolvedRootSchema, String(key), value)
-                    ? '必填'
-                    : '可选'
-                }}
-              </span>
-              <span class="meta-pill meta-pill--type">
+                {{ key }}
+                <sup
+                  v-if="isRequired(resolvedRootSchema, String(key), value)"
+                  class="schema-item__required-star"
+                >
+                  *
+                </sup>
+              </div>
+              <div class="schema-item__type">
                 {{ getTypeLabel(value, getNodePath(String(key))) }}
-              </span>
-              <span
-                v-if="isNullable(value, getNodePath(String(key)))"
-                class="meta-pill meta-pill--nullable"
+              </div>
+              <div
+                v-if="getPlainDescription(value, getNodePath(String(key)))"
+                class="schema-item__summary"
               >
-                可空
-              </span>
-              <span
-                v-if="isDeprecated(value, getNodePath(String(key)))"
-                class="meta-pill meta-pill--deprecated"
-              >
-                已弃用
-              </span>
-              <span
-                v-if="isReadOnly(value, getNodePath(String(key)))"
-                class="meta-pill meta-pill--access"
-              >
-                只读
-              </span>
-              <span
-                v-if="isWriteOnly(value, getNodePath(String(key)))"
-                class="meta-pill meta-pill--access"
-              >
-                只写
-              </span>
-              <ElTooltip
-                v-if="
-                  getExampleValue(value, getNodePath(String(key))) !== undefined
-                "
-                :content="
-                  formatValue(getExampleValue(value, getNodePath(String(key))))
-                "
-                placement="top"
-              >
-                <span class="meta-pill meta-pill--example">
-                  示例
-                  {{
-                    formatValue(
-                      getExampleValue(value, getNodePath(String(key))),
-                    )
-                  }}
-                </span>
-              </ElTooltip>
-              <ElTooltip
-                v-if="getPatternValue(value, getNodePath(String(key)))"
-                :content="getPatternValue(value, getNodePath(String(key)))"
-                placement="top"
-              >
-                <span class="meta-pill meta-pill--pattern">
-                  正则 {{ getPatternValue(value, getNodePath(String(key))) }}
-                </span>
-              </ElTooltip>
-              <span
-                v-if="getConstraints(value, getNodePath(String(key)))"
-                class="meta-pill meta-pill--constraint"
-              >
-                约束 {{ getConstraints(value, getNodePath(String(key))) }}
-              </span>
+                {{ getPlainDescription(value, getNodePath(String(key))) }}
+              </div>
             </div>
+
             <div
               v-if="hasVariantSelector(value)"
               class="schema-item__meta-variant"
@@ -533,55 +507,122 @@ const showSchemaStack = computed(() => {
           </div>
 
           <div
-            v-if="
-              getDescription(value, getNodePath(String(key))) &&
-              !hasHtmlDescription(
-                getDescription(value, getNodePath(String(key))),
-              )
-            "
-            class="schema-item__description"
-          >
-            {{ getDescription(value, getNodePath(String(key))) }}
-          </div>
-          <div
-            v-if="
-              getDescription(value, getNodePath(String(key))) &&
-              hasHtmlDescription(
-                getDescription(value, getNodePath(String(key))),
-              )
-            "
+            v-if="getHtmlDescription(value, getNodePath(String(key)))"
             class="schema-item__description prose prose-sm max-w-none"
-            v-html="getDescription(value, getNodePath(String(key)))"
+            v-html="getHtmlDescription(value, getNodePath(String(key)))"
           ></div>
 
           <div
             v-if="
-              getPropertyEnumItems(value, getNodePath(String(key))).length > 0
+              getFlagTokens(value, getNodePath(String(key))).length > 0 ||
+              getConstraintTokens(value, getNodePath(String(key))).length > 0 ||
+              getPropertyEnumItems(value, getNodePath(String(key))).length > 0 ||
+              getExampleValue(value, getNodePath(String(key))) !== undefined ||
+              getPatternValue(value, getNodePath(String(key)))
             "
-            class="schema-item__enum"
+            class="schema-item__details"
           >
-            <span class="schema-item__enum-label">枚举</span>
-            <div class="schema-item__enum-values">
-              <span
-                v-for="item in getPropertyEnumItems(
-                  value,
-                  getNodePath(String(key)),
-                )"
-                :key="item.value"
-                class="enum-pill"
-              >
-                <span class="enum-pill__value">{{ item.value }}</span>
-                <span v-if="item.description" class="enum-pill__description">
-                  {{ item.description }}
-                </span>
-              </span>
-            </div>
-            <span
-              v-if="getEnumValueList(value, getNodePath(String(key)))"
-              class="schema-item__enum-available"
+            <div
+              v-if="getFlagTokens(value, getNodePath(String(key))).length > 0"
+              class="schema-item__detail-row"
             >
-              可用值: {{ getEnumValueList(value, getNodePath(String(key))) }}
-            </span>
+              <span class="schema-item__detail-label">属性:</span>
+              <div class="schema-item__detail-content">
+                <span
+                  v-for="item in getFlagTokens(value, getNodePath(String(key)))"
+                  :key="item"
+                  class="meta-chip"
+                >
+                  {{ item }}
+                </span>
+              </div>
+            </div>
+
+            <div
+              v-if="
+                getConstraintTokens(value, getNodePath(String(key))).length > 0
+              "
+              class="schema-item__detail-row"
+            >
+              <span class="schema-item__detail-label">约束:</span>
+              <div class="schema-item__detail-content">
+                <span
+                  v-for="item in getConstraintTokens(
+                    value,
+                    getNodePath(String(key)),
+                  )"
+                  :key="item"
+                  class="meta-chip"
+                >
+                  {{ item }}
+                </span>
+              </div>
+            </div>
+
+            <div
+              v-if="
+                getPropertyEnumItems(value, getNodePath(String(key))).length > 0
+              "
+              class="schema-item__detail-row"
+            >
+              <span class="schema-item__detail-label">枚举值:</span>
+              <div class="schema-item__detail-content">
+                <span
+                  v-for="item in getPropertyEnumItems(
+                    value,
+                    getNodePath(String(key)),
+                  )"
+                  :key="item.value"
+                  class="enum-entry"
+                >
+                  <span class="meta-chip meta-chip--mono">{{ item.value }}</span>
+                  <span
+                    v-if="item.description"
+                    class="enum-entry__description"
+                  >
+                    - {{ item.description }}
+                  </span>
+                </span>
+              </div>
+            </div>
+
+            <div
+              v-if="getExampleValue(value, getNodePath(String(key))) !== undefined"
+              class="schema-item__detail-row"
+            >
+              <span class="schema-item__detail-label">示例:</span>
+              <div class="schema-item__detail-content">
+                <ElTooltip
+                  :content="
+                    formatValue(getExampleValue(value, getNodePath(String(key))))
+                  "
+                  placement="top"
+                >
+                  <span class="meta-chip meta-chip--mono">
+                    {{
+                      formatValue(getExampleValue(value, getNodePath(String(key))))
+                    }}
+                  </span>
+                </ElTooltip>
+              </div>
+            </div>
+
+            <div
+              v-if="getPatternValue(value, getNodePath(String(key)))"
+              class="schema-item__detail-row"
+            >
+              <span class="schema-item__detail-label">正则匹配:</span>
+              <div class="schema-item__detail-content">
+                <ElTooltip
+                  :content="getPatternValue(value, getNodePath(String(key)))"
+                  placement="top"
+                >
+                  <span class="meta-chip meta-chip--mono">
+                    {{ getPatternValue(value, getNodePath(String(key))) }}
+                  </span>
+                </ElTooltip>
+              </div>
+            </div>
           </div>
 
           <div
@@ -603,42 +644,45 @@ const showSchemaStack = computed(() => {
     </div>
   </div>
 </template>
+
 <style scoped>
 .schema-root-pill,
 .schema-stack {
-  --doc-chip-radius: calc(var(--radius) * 0.62);
-  --doc-radius-sm: calc(var(--radius) * 0.72);
+  --field-chip-radius: calc(var(--radius, 12px) * 0.82);
+  --field-chip-bg: var(--el-fill-color-light);
+  --field-chip-border: var(--el-border-color);
+  --field-chip-text: var(--el-text-color-primary);
+  --field-chip-value-weight: 600;
+  --field-required: var(--el-color-danger);
 }
 
 .schema-root-pill {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px 10px;
   align-items: center;
   width: 100%;
   min-width: 0;
-  min-height: 34px;
-  padding: 0 11px;
-  margin-bottom: 8px;
-  color: #175cd3;
-  background: #e8f1ff;
-  border: 1px solid #b7cdfb;
-  border-radius: var(--doc-radius-sm);
+  min-height: 36px;
+  padding: 6px 12px;
+  margin-bottom: 10px;
+  background: var(--field-chip-bg);
+  border: 1px solid var(--field-chip-border);
+  border-radius: calc(var(--radius, 12px) * 0.92);
 }
 
 .schema-root-pill__title {
   font-size: 12px;
   font-weight: 700;
   color: var(--el-text-color-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.04em;
 }
 
 .schema-root-pill__value {
   font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
-  font-size: 13px;
-  font-weight: 700;
-  color: #1e40af;
+  font-size: 12px;
+  font-weight: var(--field-chip-value-weight);
+  color: var(--field-chip-text);
 }
 
 .schema-stack {
@@ -650,12 +694,11 @@ const showSchemaStack = computed(() => {
   flex-wrap: wrap;
   gap: 6px;
   align-items: center;
-  justify-content: flex-end;
   margin-left: auto;
 }
 
 .schema-item {
-  padding: 10px 0;
+  padding: 12px 0;
   border-bottom: 1px solid var(--el-border-color-lighter);
 }
 
@@ -675,14 +718,14 @@ const showSchemaStack = computed(() => {
   flex: none;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
-  margin-top: 2px;
+  width: 24px;
+  height: 24px;
+  margin-top: 1px;
   color: var(--el-text-color-secondary);
   cursor: pointer;
-  background: var(--el-fill-color-light);
-  border: none;
-  border-radius: var(--doc-chip-radius);
+  background: var(--field-chip-bg);
+  border: 1px solid var(--field-chip-border);
+  border-radius: var(--field-chip-radius);
 }
 
 .schema-item__content {
@@ -690,301 +733,203 @@ const showSchemaStack = computed(() => {
   min-width: 0;
 }
 
-.schema-item__name {
-  font-family:
-    'HarmonyOS Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  font-size: 14px;
-  font-weight: 900;
-  color: var(--el-text-color-primary);
-}
-
 .schema-item__headline {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 6px 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 12px;
+  align-items: start;
+  min-width: 0;
+}
+
+.schema-item__headline-main {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 4px 10px;
   align-items: center;
   min-width: 0;
 }
 
-.schema-item__meta,
-.schema-item__enum-values {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  align-items: center;
+.schema-item__name {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  padding-right: 8px;
+  font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+  overflow-wrap: anywhere;
 }
 
-.schema-item__meta {
+.schema-item__name--required {
+  color: var(--field-required);
+}
+
+.schema-item__required-star {
+  position: absolute;
+  top: 0;
+  right: 0;
+  margin-left: 0;
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--field-required);
+  transform: translate(42%, -34%);
+}
+
+.schema-item__type {
+  font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+}
+
+.schema-item__summary,
+.schema-item__description {
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--el-text-color-secondary);
+}
+
+.schema-item__summary {
+  min-width: 0;
+}
+
+.schema-item__description {
+  margin-top: 8px;
+}
+
+.schema-item__details {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.schema-item__detail-row {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+}
+
+.schema-item__detail-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+}
+
+.schema-item__detail-content {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  align-items: center;
   min-width: 0;
 }
 
 .schema-item__meta-variant {
   display: inline-flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 6px;
   align-items: center;
-  justify-self: end;
   justify-content: flex-end;
 }
 
-.schema-item__enum {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+.meta-chip {
+  display: inline-flex;
   align-items: center;
-  min-width: 0;
-  margin-top: 6px;
-}
-
-.schema-item__enum-label {
-  flex: none;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--el-text-color-secondary);
-}
-
-.schema-item__enum-available {
-  flex: 1 1 100%;
-  min-width: 0;
-  font-size: 11px;
-  color: var(--el-text-color-secondary);
-  word-break: normal;
+  justify-content: center;
+  min-height: 26px;
+  max-width: 100%;
+  padding: 3px 9px;
+  font-size: 11.5px;
+  font-weight: var(--field-chip-value-weight);
+  line-height: 1.45;
+  color: var(--field-chip-text);
+  background: var(--field-chip-bg);
+  border: 1px solid var(--field-chip-border);
+  border-radius: var(--field-chip-radius);
   overflow-wrap: anywhere;
   white-space: normal;
 }
 
-.schema-item__description {
-  margin-top: 6px;
+.meta-chip--mono {
+  font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
+  font-weight: inherit;
+}
+
+.enum-entry {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.enum-entry__description {
   font-size: 12px;
-  line-height: 1.6;
+  line-height: 1.55;
   color: var(--el-text-color-secondary);
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .variant-switch-button {
-  min-width: 26px;
-  height: 22px;
-  padding: 0 7px;
+  min-width: 28px;
+  height: 24px;
+  padding: 0 8px;
   font-size: 11px;
   color: var(--el-text-color-secondary);
-  background: var(--el-fill-color-light);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: var(--doc-chip-radius);
+  background: var(--field-chip-bg);
+  border: 1px solid var(--field-chip-border);
+  border-radius: var(--field-chip-radius);
 }
 
 .variant-switch-button--active {
   color: var(--el-color-primary);
-  background: var(--el-color-primary-light-9);
-  border-color: var(--el-color-primary-light-7);
+  background: color-mix(
+    in srgb,
+    var(--el-color-primary-light-9) 78%,
+    var(--el-bg-color) 22%
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--el-color-primary-light-7) 86%,
+    transparent
+  );
 }
 
 .schema-item__children {
   padding-left: 14px;
-  margin-top: 10px;
+  margin-top: 12px;
   margin-left: 8px;
   border-left: 1px solid var(--el-border-color-lighter);
 }
 
-.meta-pill {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  align-items: center;
-  min-height: 22px;
-  padding: 0 7px;
-  font-size: 10.5px;
-  line-height: 1.2;
-  color: #334155;
-  background: #f8fafc;
-  border: 1px solid #cfd8e3;
-  border-radius: var(--doc-chip-radius);
-}
+@media (max-width: 768px) {
+  .schema-item__headline {
+    grid-template-columns: minmax(0, 1fr);
+  }
 
-.meta-pill--type {
-  color: #1f4ba8;
-  background: #ecf2ff;
-  border-color: #b8c9eb;
-}
+  .schema-item__headline-main {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
 
-.meta-pill--required {
-  color: #b42318;
-  background: #feeceb;
-  border-color: #f6b4ad;
-}
+  .schema-item__summary {
+    grid-column: 1 / -1;
+  }
 
-.meta-pill--optional {
-  color: #0f7a43;
-  background: #e9f8ee;
-  border-color: #9fd9b7;
-}
+  .schema-item__detail-label {
+    min-width: 0;
+  }
 
-.meta-pill--example {
-  color: #8b5a1e;
-  background: #fff5e6;
-  border-color: #ebc48c;
-}
-
-.meta-pill--pattern {
-  color: #5b3fa3;
-  background: #f3efff;
-  border-color: #cdc0ef;
-}
-
-.meta-pill--constraint {
-  color: #11605b;
-  background: #e9fbf8;
-  border-color: #9fd7cf;
-}
-
-.meta-pill--composition {
-  color: #14532d;
-  background: #ecfdf3;
-  border-color: #a7f3d0;
-}
-
-.meta-pill--nullable {
-  color: #1d4ed8;
-  background: #eff6ff;
-  border-color: #bfdbfe;
-}
-
-.meta-pill--deprecated {
-  color: #9a3412;
-  background: #fff7ed;
-  border-color: #fed7aa;
-}
-
-.meta-pill--access {
-  color: #7c3aed;
-  background: #f5f3ff;
-  border-color: #ddd6fe;
-}
-
-.enum-pill {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  align-items: center;
-  min-width: 0;
-  max-width: 100%;
-  min-height: 22px;
-  padding: 2px 8px;
-  color: #1f4ba8;
-  background: #eff4ff;
-  border: 1px solid #c7d5ef;
-  border-radius: var(--doc-radius-sm);
-}
-
-.enum-pill__value {
-  display: inline-flex;
-  flex: 0 1 auto;
-  align-items: center;
-  justify-content: center;
-  min-width: 14px;
-  max-width: 100%;
-  padding: 0 2px;
-  font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
-  font-size: 10.5px;
-  font-weight: 700;
-  line-height: 1.2;
-  color: #1e3f8a;
-  text-align: center;
-  word-break: normal;
-  overflow-wrap: anywhere;
-  white-space: normal;
-}
-
-.enum-pill__description {
-  display: inline-flex;
-  flex: 1 1 auto;
-  gap: 3px;
-  align-items: center;
-  min-width: 0;
-  font-size: 10.5px;
-  line-height: 1.2;
-  color: var(--el-text-color-secondary);
-  text-align: left;
-  word-break: normal;
-  overflow-wrap: anywhere;
-  white-space: normal;
-}
-
-.enum-pill__description::before {
-  flex: none;
-  font-weight: 600;
-  color: color-mix(in srgb, var(--el-text-color-secondary) 82%, transparent);
-  content: '-';
-}
-
-:deep(.document-page--dark .schema-root-pill),
-:deep(html.dark .schema-root-pill) {
-  color: #a9c0eb;
-  background: #1e2838;
-  border-color: #3b4d67;
-}
-
-:deep(.document-page--dark .schema-root-pill__value),
-:deep(html.dark .schema-root-pill__value) {
-  color: #d4e1f5;
-}
-
-:deep(.document-page--dark .meta-pill),
-:deep(html.dark .meta-pill) {
-  color: #bfcad9;
-  background: #232a36;
-  border-color: #3f4d61;
-}
-
-:deep(.document-page--dark .meta-pill--type),
-:deep(html.dark .meta-pill--type) {
-  color: #a9c0eb;
-  background: #1e2838;
-  border-color: #3b4d67;
-}
-
-:deep(.document-page--dark .meta-pill--required),
-:deep(html.dark .meta-pill--required) {
-  color: #f0b2ad;
-  background: #372228;
-  border-color: #5c3840;
-}
-
-:deep(.document-page--dark .meta-pill--optional),
-:deep(html.dark .meta-pill--optional) {
-  color: #aad8be;
-  background: #1d3127;
-  border-color: #385a49;
-}
-
-:deep(.document-page--dark .meta-pill--example),
-:deep(html.dark .meta-pill--example) {
-  color: #e3c199;
-  background: #372d22;
-  border-color: #5a4a35;
-}
-
-:deep(.document-page--dark .meta-pill--pattern),
-:deep(html.dark .meta-pill--pattern) {
-  color: #c8b8e6;
-  background: #2d2539;
-  border-color: #4c4061;
-}
-
-:deep(.document-page--dark .meta-pill--constraint),
-:deep(html.dark .meta-pill--constraint) {
-  color: #9fcec9;
-  background: #1d3131;
-  border-color: #385956;
-}
-
-:deep(.document-page--dark .enum-pill),
-:deep(html.dark .enum-pill) {
-  color: #a9c0eb;
-  background: #1e2d42;
-  border-color: #3a4f6e;
-}
-
-:deep(.document-page--dark .enum-pill__value),
-:deep(html.dark .enum-pill__value) {
-  color: #d4e1f5;
+  .schema-item__detail-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
 }
 </style>

@@ -20,7 +20,7 @@ const schema = computed(() => {
   return props.parameter.schema ? resolveSchema(props.parameter.schema) : null;
 });
 
-const constraints = computed(() => {
+const constraintTokens = computed(() => {
   const source = schema.value || props.parameter;
   const parts: string[] = [];
 
@@ -41,7 +41,7 @@ const constraints = computed(() => {
     parts.push(`<=${source.maximum}`);
   }
 
-  return parts.join(' 或 ');
+  return parts;
 });
 
 const hasHtmlDescription = computed(() => {
@@ -66,20 +66,12 @@ const enumItems = computed(() => {
   return getEnumItems(schemaSource);
 });
 
-const enumValueList = computed(() => {
-  return enumItems.value.map((item) => String(item.value)).join(', ');
-});
-
 const typeLabel = computed(() => {
   return getSchemaTypeLabel(schema.value);
 });
 
 const exampleValue = computed(() => {
   return props.parameter.example ?? schema.value?.example;
-});
-
-const defaultValue = computed(() => {
-  return props.parameter.default;
 });
 
 const patternValue = computed(() => {
@@ -97,89 +89,103 @@ const formatValue = (value: unknown) => {
 
 <template>
   <div class="parameter-item">
-    <div class="parameter-item__top">
-      <div class="parameter-item__headline">
-        <div class="parameter-item__name">
+    <div class="parameter-item__headline">
+      <div class="parameter-item__title-line">
+        <div
+          class="parameter-item__name"
+          :class="{ 'parameter-item__name--required': parameter.required }"
+        >
           {{ parameter.name }}
+          <sup v-if="parameter.required" class="parameter-item__required-star">
+            *
+          </sup>
         </div>
-        <div class="parameter-item__meta">
-          <span
-            class="meta-pill"
-            :class="
-              parameter.required ? 'meta-pill--required' : 'meta-pill--optional'
-            "
-          >
-            {{ parameter.required ? '必填' : '可选' }}
-          </span>
-          <span class="meta-pill meta-pill--type">
-            {{ typeLabel }}
-          </span>
-          <ElTooltip
-            v-if="exampleValue !== undefined && exampleValue !== null"
-            :content="formatValue(exampleValue)"
-            placement="top"
-          >
-            <span class="meta-pill meta-pill--example">
-              示例 {{ formatValue(exampleValue) }}
-            </span>
-          </ElTooltip>
-          <ElTooltip
-            v-if="defaultValue !== undefined && defaultValue !== null"
-            :content="formatValue(defaultValue)"
-            placement="top"
-          >
-            <span class="meta-pill meta-pill--default">
-              默认 {{ formatValue(defaultValue) }}
-            </span>
-          </ElTooltip>
-          <ElTooltip
-            v-if="patternValue"
-            :content="patternValue"
-            placement="top"
-          >
-            <span class="meta-pill meta-pill--pattern">
-              正则 {{ patternValue }}
-            </span>
-          </ElTooltip>
-          <span v-if="constraints" class="meta-pill meta-pill--constraint">
-            约束 {{ constraints }}
-          </span>
+        <div class="parameter-item__type">{{ typeLabel }}</div>
+        <div v-if="plainDescription" class="parameter-item__summary">
+          {{ plainDescription }}
         </div>
       </div>
     </div>
 
-    <div v-if="plainDescription" class="parameter-item__description">
-      {{ plainDescription }}
-    </div>
     <div
       v-if="htmlDescription"
       class="parameter-item__description prose prose-sm max-w-none"
       v-html="htmlDescription"
     ></div>
 
-    <div v-if="enumItems.length > 0" class="parameter-item__enum">
-      <span class="parameter-item__enum-label">枚举</span>
-      <div class="parameter-item__enum-values">
-        <span v-for="item in enumItems" :key="item.value" class="enum-pill">
-          <span class="enum-pill__value">{{ item.value }}</span>
-          <span v-if="item.description" class="enum-pill__description">
-            {{ item.description }}
+    <div
+      v-if="
+        constraintTokens.length > 0 ||
+        enumItems.length > 0 ||
+        (exampleValue !== undefined && exampleValue !== null) ||
+        patternValue
+      "
+      class="parameter-item__details"
+    >
+      <div
+        v-if="constraintTokens.length > 0"
+        class="parameter-item__detail-row"
+      >
+        <span class="parameter-item__detail-label">约束:</span>
+        <div class="parameter-item__detail-content">
+          <span
+            v-for="item in constraintTokens"
+            :key="item"
+            class="meta-chip"
+          >
+            {{ item }}
           </span>
-        </span>
+        </div>
       </div>
-      <span v-if="enumValueList" class="parameter-item__enum-available">
-        可用值: {{ enumValueList }}
-      </span>
+
+      <div v-if="enumItems.length > 0" class="parameter-item__detail-row">
+        <span class="parameter-item__detail-label">枚举值:</span>
+        <div class="parameter-item__detail-content">
+          <span v-for="item in enumItems" :key="item.value" class="enum-entry">
+            <span class="meta-chip meta-chip--mono">{{ item.value }}</span>
+            <span v-if="item.description" class="enum-entry__description">
+              - {{ item.description }}
+            </span>
+          </span>
+        </div>
+      </div>
+
+      <div
+        v-if="exampleValue !== undefined && exampleValue !== null"
+        class="parameter-item__detail-row"
+      >
+        <span class="parameter-item__detail-label">示例:</span>
+        <div class="parameter-item__detail-content">
+          <ElTooltip :content="formatValue(exampleValue)" placement="top">
+            <span class="meta-chip meta-chip--mono">
+              {{ formatValue(exampleValue) }}
+            </span>
+          </ElTooltip>
+        </div>
+      </div>
+
+      <div v-if="patternValue" class="parameter-item__detail-row">
+        <span class="parameter-item__detail-label">正则匹配:</span>
+        <div class="parameter-item__detail-content">
+          <ElTooltip :content="patternValue" placement="top">
+            <span class="meta-chip meta-chip--mono">{{ patternValue }}</span>
+          </ElTooltip>
+        </div>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
 .parameter-item {
-  --doc-chip-radius: calc(var(--radius) * 0.62);
-  --doc-radius-sm: calc(var(--radius) * 0.72);
+  --field-chip-radius: calc(var(--radius, 12px) * 0.82);
+  --field-chip-bg: var(--el-fill-color-light);
+  --field-chip-border: var(--el-border-color);
+  --field-chip-text: var(--el-text-color-primary);
+  --field-chip-value-weight: 600;
+  --field-required: var(--el-color-danger);
 
-  padding: 10px 0;
+  padding: 12px 0;
   border-bottom: 1px solid var(--el-border-color-lighter);
 }
 
@@ -188,251 +194,155 @@ const formatValue = (value: unknown) => {
   border-bottom: none;
 }
 
-.parameter-item__top {
-  display: block;
+.parameter-item__headline {
+  min-width: 0;
 }
 
-.parameter-item__headline {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 8px;
+.parameter-item__title-line {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 4px 10px;
   align-items: center;
+  min-width: 0;
 }
 
 .parameter-item__name {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  padding-right: 8px;
   font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
   font-size: 14px;
   font-weight: 700;
   color: var(--el-text-color-primary);
+  overflow-wrap: anywhere;
 }
 
-.parameter-item__meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  align-items: center;
+.parameter-item__name--required {
+  color: var(--field-required);
+}
+
+.parameter-item__required-star {
+  position: absolute;
+  top: 0;
+  right: 0;
+  margin-left: 0;
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--field-required);
+  transform: translate(42%, -34%);
+}
+
+.parameter-item__type {
+  font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+}
+
+.parameter-item__summary,
+.parameter-item__description {
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--el-text-color-secondary);
+}
+
+.parameter-item__summary {
+  min-width: 0;
 }
 
 .parameter-item__description {
-  margin-top: 6px;
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--el-text-color-secondary);
+  margin-top: 8px;
 }
 
-.parameter-item__enum {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+.parameter-item__details {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.parameter-item__detail-row {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  gap: 10px;
   align-items: center;
   min-width: 0;
-  margin-top: 6px;
 }
 
-.parameter-item__enum-label {
-  flex: none;
-  font-size: 11px;
+.parameter-item__detail-label {
+  font-size: 12px;
   font-weight: 600;
   color: var(--el-text-color-secondary);
 }
 
-.parameter-item__enum-values {
+.parameter-item__detail-content {
   display: flex;
   flex: 1 1 auto;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 6px 8px;
   align-items: center;
   min-width: 0;
 }
 
-.meta-pill {
+.meta-chip {
   display: inline-flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  align-items: center;
-  min-height: 22px;
-  padding: 0 7px;
-  font-size: 10.5px;
-  line-height: 1.2;
-  color: #334155;
-  background: #f8fafc;
-  border: 1px solid #cfd8e3;
-  border-radius: var(--doc-chip-radius);
-}
-
-.meta-pill--type {
-  color: #1f4ba8;
-  background: #ecf2ff;
-  border-color: #b8c9eb;
-}
-
-.meta-pill--default {
-  color: #475569;
-  background: #f5f7fa;
-  border-color: #d5dde8;
-}
-
-.meta-pill--required {
-  color: #b42318;
-  background: #feeceb;
-  border-color: #f6b4ad;
-}
-
-.meta-pill--optional {
-  color: #0f7a43;
-  background: #e9f8ee;
-  border-color: #9fd9b7;
-}
-
-.meta-pill--example {
-  color: #8b5a1e;
-  background: #fff5e6;
-  border-color: #ebc48c;
-}
-
-.meta-pill--pattern {
-  color: #5b3fa3;
-  background: #f3efff;
-  border-color: #cdc0ef;
-}
-
-.meta-pill--constraint {
-  color: #11605b;
-  background: #e9fbf8;
-  border-color: #9fd7cf;
-}
-
-.enum-pill {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  align-items: center;
-  min-width: 0;
-  max-width: 100%;
-  min-height: 22px;
-  padding: 2px 8px;
-  color: #1f4ba8;
-  background: #eff4ff;
-  border: 1px solid #c7d5ef;
-  border-radius: var(--doc-radius-sm);
-}
-
-.enum-pill__value {
-  display: inline-flex;
-  flex: 0 1 auto;
   align-items: center;
   justify-content: center;
-  min-width: 14px;
+  min-height: 26px;
   max-width: 100%;
-  padding: 0 2px;
-  font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
-  font-size: 10.5px;
-  font-weight: 700;
-  line-height: 1.2;
-  color: #1e3f8a;
-  text-align: center;
-  word-break: normal;
+  padding: 3px 10px;
+  font-size: 11.5px;
+  font-weight: var(--field-chip-value-weight);
+  line-height: 1.45;
+  color: var(--field-chip-text);
+  background: var(--field-chip-bg);
+  border: 1px solid var(--field-chip-border);
+  border-radius: var(--field-chip-radius);
   overflow-wrap: anywhere;
   white-space: normal;
 }
 
-.enum-pill__description {
+.meta-chip--mono {
+  font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
+  font-weight: inherit;
+}
+
+.enum-entry {
   display: inline-flex;
-  flex: 1 1 auto;
-  gap: 3px;
+  flex-wrap: wrap;
+  gap: 4px 6px;
   align-items: center;
   min-width: 0;
-  font-size: 10.5px;
-  line-height: 1.2;
+  max-width: 100%;
+}
+
+.enum-entry__description {
+  font-size: 12px;
+  line-height: 1.55;
   color: var(--el-text-color-secondary);
-  text-align: left;
-  word-break: normal;
   overflow-wrap: anywhere;
   white-space: normal;
 }
 
-.enum-pill__description::before {
-  flex: none;
-  font-weight: 600;
-  color: color-mix(in srgb, var(--el-text-color-secondary) 82%, transparent);
-  content: '-';
-}
+@media (max-width: 768px) {
+  .parameter-item__title-line {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
 
-.parameter-item__enum-available {
-  flex: 1 1 100%;
-  min-width: 0;
-  font-size: 11px;
-  color: var(--el-text-color-secondary);
-  word-break: normal;
-  overflow-wrap: anywhere;
-  white-space: normal;
-}
+  .parameter-item__summary {
+    grid-column: 1 / -1;
+  }
 
-:deep(.document-page--dark .parameter-item .meta-pill),
-:deep(html.dark .parameter-item .meta-pill) {
-  color: #bfcad9;
-  background: #232a36;
-  border-color: #3f4d61;
-}
+  .parameter-item__detail-label {
+    min-width: 0;
+  }
 
-:deep(.document-page--dark .parameter-item .meta-pill--type),
-:deep(html.dark .parameter-item .meta-pill--type) {
-  color: #a9c0eb;
-  background: #1e2838;
-  border-color: #3b4d67;
-}
-
-:deep(.document-page--dark .parameter-item .meta-pill--default),
-:deep(html.dark .parameter-item .meta-pill--default) {
-  color: #c3cfde;
-  background: #252d3a;
-  border-color: #435368;
-}
-
-:deep(.document-page--dark .parameter-item .meta-pill--required),
-:deep(html.dark .parameter-item .meta-pill--required) {
-  color: #f0b2ad;
-  background: #372228;
-  border-color: #5c3840;
-}
-
-:deep(.document-page--dark .parameter-item .meta-pill--optional),
-:deep(html.dark .parameter-item .meta-pill--optional) {
-  color: #aad8be;
-  background: #1d3127;
-  border-color: #385a49;
-}
-
-:deep(.document-page--dark .parameter-item .meta-pill--example),
-:deep(html.dark .parameter-item .meta-pill--example) {
-  color: #e3c199;
-  background: #372d22;
-  border-color: #5a4a35;
-}
-
-:deep(.document-page--dark .parameter-item .meta-pill--pattern),
-:deep(html.dark .parameter-item .meta-pill--pattern) {
-  color: #c8b8e6;
-  background: #2d2539;
-  border-color: #4c4061;
-}
-
-:deep(.document-page--dark .parameter-item .meta-pill--constraint),
-:deep(html.dark .parameter-item .meta-pill--constraint) {
-  color: #9fcec9;
-  background: #1d3131;
-  border-color: #385956;
-}
-
-:deep(.document-page--dark .parameter-item .enum-pill),
-:deep(html.dark .parameter-item .enum-pill) {
-  color: #a9c0eb;
-  background: #1e2d42;
-  border-color: #3a4f6e;
-}
-
-:deep(.document-page--dark .parameter-item .enum-pill__value),
-:deep(html.dark .parameter-item .enum-pill__value) {
-  color: #d4e1f5;
+  .parameter-item__detail-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
 }
 </style>
