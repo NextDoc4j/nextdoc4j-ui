@@ -128,7 +128,11 @@ const formatValue = (value: unknown) => {
       >
         <span class="parameter-item__detail-label">约束:</span>
         <div class="parameter-item__detail-content">
-          <span v-for="item in constraintTokens" :key="item" class="meta-chip">
+          <span
+            v-for="item in constraintTokens"
+            :key="item"
+            class="meta-chip meta-chip--constraint"
+          >
             {{ item }}
           </span>
         </div>
@@ -304,6 +308,11 @@ const formatValue = (value: unknown) => {
 .meta-chip--mono {
   font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
   font-weight: inherit;
+}
+
+.meta-chip--constraint {
+  font-weight: 500;
+  color: var(--el-text-color-secondary);
 }
 
 .enum-entry {

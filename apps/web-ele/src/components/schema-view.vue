@@ -435,16 +435,28 @@ const showSchemaStack = computed(() => {
   <div v-if="showSchemaStack" class="schema-stack">
     <div v-for="(value, key) in rootChildren" :key="key" class="schema-item">
       <div class="schema-item__top">
-        <button
-          v-if="isExpandable(value, getNodePath(String(key)))"
-          class="schema-item__toggle"
-          @click="toggleFold(getNodePath(String(key)), value)"
-        >
-          <SvgCaretRightIcon
-            class="size-4 transition-transform"
-            :class="{ 'rotate-90': !foldState[getNodePath(String(key))] }"
-          />
-        </button>
+        <div class="schema-item__control">
+          <button
+            v-if="isExpandable(value, getNodePath(String(key)))"
+            type="button"
+            class="schema-item__toggle"
+            :class="{
+              'schema-item__toggle--expanded':
+                !foldState[getNodePath(String(key))],
+            }"
+            @click="toggleFold(getNodePath(String(key)), value)"
+          >
+            <SvgCaretRightIcon
+              class="size-4 transition-transform"
+              :class="{ 'rotate-90': !foldState[getNodePath(String(key))] }"
+            />
+          </button>
+          <span
+            v-else
+            class="schema-item__control-spacer"
+            aria-hidden="true"
+          ></span>
+        </div>
 
         <div class="schema-item__content">
           <div class="schema-item__headline">
@@ -553,7 +565,7 @@ const showSchemaStack = computed(() => {
                     getNodePath(String(key)),
                   )"
                   :key="item"
-                  class="meta-chip"
+                  class="meta-chip meta-chip--constraint"
                 >
                   {{ item }}
                 </span>
@@ -696,6 +708,10 @@ const showSchemaStack = computed(() => {
   width: 100%;
 }
 
+.schema-stack > .schema-item + .schema-item {
+  border-top: 1px solid var(--el-border-color-lighter);
+}
+
 .composition-switch__buttons {
   display: flex;
   flex-wrap: wrap;
@@ -708,7 +724,6 @@ const showSchemaStack = computed(() => {
   box-sizing: border-box;
   width: 100%;
   padding: 10px 0;
-  border-bottom: 1px solid var(--el-border-color-lighter);
 }
 
 .schema-item__top {
@@ -718,19 +733,68 @@ const showSchemaStack = computed(() => {
   width: 100%;
 }
 
+.schema-item__control {
+  display: flex;
+  flex: none;
+  align-items: flex-start;
+  justify-content: center;
+  width: 18px;
+  min-width: 18px;
+  padding-top: 2px;
+}
+
 .schema-item__toggle {
   display: inline-flex;
-  flex: none;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  margin-top: 1px;
+  width: 18px;
+  height: 18px;
   color: var(--el-text-color-secondary);
   cursor: pointer;
-  background: var(--field-chip-bg);
-  border: 1px solid var(--field-chip-border);
-  border-radius: var(--field-chip-radius);
+  background: transparent;
+  border: none;
+  border-radius: calc(var(--field-chip-radius) * 0.78);
+  transition:
+    color 0.16s ease,
+    background-color 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.16s ease;
+}
+
+.schema-item__toggle:hover {
+  color: var(--el-color-primary);
+  background: color-mix(
+    in srgb,
+    var(--el-color-primary-light-9) 82%,
+    transparent
+  );
+}
+
+.schema-item__toggle:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--el-color-primary-light-8) 75%, transparent);
+}
+
+.schema-item__toggle--expanded {
+  color: var(--el-color-primary);
+  background: color-mix(
+    in srgb,
+    var(--el-color-primary-light-9) 88%,
+    transparent
+  );
+}
+
+.schema-item__toggle:active {
+  transform: scale(0.95);
+}
+
+.schema-item__control-spacer {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
 }
 
 .schema-item__content {
@@ -867,6 +931,11 @@ const showSchemaStack = computed(() => {
   font-weight: inherit;
 }
 
+.meta-chip--constraint {
+  font-weight: 500;
+  color: var(--el-text-color-secondary);
+}
+
 .enum-entry {
   display: inline-flex;
   flex-wrap: wrap;
@@ -912,10 +981,11 @@ const showSchemaStack = computed(() => {
 .schema-item__children {
   box-sizing: border-box;
   width: 100%;
-  padding-left: 10px;
-  margin-top: 12px;
-  margin-left: 0;
-  border-left: 1px solid var(--el-border-color-lighter);
+  padding-left: 12px;
+  margin-top: 10px;
+  margin-left: 2px;
+  border-left: 1px solid
+    color-mix(in srgb, var(--el-border-color-lighter) 88%, transparent);
 }
 
 @media (max-width: 768px) {
