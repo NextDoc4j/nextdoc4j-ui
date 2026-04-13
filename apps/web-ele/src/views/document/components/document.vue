@@ -83,6 +83,7 @@ const apiStore = useApiStore();
 const baseUrl = ref('');
 const apiInfo = ref({} as ApiInfo);
 const activeResponseCode = ref('');
+const activeRequestSections = ref<string[]>([]);
 const requestBodyType = ref('');
 const requestBodyVariantState = ref<Record<string, number>>({});
 const requestExampleOpen = ref(false);
@@ -126,6 +127,20 @@ const parametersInPath = computed(() => {
 
 const parametersInQuery = computed(() => {
   return apiInfo.value?.parameters?.filter((item) => item.in === 'query') ?? [];
+});
+
+const requestSectionNames = computed(() => {
+  const sections: string[] = [];
+  if (parametersInPath.value.length > 0) {
+    sections.push('path');
+  }
+  if (parametersInQuery.value.length > 0) {
+    sections.push('query');
+  }
+  if (requestBody.value) {
+    sections.push('body');
+  }
+  return sections;
 });
 
 const securitySchemeMap = computed<Record<string, SecuritySchemeObject>>(() => {
@@ -496,6 +511,14 @@ const requestPreviewSchema = computed(() => {
   }
   return applyRequestBodyVariantState(source, requestBodyVariantState.value);
 });
+
+watch(
+  requestSectionNames,
+  (names) => {
+    activeRequestSections.value = [...names];
+  },
+  { immediate: true },
+);
 
 const responseCodes = computed(() => {
   return Object.keys(apiInfo.value?.responses || {});
@@ -1193,109 +1216,143 @@ defineExpose({
           </div>
         </div>
 
-        <div class="section-panel__stack">
-          <article v-if="parametersInPath.length > 0" class="sub-panel">
-            <div class="sub-panel__header">
-              <div class="sub-panel__title-wrap">
-                <div class="sub-panel__title">Path 参数</div>
-                <span class="sub-panel__count">{{
-                  parametersInPath.length
-                }}</span>
+        <ElCollapse v-model="activeRequestSections" class="request-collapse">
+          <ElCollapseItem
+            v-if="parametersInPath.length > 0"
+            name="path"
+            class="sub-panel request-collapse__item"
+          >
+            <template #title>
+              <div class="request-collapse__title">
+                <div class="sub-panel__title-wrap">
+                  <div class="sub-panel__title">Path 参数</div>
+                  <span class="sub-panel__count">{{
+                    parametersInPath.length
+                  }}</span>
+                </div>
               </div>
+            </template>
+
+            <div class="sub-panel__content">
+              <ParameterView
+                v-for="item in parametersInPath"
+                :key="item.name"
+                :parameter="item"
+              />
             </div>
+          </ElCollapseItem>
 
-            <ParameterView
-              v-for="item in parametersInPath"
-              :key="item.name"
-              :parameter="item"
-            />
-          </article>
-
-          <article v-if="parametersInQuery.length > 0" class="sub-panel">
-            <div class="sub-panel__header">
-              <div class="sub-panel__title-wrap">
-                <div class="sub-panel__title">Query 参数</div>
-                <span class="sub-panel__count">{{
-                  parametersInQuery.length
-                }}</span>
+          <ElCollapseItem
+            v-if="parametersInQuery.length > 0"
+            name="query"
+            class="sub-panel request-collapse__item"
+          >
+            <template #title>
+              <div class="request-collapse__title">
+                <div class="sub-panel__title-wrap">
+                  <div class="sub-panel__title">Query 参数</div>
+                  <span class="sub-panel__count">{{
+                    parametersInQuery.length
+                  }}</span>
+                </div>
               </div>
+            </template>
+
+            <div class="sub-panel__content">
+              <ParameterView
+                v-for="item in parametersInQuery"
+                :key="item.name"
+                :parameter="item"
+              />
             </div>
+          </ElCollapseItem>
 
-            <ParameterView
-              v-for="item in parametersInQuery"
-              :key="item.name"
-              :parameter="item"
-            />
-          </article>
-
-          <article v-if="requestBody" class="sub-panel">
-            <div class="sub-panel__header sub-panel__header--wrap">
-              <div class="sub-panel__title-wrap">
-                <div class="sub-panel__title">Body 参数</div>
-                <span class="sub-panel__count">{{
-                  requestBodyContentType
-                }}</span>
+          <ElCollapseItem
+            v-if="requestBody"
+            name="body"
+            class="sub-panel request-collapse__item"
+          >
+            <template #title>
+              <div class="request-collapse__title">
+                <div class="sub-panel__title-wrap">
+                  <div class="sub-panel__title">Body 参数</div>
+                  <span class="sub-panel__count">{{
+                    requestBodyContentType
+                  }}</span>
+                </div>
               </div>
+            </template>
 
-              <div class="sub-panel__actions">
-                <div v-if="Array.isArray(requestBody)" class="body-type-switch">
-                  <ElButton
-                    v-for="item in requestBody"
-                    :key="item.variantKey || item.title"
-                    size="small"
-                    class="body-type-switch__button"
-                    :class="{
-                      'body-type-switch__button--active':
-                        isMatchedRequestBodyVariant(item, requestBodyType),
-                    }"
-                    @click="
-                      requestBodyType = resolveRequestBodyVariantValue(item)
-                    "
-                  >
-                    {{ item.title }}
-                  </ElButton>
+            <div class="sub-panel__content sub-panel__content--schema">
+              <div
+                class="schema-layout schema-layout--with-actions schema-layout--body"
+                :class="{
+                  'schema-layout--open':
+                    requestExampleOpen && requestPreviewSchema,
+                }"
+              >
+                <div class="schema-layout__main">
+                  <SchemaView
+                    v-if="requestSchemaForView"
+                    :key="requestBodyType || '__request_schema__'"
+                    :data="requestSchemaForView"
+                    mode="request"
+                    @variant-change="handleRequestSchemaVariantChange"
+                  />
                 </div>
 
-                <ElButton
-                  size="small"
-                  class="example-toggle-button"
-                  :class="{
-                    'example-toggle-button--active': requestExampleOpen,
-                  }"
-                  @click="requestExampleOpen = !requestExampleOpen"
-                >
-                  {{ requestExampleOpen ? '收起示例' : 'JSON 示例' }}
-                </ElButton>
+                <div class="schema-layout__side">
+                  <div
+                    class="schema-layout__floating-actions schema-layout__floating-actions--body"
+                  >
+                    <div
+                      v-if="Array.isArray(requestBody)"
+                      class="body-type-switch"
+                    >
+                      <ElButton
+                        v-for="item in requestBody"
+                        :key="item.variantKey || item.title"
+                        size="small"
+                        class="body-type-switch__button"
+                        :class="{
+                          'body-type-switch__button--active':
+                            isMatchedRequestBodyVariant(item, requestBodyType),
+                        }"
+                        @click="
+                          requestBodyType = resolveRequestBodyVariantValue(item)
+                        "
+                      >
+                        {{ item.title }}
+                      </ElButton>
+                    </div>
+
+                    <ElButton
+                      size="small"
+                      class="example-toggle-button"
+                      :class="{
+                        'example-toggle-button--active': requestExampleOpen,
+                      }"
+                      @click="requestExampleOpen = !requestExampleOpen"
+                    >
+                      {{ requestExampleOpen ? '收起示例' : 'JSON 示例' }}
+                    </ElButton>
+                  </div>
+
+                  <div
+                    v-if="requestExampleOpen && requestPreviewSchema"
+                    class="schema-layout__aside"
+                  >
+                    <JsonViewer
+                      class="json-panel app-json-schema-viewer"
+                      :schema="requestPreviewSchema"
+                      mode="request"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
-
-            <div
-              class="schema-layout"
-              :class="{ 'schema-layout--open': requestExampleOpen }"
-            >
-              <div class="schema-layout__main">
-                <SchemaView
-                  v-if="requestSchemaForView"
-                  :key="requestBodyType || '__request_schema__'"
-                  :data="requestSchemaForView"
-                  mode="request"
-                  @variant-change="handleRequestSchemaVariantChange"
-                />
-              </div>
-
-              <div
-                v-if="requestExampleOpen && requestPreviewSchema"
-                class="schema-layout__aside"
-              >
-                <JsonViewer
-                  class="json-panel app-json-schema-viewer"
-                  :schema="requestPreviewSchema"
-                  mode="request"
-                />
-              </div>
-            </div>
-          </article>
-        </div>
+          </ElCollapseItem>
+        </ElCollapse>
       </section>
 
       <section class="panel section-panel">
@@ -1340,52 +1397,12 @@ defineExpose({
             </template>
 
             <div class="response-content">
-              <div class="response-content__toolbar">
-                <div
-                  v-if="
-                    responseExampleOpen[panel.code] &&
-                    panel.exampleOptions.length > 1
-                  "
-                  class="response-content__actions"
-                >
-                  <ElSelect
-                    :model-value="responseExampleSelection[panel.code]"
-                    size="small"
-                    class="response-example-select"
-                    popper-class="response-example-select__popper"
-                    placeholder="选择示例"
-                    @update:model-value="
-                      handleResponseExampleSelect(panel.code, $event)
-                    "
-                  >
-                    <ElOption
-                      v-for="item in panel.exampleOptions"
-                      :key="item.key"
-                      :label="item.label"
-                      :value="item.key"
-                    />
-                  </ElSelect>
-                </div>
-
-                <ElButton
-                  size="small"
-                  class="example-toggle-button"
-                  :class="{
-                    'example-toggle-button--active':
-                      responseExampleOpen[panel.code],
-                  }"
-                  @click.stop="toggleResponseExample(panel.code)"
-                >
-                  {{
-                    responseExampleOpen[panel.code] ? '收起示例' : 'JSON 示例'
-                  }}
-                </ElButton>
-              </div>
-
               <div
-                class="schema-layout"
+                class="schema-layout schema-layout--with-actions schema-layout--response"
                 :class="{
-                  'schema-layout--open': responseExampleOpen[panel.code],
+                  'schema-layout--open':
+                    responseExampleOpen[panel.code] &&
+                    (panel.schema || panel.hasExampleValue),
                 }"
               >
                 <div class="schema-layout__main">
@@ -1400,21 +1417,71 @@ defineExpose({
                   <div v-else class="empty-hint">暂无可展示的响应结构</div>
                 </div>
 
-                <div
-                  v-if="
-                    responseExampleOpen[panel.code] &&
-                    (panel.schema || panel.hasExampleValue)
-                  "
-                  class="schema-layout__aside"
-                >
-                  <JsonViewer
-                    class="json-panel app-json-schema-viewer"
-                    :schema="getResponsePreviewSchema(panel.code, panel.schema)"
-                    :value="
-                      panel.hasExampleValue ? panel.exampleValue : undefined
+                <div class="schema-layout__side">
+                  <div
+                    class="schema-layout__floating-actions schema-layout__floating-actions--response"
+                  >
+                    <div
+                      v-if="
+                        responseExampleOpen[panel.code] &&
+                        panel.exampleOptions.length > 1
+                      "
+                      class="response-content__actions"
+                    >
+                      <ElSelect
+                        :model-value="responseExampleSelection[panel.code]"
+                        size="small"
+                        class="response-example-select"
+                        popper-class="response-example-select__popper"
+                        placeholder="选择示例"
+                        @update:model-value="
+                          handleResponseExampleSelect(panel.code, $event)
+                        "
+                      >
+                        <ElOption
+                          v-for="item in panel.exampleOptions"
+                          :key="item.key"
+                          :label="item.label"
+                          :value="item.key"
+                        />
+                      </ElSelect>
+                    </div>
+
+                    <ElButton
+                      size="small"
+                      class="example-toggle-button"
+                      :class="{
+                        'example-toggle-button--active':
+                          responseExampleOpen[panel.code],
+                      }"
+                      @click.stop="toggleResponseExample(panel.code)"
+                    >
+                      {{
+                        responseExampleOpen[panel.code]
+                          ? '收起示例'
+                          : 'JSON 示例'
+                      }}
+                    </ElButton>
+                  </div>
+
+                  <div
+                    v-if="
+                      responseExampleOpen[panel.code] &&
+                      (panel.schema || panel.hasExampleValue)
                     "
-                    mode="response"
-                  />
+                    class="schema-layout__aside"
+                  >
+                    <JsonViewer
+                      class="json-panel app-json-schema-viewer"
+                      :schema="
+                        getResponsePreviewSchema(panel.code, panel.schema)
+                      "
+                      :value="
+                        panel.hasExampleValue ? panel.exampleValue : undefined
+                      "
+                      mode="response"
+                    />
+                  </div>
                 </div>
               </div>
             </div>
@@ -1803,6 +1870,73 @@ defineExpose({
   gap: 12px;
 }
 
+.request-collapse {
+  --el-collapse-border-color: transparent;
+}
+
+.request-collapse__item {
+  margin-bottom: 12px;
+}
+
+.request-collapse__item:last-child {
+  margin-bottom: 0;
+}
+
+.request-collapse :deep(.el-collapse-item__wrap) {
+  background: transparent;
+  border-bottom: none;
+}
+
+.request-collapse :deep(.el-collapse-item__header) {
+  height: auto;
+  padding: 0;
+  line-height: normal;
+  background: transparent;
+  border-bottom: none;
+  border-radius: var(--doc-radius-xs);
+  transition:
+    background-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.request-collapse :deep(.el-collapse-item__header:hover) {
+  background: color-mix(
+    in srgb,
+    var(--el-color-primary-light-9) 36%,
+    transparent
+  );
+}
+
+.request-collapse :deep(.el-collapse-item__header:focus-visible) {
+  outline: none;
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--el-color-primary-light-8) 70%, transparent);
+}
+
+.request-collapse :deep(.el-collapse-item__content) {
+  padding: 8px 0 0;
+}
+
+.request-collapse :deep(.el-collapse-item__arrow) {
+  margin: 0 6px 0 10px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.request-collapse
+  :deep(.el-collapse-item__header.is-active .el-collapse-item__arrow),
+.request-collapse
+  :deep(.el-collapse-item__header:hover .el-collapse-item__arrow) {
+  color: var(--el-color-primary);
+}
+
+.request-collapse__title {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+}
+
 .sub-panel {
   min-width: 0;
   padding: 12px;
@@ -1813,6 +1947,68 @@ defineExpose({
 
 .sub-panel__header {
   margin-bottom: 6px;
+}
+
+.sub-panel__summary {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding-right: 28px;
+  margin-bottom: 0;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  border-radius: var(--doc-radius-xs);
+  transition:
+    background-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.sub-panel__summary::-webkit-details-marker {
+  display: none;
+}
+
+.sub-panel__summary::after {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  content: '';
+  border-right: 1.5px solid var(--el-text-color-secondary);
+  border-bottom: 1.5px solid var(--el-text-color-secondary);
+  transform: translateY(-68%) rotate(45deg);
+  transition: transform 0.16s ease;
+}
+
+.sub-panel__summary:hover {
+  background: color-mix(
+    in srgb,
+    var(--el-color-primary-light-9) 36%,
+    transparent
+  );
+}
+
+.sub-panel__summary:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--el-color-primary-light-8) 70%, transparent);
+}
+
+.sub-panel--collapsible[open] > .sub-panel__summary {
+  margin-bottom: 8px;
+}
+
+.sub-panel--collapsible[open] > .sub-panel__summary::after {
+  transform: translateY(-36%) rotate(225deg);
+}
+
+.sub-panel__content {
+  min-width: 0;
+}
+
+.sub-panel__content--schema {
+  padding-top: 2px;
 }
 
 .sub-panel__header--wrap {
@@ -1910,10 +2106,16 @@ defineExpose({
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 10px;
+  align-items: start;
   transition: grid-template-columns 0.24s ease;
 }
 
-.schema-layout--open {
+.schema-layout--with-actions {
+  grid-template-columns: minmax(0, 1fr) max-content;
+  column-gap: 12px;
+}
+
+.schema-layout--with-actions.schema-layout--open {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 
@@ -1921,7 +2123,47 @@ defineExpose({
   min-width: 0;
 }
 
+.schema-layout__side {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  place-self: start end;
+  min-width: 0;
+}
+
+.schema-layout--with-actions.schema-layout--open .schema-layout__side {
+  justify-self: stretch;
+  width: 100%;
+}
+
+.schema-layout__floating-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-start;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.schema-layout--body:not(.schema-layout--open) .schema-layout__side {
+  max-width: clamp(216px, 34vw, 360px);
+}
+
+.schema-layout--with-actions.schema-layout--open
+  .schema-layout__floating-actions {
+  width: 100%;
+}
+
+.schema-layout__floating-actions--body {
+  align-items: flex-start;
+}
+
+.schema-layout__floating-actions--response {
+  align-items: center;
+}
+
 .schema-layout__aside {
+  width: 100%;
   min-width: 0;
   padding: 0;
   background: transparent;
@@ -2040,11 +2282,6 @@ defineExpose({
 .response-content {
   width: 100%;
   margin-top: 1px;
-}
-
-.response-content__toolbar {
-  justify-content: flex-end;
-  margin-bottom: 6px;
 }
 
 .response-collapse :deep(.el-collapse-item__content),
@@ -2215,8 +2452,7 @@ defineExpose({
 
   .hero-panel__top,
   .section-panel__header,
-  .sub-panel__header,
-  .response-content__toolbar {
+  .response-collapse__title {
     flex-direction: column;
     align-items: stretch;
   }
@@ -2239,17 +2475,25 @@ defineExpose({
     width: 100%;
   }
 
-  .schema-layout--open {
+  .sub-panel__summary {
+    align-items: center;
+  }
+
+  .schema-layout--with-actions,
+  .schema-layout--with-actions.schema-layout--open {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .response-collapse__title {
-    gap: 8px;
-    align-items: flex-start;
+  .schema-layout__side,
+  .schema-layout__floating-actions {
+    justify-content: flex-start;
+    width: 100%;
+    max-width: none;
   }
 
+  .response-collapse__title,
   .response-collapse__status {
-    flex-direction: column;
+    gap: 8px;
     align-items: flex-start;
   }
 

@@ -909,7 +909,6 @@ const showSchemaStack = computed(() => {
   position: relative;
   display: inline-block;
   max-width: 100%;
-  padding-right: 8px;
   font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
   font-size: 14px;
   font-weight: 700;
@@ -924,14 +923,13 @@ const showSchemaStack = computed(() => {
 .schema-item__required-star {
   position: absolute;
   top: 0;
-  right: 0;
-  margin-left: 0;
+  left: -10px;
   font-size: 10px;
   font-style: normal;
   font-weight: 700;
   line-height: 1;
   color: var(--field-required);
-  transform: translate(42%, -34%);
+  transform: translate(0, -32%);
 }
 
 .schema-item__type {

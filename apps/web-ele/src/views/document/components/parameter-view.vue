@@ -178,6 +178,7 @@ const formatValue = (value: unknown) => {
   --field-chip-text: var(--el-text-color-primary);
   --field-chip-value-weight: 600;
   --field-required: var(--el-color-danger);
+  --field-leading-gutter: 26px;
 
   padding: 10px 0;
   border-bottom: 1px solid var(--el-border-color-lighter);
@@ -190,6 +191,7 @@ const formatValue = (value: unknown) => {
 
 .parameter-item__headline {
   min-width: 0;
+  padding-left: var(--field-leading-gutter);
 }
 
 .parameter-item__title-line {
@@ -204,7 +206,6 @@ const formatValue = (value: unknown) => {
   position: relative;
   display: inline-block;
   max-width: 100%;
-  padding-right: 8px;
   font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
   font-size: 14px;
   font-weight: 700;
@@ -219,14 +220,13 @@ const formatValue = (value: unknown) => {
 .parameter-item__required-star {
   position: absolute;
   top: 0;
-  right: 0;
-  margin-left: 0;
+  left: -10px;
   font-size: 10px;
   font-style: normal;
   font-weight: 700;
   line-height: 1;
   color: var(--field-required);
-  transform: translate(42%, -34%);
+  transform: translate(0, -32%);
 }
 
 .parameter-item__type {
@@ -249,6 +249,7 @@ const formatValue = (value: unknown) => {
 }
 
 .parameter-item__description {
+  padding-left: var(--field-leading-gutter);
   margin-top: 6px;
 }
 
@@ -256,6 +257,7 @@ const formatValue = (value: unknown) => {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
   gap: 6px 8px;
+  padding-left: var(--field-leading-gutter);
   margin-top: 8px;
 }
 
