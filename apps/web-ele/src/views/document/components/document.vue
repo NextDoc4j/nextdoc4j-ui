@@ -2096,6 +2096,8 @@ defineExpose({
   flex-wrap: wrap;
   gap: 6px;
   justify-content: flex-end;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .body-type-switch__button {
@@ -2158,6 +2160,7 @@ defineExpose({
 }
 
 .schema-layout {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 10px;
@@ -2166,12 +2169,12 @@ defineExpose({
 }
 
 .schema-layout--with-actions {
-  grid-template-columns: minmax(0, 1fr) max-content;
-  column-gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .schema-layout--with-actions.schema-layout--open {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 12px;
 }
 
 .schema-layout__main {
@@ -2187,6 +2190,7 @@ defineExpose({
 }
 
 .schema-layout--with-actions.schema-layout--open .schema-layout__side {
+  position: static;
   justify-self: stretch;
   width: 100%;
 }
@@ -2201,7 +2205,33 @@ defineExpose({
 }
 
 .schema-layout--body:not(.schema-layout--open) .schema-layout__side {
-  max-width: clamp(216px, 34vw, 360px);
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 1;
+  max-width: min(100%, 720px);
+}
+
+.schema-layout--body:not(.schema-layout--open)
+  .schema-layout__floating-actions--body,
+.schema-layout--body:not(.schema-layout--open) .body-type-switch {
+  flex-wrap: nowrap;
+}
+
+.schema-layout--with-actions:not(.schema-layout--open) .schema-layout__main {
+  grid-column: 1 / -1;
+}
+
+.schema-layout--with-actions:not(.schema-layout--open)
+  .schema-layout__floating-actions {
+  justify-content: flex-end;
+}
+
+.schema-layout--response:not(.schema-layout--open) .schema-layout__side {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 1;
 }
 
 .schema-layout--with-actions.schema-layout--open
@@ -2541,9 +2571,16 @@ defineExpose({
 
   .schema-layout__side,
   .schema-layout__floating-actions {
+    position: static;
     justify-content: flex-start;
     width: 100%;
     max-width: none;
+  }
+
+  .schema-layout--body:not(.schema-layout--open)
+    .schema-layout__floating-actions--body,
+  .schema-layout--body:not(.schema-layout--open) .body-type-switch {
+    flex-wrap: wrap;
   }
 
   .response-collapse__title,
