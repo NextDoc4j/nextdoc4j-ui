@@ -206,6 +206,10 @@ function handleUpload(
   uploadFiles: UploadFiles,
   row: ParamItem,
 ) {
+  syncUploadValue(row, uploadFiles);
+}
+
+function syncUploadValue(row: ParamItem, uploadFiles: UploadFiles) {
   row.fileList = [...uploadFiles];
   const rawFiles = uploadFiles
     .filter((file) => file.raw)
@@ -215,6 +219,13 @@ function handleUpload(
     return;
   }
   row.value = row.type === 'array' ? rawFiles : rawFiles[0];
+}
+
+function removeUploadedFile(file: UploadFile, row: ParamItem) {
+  const nextFiles = (row.fileList || []).filter(
+    (item) => item.uid !== file.uid,
+  );
+  syncUploadValue(row, nextFiles);
 }
 
 const handleExceed = (
@@ -306,7 +317,7 @@ watch(
           <div class="params-grid-table__cell params-grid-table__cell--body">
             <div
               v-if="row.format === 'binary'"
-              class="params-grid-table__control"
+              class="params-grid-table__control params-grid-table__control--upload"
             >
               <ElUpload
                 v-model:file-list="row.fileList"
@@ -321,6 +332,49 @@ watch(
                 "
               >
                 <ElButton plain size="small"> 上传 </ElButton>
+                <template #file="{ file }">
+                  <div class="el-upload-list__item-info param-upload-file">
+                    <span
+                      class="el-upload-list__item-name param-upload-file__main"
+                    >
+                      <span
+                        class="el-icon el-icon--document"
+                        aria-hidden="true"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 1024 1024"
+                        >
+                          <path
+                            fill="currentColor"
+                            d="M832 384H576V128H192v768h640zm-26.496-64L640 154.496V320zM160 64h480l256 256v608a32 32 0 0 1-32 32H160a32 32 0 0 1-32-32V96a32 32 0 0 1 32-32m160 448h384v64H320zm0-192h160v64H320zm0 384h384v64H320z"
+                          />
+                        </svg>
+                      </span>
+                      <ElTooltip :content="file.name" placement="top">
+                        <span
+                          class="el-upload-list__item-file-name param-upload-file__name"
+                        >
+                          {{ file.name }}
+                        </span>
+                      </ElTooltip>
+                    </span>
+                  </div>
+                  <span
+                    class="el-icon el-icon--close param-upload-file__close"
+                    @click.stop="removeUploadedFile(file, row)"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 1024 1024"
+                    >
+                      <path
+                        fill="currentColor"
+                        d="M764.288 214.592 512 466.88 259.712 214.592a31.936 31.936 0 0 0-45.12 45.12L466.752 512 214.528 764.224a31.936 31.936 0 1 0 45.12 45.184L512 557.184l252.288 252.288a31.936 31.936 0 0 0 45.12-45.12L557.12 512.064l252.288-252.352a31.936 31.936 0 1 0-45.12-45.184z"
+                      />
+                    </svg>
+                  </span>
+                </template>
               </ElUpload>
               <button
                 v-if="showInlineDelete"
@@ -547,6 +601,66 @@ watch(
   align-items: center;
   width: 100%;
   min-width: 0;
+}
+
+.params-grid-table__control--upload {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.params-grid-table__control--upload :deep(.el-upload) {
+  align-self: flex-start;
+}
+
+.params-grid-table__control--upload :deep(.el-upload-list) {
+  width: 100%;
+  min-width: 0;
+  margin-top: 6px;
+}
+
+.params-grid-table__control--upload :deep(.el-upload-list__item) {
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.params-grid-table__control--upload :deep(.el-upload-list__item-info) {
+  width: calc(100% - 30px);
+  min-width: 0;
+}
+
+.params-grid-table__control--upload :deep(.el-upload-list__item-name) {
+  width: 100%;
+  min-width: 0;
+}
+
+.params-grid-table__control--upload :deep(.el-upload-list__item-file-name) {
+  display: inline-block;
+  width: 100%;
+  min-width: 0;
+}
+
+.param-upload-file {
+  min-width: 0;
+}
+
+.param-upload-file__main {
+  width: 100%;
+  min-width: 0;
+}
+
+.param-upload-file__main :deep(.el-tooltip__trigger) {
+  display: inline-flex;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.param-upload-file__name {
+  display: inline-block;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .params-grid-table__control :deep(.el-input),
