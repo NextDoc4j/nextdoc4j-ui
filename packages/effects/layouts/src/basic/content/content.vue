@@ -44,14 +44,12 @@ function getTransitionName(_route: RouteLocationNormalizedLoaded) {
     return transitionName;
   }
 
-  // 如果页面已经加载过，则不使用动画
-  // if (route.meta.loaded) {
-  //   return;
-  // }
   // 已经打开且已经加载过的页面不使用动画
-  // const inTabs = getCachedTabs.value.includes(route.name as string);
+  const inTabs = getCachedTabs.value.includes(_route.name as string);
+  if (inTabs && _route.meta.loaded) {
+    return;
+  }
 
-  // return inTabs && route.meta.loaded ? undefined : transitionName;
   return transitionName;
 }
 

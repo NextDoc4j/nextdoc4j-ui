@@ -2,7 +2,7 @@
 import type { ApiInfo, SecuritySchemeObject } from '#/typings/openApi';
 import type { SecurityMetadata } from '#/utils/securityexpand';
 
-import { computed, onBeforeMount, ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 
 import {
@@ -62,6 +62,11 @@ interface ResponseExampleOption {
   value: unknown;
 }
 
+interface DocumentUiState {
+  activeRequestSections: string[];
+  activeResponseCode: string;
+}
+
 type CodeDialogScope = 'request' | 'response';
 
 defineOptions({
@@ -75,6 +80,8 @@ const props = defineProps<{
 const emits = defineEmits<{
   test: [data: DebugPayload];
 }>();
+
+const documentUiStateCache = new Map<string, DocumentUiState>();
 
 const { isDark } = usePreferences();
 const route = useRoute();
@@ -142,6 +149,77 @@ const requestSectionNames = computed(() => {
   }
   return sections;
 });
+
+const responseCodes = computed(() => {
+  return Object.keys(apiInfo.value?.responses || {});
+});
+
+const routeUiStateKey = computed(() => {
+  const routeName = typeof route.name === 'string' ? route.name : '';
+  return route.fullPath || route.path || routeName;
+});
+
+const getDefaultResponseCode = () => {
+  const codes = responseCodes.value;
+  return codes.includes('200') ? '200' : codes[0] || '';
+};
+
+const persistDocumentUiState = () => {
+  const key = routeUiStateKey.value;
+  if (!key) {
+    return;
+  }
+
+  documentUiStateCache.set(key, {
+    activeRequestSections: [...activeRequestSections.value],
+    activeResponseCode: activeResponseCode.value,
+  });
+};
+
+const restoreDocumentUiState = () => {
+  const cachedState = documentUiStateCache.get(routeUiStateKey.value);
+
+  if (cachedState) {
+    activeRequestSections.value = cachedState.activeRequestSections.filter(
+      (name) => requestSectionNames.value.includes(name),
+    );
+    activeResponseCode.value =
+      cachedState.activeResponseCode === '' ||
+      responseCodes.value.includes(cachedState.activeResponseCode)
+        ? cachedState.activeResponseCode
+        : getDefaultResponseCode();
+  } else {
+    activeRequestSections.value = [...requestSectionNames.value];
+    activeResponseCode.value = getDefaultResponseCode();
+  }
+
+  persistDocumentUiState();
+};
+
+const loadCurrentDocument = () => {
+  const routeName = route.name;
+  baseUrl.value = apiStore.openApi?.servers?.[0]?.url || '';
+
+  if (!routeName || typeof routeName !== 'string') {
+    console.warn('Route name is not available');
+    apiInfo.value = {} as ApiInfo;
+    activeRequestSections.value = [];
+    activeResponseCode.value = '';
+    return;
+  }
+
+  const [group = '', tag = '', operationId = ''] = routeName.split('*') ?? [];
+  const data = apiStore.searchPathData(group, tag, operationId);
+  apiInfo.value = data || ({} as ApiInfo);
+
+  responseExampleOpen.value = Object.fromEntries(
+    responseCodes.value.map((code) => [code, false]),
+  );
+  responseExampleSelection.value = {};
+  responseVariantState.value = {};
+
+  restoreDocumentUiState();
+};
 
 const securitySchemeMap = computed<Record<string, SecuritySchemeObject>>(() => {
   return apiStore.openApi?.components?.securitySchemes || {};
@@ -513,30 +591,24 @@ const requestPreviewSchema = computed(() => {
 });
 
 watch(
-  requestSectionNames,
-  (names) => {
-    activeRequestSections.value = [...names];
+  routeUiStateKey,
+  () => {
+    loadCurrentDocument();
   },
-  { immediate: true },
+  { immediate: true, flush: 'sync' },
 );
-
-const responseCodes = computed(() => {
-  return Object.keys(apiInfo.value?.responses || {});
-});
 
 watch(
-  responseCodes,
-  (codes) => {
-    const nextCode = codes.includes('200') ? '200' : codes[0] || '';
-    activeResponseCode.value = nextCode;
-    responseExampleOpen.value = Object.fromEntries(
-      codes.map((code) => [code, false]),
-    );
-    responseExampleSelection.value = {};
-    responseVariantState.value = {};
+  activeRequestSections,
+  () => {
+    persistDocumentUiState();
   },
-  { immediate: true },
+  { deep: true },
 );
+
+watch(activeResponseCode, () => {
+  persistDocumentUiState();
+});
 
 const pickContentSchema = (content?: Record<string, any>) => {
   if (!content) return null;
@@ -1110,23 +1182,6 @@ const getDebugPayload = (): DebugPayload => {
     requestBodyVariantState: { ...requestBodyVariantState.value },
   };
 };
-
-onBeforeMount(() => {
-  const routeName = route.name;
-  if (!routeName || typeof routeName !== 'string') {
-    console.warn('Route name is not available');
-    return;
-  }
-
-  const [group = '', tag = '', operationId = ''] = routeName.split('*') ?? [];
-  const data = apiStore.searchPathData(group, tag, operationId);
-
-  if (data) {
-    apiInfo.value = data;
-  }
-
-  baseUrl.value = apiStore.openApi?.servers?.[0]?.url || '';
-});
 
 defineExpose({
   apiInfo,
