@@ -59,6 +59,12 @@ import { storeToRefs } from 'pinia';
 
 import { useApiStore } from '#/store';
 import { useAggregationStore } from '#/store/aggregation';
+import {
+  compareNamedUrlLike,
+  compareOperationLike,
+  compareTagLike,
+  compareTagNames,
+} from '#/utils/openapi-sort';
 
 defineOptions({ name: 'DocManageExport' });
 
@@ -68,6 +74,8 @@ type ScopeMode = 'all' | 'custom';
 interface GroupDocItem {
   code: string;
   name: string;
+  'x-order'?: number | string;
+  controllerName?: string;
   openApi?: OpenAPISpec;
   url?: string;
 }
@@ -76,6 +84,8 @@ interface OperationItem {
   description?: string;
   groupCode: string;
   groupName?: string;
+  groupSourceName?: string;
+  groupOrder?: number | string;
   key: string;
   method: string;
   operationId?: string;
@@ -83,6 +93,7 @@ interface OperationItem {
   raw: any;
   searchText: string;
   serviceName?: string;
+  serviceOrder?: number | string;
   serviceUrl?: string;
   summary?: string;
   tags?: string[];
@@ -212,8 +223,21 @@ const groupedFilteredOperations = computed<GroupedOperationItem[]>(() => {
     map.get(item.groupCode)!.operations.push(item);
   });
 
-  return [...map.values()].sort((a, b) =>
-    a.name.localeCompare(b.name, 'zh-CN'),
+  return [...map.values()].sort((left, right) =>
+    compareGroupDocs(
+      {
+        code: left.code,
+        name: left.name,
+        'x-order': left.operations[0]?.groupOrder,
+        controllerName: left.operations[0]?.groupSourceName,
+      },
+      {
+        code: right.code,
+        name: right.name,
+        'x-order': right.operations[0]?.groupOrder,
+        controllerName: right.operations[0]?.groupSourceName,
+      },
+    ),
   );
 });
 
@@ -257,22 +281,35 @@ const aggregationServiceTree = computed<AggregationServiceTreeNode[]>(() => {
 
   return [...serviceMap.values()]
     .map((serviceNode) => {
-      const groups = [...serviceNode.groupMap.values()].sort((a, b) =>
-        a.name.localeCompare(b.name, 'zh-CN'),
+      const groups = [...serviceNode.groupMap.values()].sort((left, right) =>
+        compareGroupDocs(
+          {
+            code: left.code,
+            name: left.name,
+            'x-order': left.operations[0]?.groupOrder,
+            controllerName: left.operations[0]?.groupSourceName,
+            url: serviceNode.serviceUrl,
+          },
+          {
+            code: right.code,
+            name: right.name,
+            'x-order': right.operations[0]?.groupOrder,
+            controllerName: right.operations[0]?.groupSourceName,
+            url: serviceNode.serviceUrl,
+          },
+        ),
       );
       const nonAllGroups = groups.filter((group) => group.code !== 'all');
       const hasGroupLevel = nonAllGroups.length > 0;
       const directOperations = hasGroupLevel
         ? []
-        : (serviceNode.groupMap.get('all')?.operations || []).sort((a, b) =>
-            `${a.path}::${a.method}`.localeCompare(`${b.path}::${b.method}`),
+        : [...(serviceNode.groupMap.get('all')?.operations || [])].sort(
+            compareOperationItems,
           );
       const allOperations = hasGroupLevel
         ? nonAllGroups
             .flatMap((group) => group.operations)
-            .sort((a, b) =>
-              `${a.path}::${a.method}`.localeCompare(`${b.path}::${b.method}`),
-            )
+            .sort(compareOperationItems)
         : directOperations;
 
       return {
@@ -285,7 +322,20 @@ const aggregationServiceTree = computed<AggregationServiceTreeNode[]>(() => {
         operations: directOperations,
       };
     })
-    .sort((a, b) => a.serviceName.localeCompare(b.serviceName, 'zh-CN'));
+    .sort((left, right) =>
+      compareNamedUrlLike(
+        {
+          name: left.serviceName,
+          url: left.serviceUrl,
+          'x-order': left.allOperations[0]?.serviceOrder,
+        },
+        {
+          name: right.serviceName,
+          url: right.serviceUrl,
+          'x-order': right.allOperations[0]?.serviceOrder,
+        },
+      ),
+    );
 });
 
 const selectedOperationItems = computed(() => {
@@ -435,6 +485,94 @@ function buildOperationSearchText(item: {
     .toLowerCase();
 }
 
+function resolveGroupTagMeta(
+  doc?: null | OpenAPISpec,
+  preferredName?: string,
+): GroupDocItem | null {
+  if (!doc?.tags || doc.tags.length <= 0) {
+    return null;
+  }
+
+  const target =
+    doc.tags.find((item) => item.name === preferredName) || doc.tags[0];
+
+  if (!target) {
+    return null;
+  }
+
+  return {
+    code: target.name || preferredName || 'default',
+    name: target.name || preferredName || 'default',
+    'x-order': target['x-order'],
+    controllerName:
+      target['x-controller-name'] ||
+      target['x-controller'] ||
+      target.controllerName ||
+      target.className ||
+      target['x-class-name'] ||
+      target.sourceName ||
+      target['x-origin-name'],
+  };
+}
+
+function compareGroupDocs(
+  left?: GroupDocItem | null,
+  right?: GroupDocItem | null,
+) {
+  const tagCompare = compareTagLike(left, right);
+  if (tagCompare !== 0) {
+    return tagCompare;
+  }
+  return compareNamedUrlLike(left, right);
+}
+
+function compareOperationItems(left: OperationItem, right: OperationItem) {
+  const serviceCompare = compareNamedUrlLike(
+    {
+      name: left.serviceName,
+      url: left.serviceUrl,
+      'x-order': left.serviceOrder,
+    },
+    {
+      name: right.serviceName,
+      url: right.serviceUrl,
+      'x-order': right.serviceOrder,
+    },
+  );
+  if (serviceCompare !== 0) {
+    return serviceCompare;
+  }
+
+  const groupCompare = compareGroupDocs(
+    {
+      code: left.groupCode,
+      name: left.groupName || left.groupCode,
+      'x-order': left.groupOrder,
+      controllerName: left.groupSourceName,
+      url: left.serviceUrl,
+    },
+    {
+      code: right.groupCode,
+      name: right.groupName || right.groupCode,
+      'x-order': right.groupOrder,
+      controllerName: right.groupSourceName,
+      url: right.serviceUrl,
+    },
+  );
+  if (groupCompare !== 0) {
+    return groupCompare;
+  }
+
+  const leftPrimaryTag = `${left.tags?.find((item) => `${item || ''}`.trim()) || ''}`;
+  const rightPrimaryTag = `${right.tags?.find((item) => `${item || ''}`.trim()) || ''}`;
+  const tagCompare = compareTagNames(leftPrimaryTag, rightPrimaryTag);
+  if (tagCompare !== 0) {
+    return tagCompare;
+  }
+
+  return compareOperationLike(left, right);
+}
+
 function getServiceNodeKey(serviceUrl: string) {
   return `service::${serviceUrl}`;
 }
@@ -535,7 +673,10 @@ function collectOperationsFromPaths(
     | {
         groupCode: string;
         groupName?: string;
+        groupOrder?: number | string;
+        groupSourceName?: string;
         serviceName?: string;
+        serviceOrder?: number | string;
         serviceUrl?: string;
       },
 ): OperationItem[] {
@@ -543,8 +684,11 @@ function collectOperationsFromPaths(
     typeof options === 'string' ? { groupCode: options } : options;
   const serviceUrl = normalizedOptions.serviceUrl || '__single__';
   const serviceName = normalizedOptions.serviceName || '当前文档';
+  const serviceOrder = normalizedOptions.serviceOrder;
   const groupCode = normalizedOptions.groupCode;
   const groupName = normalizedOptions.groupName || groupCode;
+  const groupOrder = normalizedOptions.groupOrder;
+  const groupSourceName = normalizedOptions.groupSourceName;
   const result: OperationItem[] = [];
 
   Object.entries(paths || {}).forEach(([path, methodConfig]) => {
@@ -564,9 +708,12 @@ function collectOperationsFromPaths(
         ),
         groupCode,
         groupName,
+        groupOrder,
+        groupSourceName,
         method: methodName,
         path,
         serviceName,
+        serviceOrder,
         serviceUrl,
         summary: raw?.summary,
         description: raw?.description,
@@ -586,7 +733,7 @@ function collectOperationsFromPaths(
     });
   });
 
-  return result;
+  return result.sort((left, right) => compareOperationItems(left, right));
 }
 
 function mergeComponents(docs: OpenAPISpec[]) {
@@ -1154,22 +1301,30 @@ function toDisplayFieldName(path: string) {
 
 function loadGroupDocsForSingleFromCache(config: SwaggerConfig) {
   const groupedApiData = apiStore.apiData || {};
-  const groupCodes = Object.keys(groupedApiData).filter(
-    (code) => code !== 'all',
-  );
-  const nameMap = new Map(
-    (config.urls || []).map((item) => [
-      parseGroupCode(item.url),
-      item.name?.trim(),
-    ]),
+  const groupCodeSet = new Set(
+    Object.keys(groupedApiData).filter((code) => code !== 'all'),
   );
 
-  groupDocs.value = groupCodes.map((code) => ({
-    code,
-    name: nameMap.get(code) || code,
-    url: (config.urls || []).find((item) => parseGroupCode(item.url) === code)
-      ?.url,
-  }));
+  groupDocs.value = (config.urls || [])
+    .filter((item) => {
+      const code = parseGroupCode(item.url);
+      return code !== 'all' && groupCodeSet.has(code);
+    })
+    .map((item) => {
+      const code = parseGroupCode(item.url);
+      const tagMeta = resolveGroupTagMeta(
+        currentOpenApi.value,
+        item.name?.trim(),
+      );
+      return {
+        code,
+        name: item.name?.trim() || code,
+        'x-order': tagMeta?.['x-order'] ?? item['x-order'],
+        controllerName: tagMeta?.controllerName,
+        url: item.url,
+      };
+    })
+    .sort(compareGroupDocs);
 }
 
 async function loadGroupDocsForService(
@@ -1186,15 +1341,18 @@ async function loadGroupDocsForService(
 
     const fullUrl = `${servicePrefix}${item.url}`;
     const openApi = await aggregationStore.getServiceGroupDoc(service, fullUrl);
+    const tagMeta = resolveGroupTagMeta(openApi, item.name?.trim());
     docs.push({
       code,
       name: item.name?.trim() || code,
+      'x-order': tagMeta?.['x-order'] ?? item['x-order'],
+      controllerName: tagMeta?.controllerName,
       openApi,
       url: fullUrl,
     });
   }
 
-  return docs;
+  return docs.sort(compareGroupDocs);
 }
 
 function rebuildOperations(useCachedGrouping = false) {
@@ -1208,6 +1366,9 @@ function rebuildOperations(useCachedGrouping = false) {
           collectOperationsFromPaths(group.openApi?.paths || {}, {
             groupCode: group.code,
             groupName: group.name,
+            groupOrder: group['x-order'],
+            groupSourceName: group.controllerName,
+            serviceOrder: serviceDoc.service['x-order'],
             serviceUrl: serviceDoc.service.url,
             serviceName: serviceDoc.service.name,
           }).forEach((item) => {
@@ -1220,6 +1381,7 @@ function rebuildOperations(useCachedGrouping = false) {
       collectOperationsFromPaths(serviceDoc.openApi?.paths || {}, {
         groupCode: 'all',
         groupName: '所有接口',
+        serviceOrder: serviceDoc.service['x-order'],
         serviceUrl: serviceDoc.service.url,
         serviceName: serviceDoc.service.name,
       }).forEach((item) => {
@@ -1227,12 +1389,7 @@ function rebuildOperations(useCachedGrouping = false) {
       });
     });
 
-    operations.value = [...map.values()].sort((a, b) => {
-      return `${a.serviceName || ''}::${a.groupName || ''}::${a.path}::${a.method}`.localeCompare(
-        `${b.serviceName || ''}::${b.groupName || ''}::${b.path}::${b.method}`,
-        'zh-CN',
-      );
-    });
+    operations.value = [...map.values()].sort(compareOperationItems);
 
     selectedOperations.value = [];
     expandedGroups.value = {};
@@ -1266,9 +1423,16 @@ function rebuildOperations(useCachedGrouping = false) {
               ),
               groupCode,
               groupName: getGroupTitle(groupCode),
+              groupOrder: groupDocs.value.find(
+                (item) => item.code === groupCode,
+              )?.['x-order'],
+              groupSourceName: groupDocs.value.find(
+                (item) => item.code === groupCode,
+              )?.controllerName,
               method: methodName,
               path: api.path,
               serviceName: currentOpenApi.value?.info?.title || '当前文档',
+              serviceOrder: undefined,
               serviceUrl: '__single__',
               summary: source?.summary,
               description: source?.description,
@@ -1295,6 +1459,7 @@ function rebuildOperations(useCachedGrouping = false) {
     collectOperationsFromPaths(currentOpenApi.value?.paths || {}, {
       groupCode: 'all',
       groupName: '所有接口',
+      serviceOrder: undefined,
       serviceUrl: '__single__',
       serviceName: currentOpenApi.value?.info?.title || '当前文档',
     }).forEach((item) => {
@@ -1306,6 +1471,9 @@ function rebuildOperations(useCachedGrouping = false) {
     collectOperationsFromPaths(group.openApi?.paths || {}, {
       groupCode: group.code,
       groupName: group.name,
+      groupOrder: group['x-order'],
+      groupSourceName: group.controllerName,
+      serviceOrder: undefined,
       serviceUrl: '__single__',
       serviceName: currentOpenApi.value?.info?.title || '当前文档',
     }).forEach((item) => {
@@ -1313,12 +1481,7 @@ function rebuildOperations(useCachedGrouping = false) {
     });
   });
 
-  operations.value = [...map.values()].sort((a, b) => {
-    return `${a.groupCode}${a.path}${a.method}`.localeCompare(
-      `${b.groupCode}${b.path}${b.method}`,
-      'zh-CN',
-    );
-  });
+  operations.value = [...map.values()].sort(compareOperationItems);
 
   selectedOperations.value = [];
   expandedGroups.value = {};
@@ -1816,13 +1979,35 @@ function buildMarkdownDocument(doc: OpenAPISpec, selectedOps: OperationItem[]) {
           serviceName: info?.title || '当前文档',
           serviceUrl: '__single__',
         })
-  ).sort((a, b) => {
-    const aTag = `${a.tags?.[0] || '默认标签'}`;
-    const bTag = `${b.tags?.[0] || '默认标签'}`;
-    return `${a.serviceName || ''}::${a.groupCode}::${aTag}::${a.path}::${a.method}`.localeCompare(
-      `${b.serviceName || ''}::${b.groupCode}::${bTag}::${b.path}::${b.method}`,
-      'zh-CN',
+  ).sort((left, right) => {
+    const groupCompare = compareGroupDocs(
+      {
+        code: left.groupCode,
+        name: getGroupTitle(left.groupCode, left.serviceUrl),
+        'x-order': left.groupOrder,
+        controllerName: left.groupSourceName,
+        url: left.serviceUrl,
+      },
+      {
+        code: right.groupCode,
+        name: getGroupTitle(right.groupCode, right.serviceUrl),
+        'x-order': right.groupOrder,
+        controllerName: right.groupSourceName,
+        url: right.serviceUrl,
+      },
     );
+    if (groupCompare !== 0) {
+      return groupCompare;
+    }
+
+    const leftTag = `${left.tags?.find((item) => `${item || ''}`.trim()) || '默认标签'}`;
+    const rightTag = `${right.tags?.find((item) => `${item || ''}`.trim()) || '默认标签'}`;
+    const tagCompare = compareTagNames(leftTag, rightTag, doc);
+    if (tagCompare !== 0) {
+      return tagCompare;
+    }
+
+    return compareOperationItems(left, right);
   });
 
   const getTagTitle = (op: OperationItem) => {

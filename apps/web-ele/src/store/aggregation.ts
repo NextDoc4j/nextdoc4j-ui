@@ -12,6 +12,7 @@ import { defineStore } from 'pinia';
 
 import { getOpenAPI, getOpenAPIConfig } from '#/api/core/openApi';
 import { baseRequestClient } from '#/api/request';
+import { sortOpenApiSpec, sortSwaggerConfig } from '#/utils/openapi-sort';
 
 const STORAGE_KEY = 'nextdoc4j-current-service';
 const STORAGE_TABS_KEY = 'nextdoc4j-service-tabs';
@@ -19,6 +20,7 @@ const STORAGE_TABS_KEY = 'nextdoc4j-service-tabs';
 export interface ServiceItem {
   name: string;
   url: string;
+  'x-order'?: number | string;
   contextPath?: string;
   disabled?: boolean;
   reason?: string;
@@ -51,6 +53,14 @@ interface ServiceData {
 }
 
 type ServiceApiData = Record<string, Record<string, any[]>>;
+
+const sortRequiredOpenApiSpec = (data: OpenAPISpec) => {
+  return sortOpenApiSpec(data) ?? data;
+};
+
+const sortRequiredSwaggerConfig = (data: SwaggerConfig) => {
+  return sortSwaggerConfig(data) ?? data;
+};
 
 export const useAggregationStore = defineStore('aggregation', () => {
   const isAggregation = ref(false);
@@ -100,6 +110,7 @@ export const useAggregationStore = defineStore('aggregation', () => {
   const buildServiceItem = (item: SwaggerServiceItem): ServiceItem => ({
     name: item.name,
     url: item.url,
+    'x-order': item['x-order'],
     contextPath: item.contextPath,
     disabled: item.disabled ?? false,
     reason: item.reason,
@@ -159,7 +170,9 @@ export const useAggregationStore = defineStore('aggregation', () => {
         data: OpenAPISpec;
       }>(service.url, { timeout: 3000 });
       const cache = getOrCreateServiceCache(service.url);
-      cache.openApi = resolveResponseData<OpenAPISpec>(openApiResponse);
+      cache.openApi = sortRequiredOpenApiSpec(
+        resolveResponseData<OpenAPISpec>(openApiResponse),
+      );
 
       updateServiceStatus(service.url, {
         disabled: false,
@@ -193,8 +206,8 @@ export const useAggregationStore = defineStore('aggregation', () => {
       getOpenAPIConfig(),
     ]);
 
-    mainConfigCache.value.openApi = openApiResult.data;
-    mainConfigCache.value.config = configResult.data;
+    mainConfigCache.value.openApi = sortRequiredOpenApiSpec(openApiResult.data);
+    mainConfigCache.value.config = sortRequiredSwaggerConfig(configResult.data);
 
     return {
       openApi: openApiResult.data,
@@ -220,7 +233,9 @@ export const useAggregationStore = defineStore('aggregation', () => {
         const openApiResponse = await baseRequestClient.get<{
           data: OpenAPISpec;
         }>(service.url);
-        cache.openApi = resolveResponseData<OpenAPISpec>(openApiResponse);
+        cache.openApi = sortRequiredOpenApiSpec(
+          resolveResponseData<OpenAPISpec>(openApiResponse),
+        );
       }
 
       if (!cache.config) {
@@ -228,7 +243,9 @@ export const useAggregationStore = defineStore('aggregation', () => {
           const configResponse = await baseRequestClient.get<{
             data: SwaggerConfig;
           }>(`${service.url}/swagger-config`);
-          cache.config = resolveResponseData<SwaggerConfig>(configResponse);
+          cache.config = sortRequiredSwaggerConfig(
+            resolveResponseData<SwaggerConfig>(configResponse),
+          );
         } else {
           cache.config = createFallbackServiceConfig(service);
         }
@@ -269,7 +286,7 @@ export const useAggregationStore = defineStore('aggregation', () => {
     const response = await baseRequestClient.get<{ data: OpenAPISpec }>(
       groupUrl,
     );
-    const data = (response as any).data || response;
+    const data = sortRequiredOpenApiSpec((response as any).data || response);
 
     cache.groupDocs.set(groupUrl, data);
 

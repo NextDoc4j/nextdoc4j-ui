@@ -23,6 +23,7 @@ import { getOpenAPIConfig } from '#/api/core/openApi';
 import { baseRequestClient } from '#/api/request';
 import { useApiStore } from '#/store';
 import { useAggregationStore } from '#/store/aggregation';
+import { compareOperationLike, compareTagNames } from '#/utils/openapi-sort';
 
 interface TagGroups {
   [tag: string]: Record<string, PathMenuItem[]>;
@@ -267,7 +268,7 @@ export const fetchAggregationRoutesImpl: () => Promise<
   const { paths, components } = serviceData;
 
   // 初始化主路由（all 分组）
-  const { access, allPath } = initGroupRoute(paths);
+  const { access, allPath } = initGroupRoute(paths, serviceData);
 
   // 处理服务内部的分组（类似单体模式）
   const { urls } = config;
@@ -329,7 +330,7 @@ export const fetchAggregationRoutesImpl: () => Promise<
 
         dataList.forEach((data, index) => {
           const { paths: groupPaths, components: groupComponents } = data;
-          const tagGroups = apiByTag(groupPaths);
+          const tagGroups = apiByTag(groupPaths, data);
 
           // 从 url 中提取 tag（如 "/v3/api-docs/user" -> "user"）
           const code = filterUrls?.[index]?.url?.split('/') ?? '';
@@ -338,8 +339,8 @@ export const fetchAggregationRoutesImpl: () => Promise<
           const accessRoutes: RouteRecordStringComponent[] = [];
           allPath[tag] = tagGroups;
 
-          Object.keys(tagGroups).forEach((key: string) => {
-            const children = tagGroups[key]?.map((api) => {
+          Object.entries(tagGroups).forEach(([key, groupedApis]) => {
+            const children = groupedApis?.map((api) => {
               return {
                 name: `${tag}*${key}*${api.operationId}`,
                 path: `/document/${tag}/${key}/${api.operationId}`,
@@ -466,7 +467,7 @@ const fetchSingleAppRoutes: (
 ) => Promise<RouteRecordStringComponent<string>[]> = async (data, config) => {
   const entries: RouteRecordStringComponent<string>[] = [];
   const { paths, components, 'x-nextdoc4j': xNextdoc4j } = data;
-  const { access, allPath } = initGroupRoute(paths);
+  const { access, allPath } = initGroupRoute(paths, data);
 
   if (xNextdoc4j && xNextdoc4j.brand) {
     initBrand(xNextdoc4j.brand);
@@ -521,14 +522,14 @@ const fetchSingleAppRoutes: (
         const dataList = await Promise.all(fetchList);
         dataList.forEach(({ data }, index) => {
           const { paths, components } = data;
-          const tagGroups = apiByTag(paths);
+          const tagGroups = apiByTag(paths, data);
 
           const code = filterUrls?.[index]?.url?.split('/') ?? '';
           const tag = code[code.length - 1] ?? '';
           const accessRoutes: RouteRecordStringComponent[] = [];
           allPath[tag] = tagGroups;
-          Object.keys(tagGroups).forEach((key: string) => {
-            const children = tagGroups[key]?.map((api) => {
+          Object.entries(tagGroups).forEach(([key, groupedApis]) => {
+            const children = groupedApis?.map((api) => {
               return {
                 name: `${tag}*${key}*${api.operationId}`,
                 path: `/document/${tag}/${key}/${api.operationId}`,
@@ -641,7 +642,7 @@ const fetchSingleAppRoutes: (
   });
 };
 
-export const apiByTag = (paths: Paths) => {
+export const apiByTag = (paths: Paths, spec?: OpenAPISpec) => {
   const tagGroups: Record<string, PathMenuItem[]> = {};
   // 按tag分组
   Object.entries(paths).forEach(([path, methods]: [string, any]) => {
@@ -657,7 +658,14 @@ export const apiByTag = (paths: Paths) => {
       });
     });
   });
-  return tagGroups;
+  return Object.fromEntries(
+    Object.entries(tagGroups)
+      .sort(([leftTag], [rightTag]) => compareTagNames(leftTag, rightTag, spec))
+      .map(([tag, items]) => [
+        tag,
+        [...items].sort((left, right) => compareOperationLike(left, right)),
+      ]),
+  );
 };
 
 const initBrand = (brand: Brand) => {
@@ -736,16 +744,16 @@ const markDownGroupBy = (markdowns: MarkDownDes[], key: keyof MarkDownDes) => {
   return group;
 };
 
-const initGroupRoute = (paths: Paths) => {
+const initGroupRoute = (paths: Paths, spec?: OpenAPISpec) => {
   const accessRoutes: RouteRecordStringComponent<string>[] = [];
-  const tagGroups = apiByTag(paths);
+  const tagGroups = apiByTag(paths, spec);
   const allPath: TagGroups = {
     all: {},
   };
   allPath.all = tagGroups;
 
-  Object.keys(tagGroups).forEach((key: string) => {
-    const children = tagGroups[key]?.map((api) => {
+  Object.entries(tagGroups).forEach(([key, groupedApis]) => {
+    const children = groupedApis?.map((api) => {
       return {
         name: `all*${key}*${api.operationId}`,
         path: `/document/all/${key}/${api.operationId}`,
