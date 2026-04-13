@@ -208,6 +208,23 @@ const getDisplaySchema = (item: any, path: string): any => {
   return mergeSchema(baseSchema, selected);
 };
 
+const getObjectContainerSchema = (item: any, path: string): any => {
+  const schema = getDisplaySchema(item, path);
+  if (!schema || typeof schema !== 'object') {
+    return null;
+  }
+
+  if (!schema.type || schema.type === 'object') {
+    return schema;
+  }
+
+  if (schema.type === 'array' && schema.items) {
+    return getObjectContainerSchema(schema.items, `${path}[]`);
+  }
+
+  return null;
+};
+
 const isExpandable = (item: any, path: string) => {
   const schema = getDisplaySchema(item, path);
   if (schema?.type === 'object' && schema?.properties) {
@@ -217,17 +234,6 @@ const isExpandable = (item: any, path: string) => {
     return true;
   }
   return false;
-};
-
-const getChildSchema = (item: any, path: string) => {
-  const schema = getDisplaySchema(item, path);
-  if (!schema?.type || schema.type === 'object') {
-    return schema?.properties || {};
-  }
-  if (schema.type === 'array' && schema?.items?.type === 'object') {
-    return schema.items.properties || {};
-  }
-  return {};
 };
 
 const getNodePath = (key: string) => `${rootPath.value}.${key}`;
@@ -371,8 +377,12 @@ const resolvedRootSchema = computed(() => {
   return getDisplaySchema(props.data, rootPath.value);
 });
 
+const resolvedRootObjectSchema = computed(() => {
+  return getObjectContainerSchema(props.data, rootPath.value);
+});
+
 const rootChildren = computed(() => {
-  return getChildSchema(resolvedRootSchema.value, rootPath.value);
+  return resolvedRootObjectSchema.value?.properties || {};
 });
 
 const showRootArrayPill = computed(() => {
@@ -497,7 +507,7 @@ const showSchemaStack = computed(() => {
                 class="schema-item__name"
                 :class="{
                   'schema-item__name--required': isRequired(
-                    resolvedRootSchema,
+                    resolvedRootObjectSchema,
                     String(key),
                     value,
                   ),
@@ -505,7 +515,9 @@ const showSchemaStack = computed(() => {
               >
                 {{ key }}
                 <sup
-                  v-if="isRequired(resolvedRootSchema, String(key), value)"
+                  v-if="
+                    isRequired(resolvedRootObjectSchema, String(key), value)
+                  "
                   class="schema-item__required-star"
                 >
                   *
