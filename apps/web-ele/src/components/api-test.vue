@@ -47,6 +47,10 @@ import {
 import JsonViewer from '#/components/json-viewer/index.vue';
 import { getMethodStyle } from '#/constants/methods';
 import {
+  ONLINE_DEBUG_TIMEOUT_MESSAGE,
+  REQUEST_TIMEOUTS,
+} from '#/constants/request-timeout';
+import {
   useApiStore,
   useApiTestCacheStore,
   useDocManageStore,
@@ -1625,6 +1629,10 @@ async function sendRequest() {
   loading.value = true;
   responseLoading.value = true;
   const startTime = performance.now(); // 记录开始时间;
+  const abortController = new AbortController();
+  const timeoutId = window.setTimeout(() => {
+    abortController.abort();
+  }, REQUEST_TIMEOUTS.onlineDebug);
 
   try {
     // 构建请求URL，处理路径参数
@@ -1816,6 +1824,7 @@ async function sendRequest() {
     const response = await fetch(finalUrl, {
       method: props.method.toUpperCase(),
       headers: requestHeaders,
+      signal: abortController.signal,
       body:
         props.method.toLowerCase() !== 'get' &&
         ['binary', 'form-data'].includes(bodyType || '')
@@ -1856,15 +1865,20 @@ async function sendRequest() {
         : JSON.stringify(parsedResponse.data ?? '').length * 2;
     responseSize.value = formatSize(size);
   } catch (error: any) {
-    ElMessage.error(error?.msg || '请求失败');
+    const errorMessage =
+      error?.name === 'AbortError'
+        ? ONLINE_DEBUG_TIMEOUT_MESSAGE
+        : error?.msg || '请求失败';
+    ElMessage.error(errorMessage);
     responseStatus.value = {
       code: 0,
-      text: error?.msg || '请求失败',
+      text: errorMessage,
       type: 'error',
     };
     responseData.value = null;
     responseMimeType.value = '-';
   } finally {
+    window.clearTimeout(timeoutId);
     loading.value = false;
     responseLoading.value = false;
   }

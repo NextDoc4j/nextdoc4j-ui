@@ -12,6 +12,7 @@ import { defineStore } from 'pinia';
 
 import { getOpenAPI, getOpenAPIConfig } from '#/api/core/openApi';
 import { baseRequestClient } from '#/api/request';
+import { REQUEST_TIMEOUTS } from '#/constants/request-timeout';
 import { sortOpenApiSpec, sortSwaggerConfig } from '#/utils/openapi-sort';
 
 const STORAGE_KEY = 'nextdoc4j-current-service';
@@ -168,7 +169,7 @@ export const useAggregationStore = defineStore('aggregation', () => {
     try {
       const openApiResponse = await baseRequestClient.get<{
         data: OpenAPISpec;
-      }>(service.url, { timeout: 3000 });
+      }>(service.url, { timeout: REQUEST_TIMEOUTS.serviceProbe });
       const cache = getOrCreateServiceCache(service.url);
       cache.openApi = sortRequiredOpenApiSpec(
         resolveResponseData<OpenAPISpec>(openApiResponse),
