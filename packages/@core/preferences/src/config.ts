@@ -4,7 +4,6 @@ const defaultPreferences: Preferences = {
   app: {
     accessMode: 'frontend',
     authPageLayout: 'panel-right',
-    checkUpdatesInterval: 1,
     colorGrayMode: false,
     colorWeakMode: false,
     compact: false,
@@ -19,7 +18,6 @@ const defaultPreferences: Preferences = {
       'https://unpkg.com/@vbenjs/static-source@0.1.7/source/avatar-v1.webp',
     defaultHomePath: '/home',
     dynamicTitle: true,
-    enableCheckUpdates: false,
     enablePreferences: true,
     enableRefreshToken: false,
     isMobile: false,
