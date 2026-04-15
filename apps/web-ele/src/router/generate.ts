@@ -34,6 +34,22 @@ const hasGlobalSecurityConfig = (doc?: OpenAPISpec) => {
   return Object.keys(doc?.components?.securitySchemes ?? {}).length > 0;
 };
 
+const DEFAULT_WATERMARK_CONTENT = 'Nextdoc4j';
+
+const resolveWatermarkContent = (doc?: OpenAPISpec) => {
+  const brandTitle = doc?.['x-nextdoc4j']?.brand?.title?.trim?.();
+  if (brandTitle) {
+    return brandTitle;
+  }
+
+  const infoTitle = doc?.info?.title?.trim?.();
+  if (infoTitle) {
+    return infoTitle;
+  }
+
+  return DEFAULT_WATERMARK_CONTENT;
+};
+
 const createAuthorizeRoute = (): RouteRecordStringComponent<string> => ({
   meta: {
     icon: SvgMenuSafetyIcon,
@@ -235,6 +251,12 @@ export const fetchAggregationRoutesImpl: () => Promise<
       },
     });
   }
+
+  updatePreferences({
+    app: {
+      watermarkContent: resolveWatermarkContent(gatewayOpenApi),
+    },
+  });
 
   // 初始化聚合模式（获取服务列表，使用缓存）
   await aggregationStore.initAggregation();
@@ -608,6 +630,12 @@ const fetchSingleAppRoutes: (
       },
     });
   }
+
+  updatePreferences({
+    app: {
+      watermarkContent: resolveWatermarkContent(data),
+    },
+  });
 
   return new Promise((resolve) => {
     useApiStore().initConfig(allPath, data, config);
