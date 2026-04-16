@@ -185,12 +185,83 @@ const methodPillStyle = computed(() => {
 
 const normalizeParamName = (name: string) => name.trim();
 const normalizeHeaderName = (name: string) => name.trim().toLowerCase();
+const PATH_PLACEHOLDER_SEGMENT_RE = /^\{[^/{}]+\}$/;
+
+const splitRequestUrlParts = (url: string) => {
+  const [pathAndSearch, hashFragment = ''] = `${url || ''}`.split('#', 2);
+  const [pathname = '', searchQuery = ''] = pathAndSearch.split('?', 2);
+  return {
+    hash: hashFragment ? `#${hashFragment}` : '',
+    pathname,
+    search: searchQuery ? `?${searchQuery}` : '',
+  };
+};
+
+const applyPathParamsToRequestUrl = (
+  templateUrl: string,
+  params: Array<Partial<TableParamsObject>> = pathParams.value,
+) => {
+  const { pathname, search, hash } = splitRequestUrlParts(templateUrl);
+  let resolvedPathname = pathname;
+
+  params.forEach((param) => {
+    const name = normalizeParamName(param.name || '');
+    if (!name) {
+      return;
+    }
+
+    const placeholder = `{${name}}`;
+    const rawValue =
+      param.value === undefined || param.value === null ? '' : `${param.value}`;
+    const nextSegment = rawValue ? encodeURIComponent(rawValue) : placeholder;
+    resolvedPathname = resolvedPathname.replaceAll(placeholder, nextSegment);
+  });
+
+  return `${resolvedPathname}${search}${hash}`;
+};
+
+const normalizeRequestUrlTemplate = (
+  inputUrl: string,
+  currentTemplateUrl: string,
+) => {
+  const nextUrl = inputUrl || props.path;
+  const currentTemplate = currentTemplateUrl || props.path;
+  const currentParts = splitRequestUrlParts(currentTemplate);
+  const nextParts = splitRequestUrlParts(nextUrl);
+  const templateSegments = currentParts.pathname.split('/');
+  const nextSegments = nextParts.pathname.split('/');
+
+  const normalizedPathname = nextSegments
+    .map((segment, index) => {
+      const templateSegment = templateSegments[index];
+      if (
+        templateSegment &&
+        PATH_PLACEHOLDER_SEGMENT_RE.test(templateSegment)
+      ) {
+        return templateSegment;
+      }
+      return segment;
+    })
+    .join('/');
+
+  return `${normalizedPathname}${nextParts.search}${nextParts.hash}`;
+};
 
 const cacheKey = computed(() => {
   const serviceScope = aggregationStore.isAggregation
     ? aggregationStore.currentService?.url || '__aggregation__'
     : '__single__';
   return `${serviceScope}::${props.method.toUpperCase()}::${props.path}`;
+});
+
+const requestUrlDisplay = computed({
+  get: () => applyPathParamsToRequestUrl(requestUrl.value || props.path),
+  set: (value: string) => {
+    requestUrl.value = normalizeRequestUrlTemplate(
+      value,
+      requestUrl.value || props.path,
+    );
+  },
 });
 
 const cloneTableParams = (
@@ -1636,12 +1707,7 @@ async function sendRequest() {
 
   try {
     // 构建请求URL，处理路径参数
-    let url = requestUrl.value;
-    pathParams.value.forEach((param) => {
-      if (param.name && param.value) {
-        url = url.replace(`{${param.name}}`, encodeURIComponent(param.value));
-      }
-    });
+    const url = applyPathParamsToRequestUrl(requestUrl.value || props.path);
 
     // 获取聚合模式下的服务前缀
     let servicePrefix = '';
@@ -2076,7 +2142,7 @@ onBeforeUnmount(() => {
     <div class="debug-console__top">
       <div class="debug-console__request-row">
         <ElInput
-          v-model="requestUrl"
+          v-model="requestUrlDisplay"
           placeholder="请输入正确的URL"
           class="debug-request-input"
         >

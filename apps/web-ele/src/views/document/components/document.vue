@@ -2173,7 +2173,7 @@ defineExpose({
 }
 
 .schema-layout--with-actions.schema-layout--open {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.12fr) minmax(280px, 0.88fr);
   column-gap: 12px;
 }
 
