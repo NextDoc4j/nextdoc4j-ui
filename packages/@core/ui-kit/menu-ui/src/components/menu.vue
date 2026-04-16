@@ -66,6 +66,7 @@ const activePath = ref<MenuProvider['activePath']>(props.defaultActive);
 const items = ref<MenuProvider['items']>({});
 const subMenus = ref<MenuProvider['subMenus']>({});
 const mouseInChild = ref(false);
+const itemPathsKey = computed(() => Object.keys(items.value).join('|'));
 
 const isMenuPopup = computed<MenuProvider['isMenuPopup']>(() => {
   return (
@@ -96,7 +97,15 @@ watch(
   },
 );
 
-watch(items.value, initMenu);
+watch(
+  itemPathsKey,
+  () => {
+    nextTick(() => {
+      initMenu();
+    });
+  },
+  { flush: 'post' },
+);
 
 watch(
   () => props.defaultActive,
@@ -212,15 +221,24 @@ const enableScroll = computed(
   () => props.scrollToActive && props.mode === 'vertical' && !props.collapse,
 );
 
-const { scrollToActiveItem } = useMenuScroll(activePath, {
+const { scrollToActiveItem } = useMenuScroll({
   enable: enableScroll,
-  delay: 320,
+  delay: 120,
 });
 
-// 监听 activePath 变化，自动滚动到激活项
-watch(activePath, () => {
-  scrollToActiveItem();
-});
+watch(
+  activePath,
+  () => {
+    nextTick(() => {
+      initMenu();
+      scrollToActiveItem();
+    });
+  },
+  {
+    flush: 'post',
+    immediate: true,
+  },
+);
 
 // 默认展开菜单
 function initMenu() {

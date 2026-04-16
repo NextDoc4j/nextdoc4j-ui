@@ -23,6 +23,7 @@ defineOptions({
 });
 
 const props = withDefaults(defineProps<Props>(), {});
+const leafCountCache = new WeakMap<MenuRecordRaw, number>();
 const rootMenu = useMenuContext();
 const menu = computed(() => props.menu);
 
@@ -47,7 +48,13 @@ const methodStyle = computed(() => {
   return getMethodStyle(menu.value?.method, rootMenu?.theme === 'dark');
 });
 
-const countLeaves = (treeData: MenuRecordRaw) => {
+function getLeafCount(treeData: MenuRecordRaw) {
+  const cachedLeafCount = leafCountCache.get(treeData);
+
+  if (typeof cachedLeafCount === 'number') {
+    return cachedLeafCount;
+  }
+
   let count = 0;
 
   function traverse(node: MenuRecordRaw) {
@@ -59,15 +66,21 @@ const countLeaves = (treeData: MenuRecordRaw) => {
     // 递归遍历子节点
     node.children.forEach((child) => traverse(child));
   }
-  // 处理可能是数组形式的树结构
-  if (Array.isArray(treeData)) {
-    treeData.forEach((root) => traverse(root));
-  } else {
-    traverse(treeData);
-  }
+
+  traverse(treeData);
+
+  leafCountCache.set(treeData, count);
 
   return count;
-};
+}
+
+const leafCount = computed(() => {
+  if (!hasChildren.value || !menu.value.parents?.includes('/document')) {
+    return 0;
+  }
+
+  return getLeafCount(menu.value);
+});
 </script>
 
 <template>
@@ -126,7 +139,7 @@ const countLeaves = (treeData: MenuRecordRaw) => {
         class="bg-primary/10 text-primary border-primary/30 ml-6 inline-block rounded-xl border px-2 text-xs"
         v-if="menu.parents?.includes('/document')"
       >
-        {{ menu.children ? countLeaves(menu) : '' }}
+        {{ leafCount }}
       </span>
     </template>
     <template v-for="childItem in menu.children || []" :key="childItem.path">

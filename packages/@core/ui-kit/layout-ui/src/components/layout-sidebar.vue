@@ -257,7 +257,7 @@ function handleMouseleave() {
     v-if="domVisible"
     :class="theme"
     :style="hiddenSideStyle"
-    class="h-full transition-all duration-150"
+    class="duration-180 h-full transition-[flex-basis,margin-left,max-width,min-width,width] ease-[cubic-bezier(0.22,1,0.36,1)]"
   ></div>
   <aside
     :class="[
@@ -268,7 +268,7 @@ function handleMouseleave() {
       },
     ]"
     :style="style"
-    class="fixed left-0 top-0 h-full transition-all duration-150"
+    class="duration-180 fixed left-0 top-0 h-full transition-[flex-basis,margin-left,max-width,min-width,width] ease-[cubic-bezier(0.22,1,0.36,1)]"
     @mouseenter="handleMouseenter"
     @mouseleave="handleMouseleave"
   >
@@ -297,7 +297,7 @@ function handleMouseleave() {
         'border-l': extraVisible,
       }"
       :style="extraStyle"
-      class="border-border bg-sidebar fixed top-0 h-full overflow-hidden border-r transition-all duration-200"
+      class="border-border bg-sidebar fixed top-0 h-full overflow-hidden border-r transition-[left,width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]"
     >
       <SidebarCollapseButton
         v-if="isSidebarMixed && expandOnHover"
