@@ -1,11 +1,27 @@
 <script setup lang="ts">
+import type { Component } from 'vue';
+
 import type { ServiceItem } from '#/store/aggregation';
 import type { OpenAPISpec, SwaggerConfig } from '#/typings/openApi';
 
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  ref,
+  shallowRef,
+  watch,
+} from 'vue';
 
-import { SvgDoubleArrowDownIcon, SvgDoubleArrowUpIcon } from '@vben/icons';
-import { preferences } from '@vben/preferences';
+import {
+  SvgDocExportHtmlIcon,
+  SvgDocExportMarkdownIcon,
+  SvgDocExportOpenapiIcon,
+  SvgDocExportPdfIcon,
+  SvgDocExportWordIcon,
+  SvgDoubleArrowDownIcon,
+  SvgDoubleArrowUpIcon,
+} from '@vben/icons';
 
 import {
   Document as DocxDocument,
@@ -25,9 +41,7 @@ import {
   ElCheckbox,
   ElCheckboxGroup,
   ElCol,
-  ElDropdown,
-  ElDropdownItem,
-  ElDropdownMenu,
+  ElDialog,
   ElEmpty,
   ElForm,
   ElFormItem,
@@ -39,13 +53,18 @@ import {
   ElRow,
   ElSelect,
   ElSkeleton,
-  ElSpace,
 } from 'element-plus';
 import MarkdownIt from 'markdown-it';
 import { storeToRefs } from 'pinia';
 
 import { useApiStore } from '#/store';
 import { useAggregationStore } from '#/store/aggregation';
+import {
+  compareNamedUrlLike,
+  compareOperationLike,
+  compareTagLike,
+  compareTagNames,
+} from '#/utils/openapi-sort';
 
 defineOptions({ name: 'DocManageExport' });
 
@@ -55,6 +74,8 @@ type ScopeMode = 'all' | 'custom';
 interface GroupDocItem {
   code: string;
   name: string;
+  'x-order'?: number | string;
+  controllerName?: string;
   openApi?: OpenAPISpec;
   url?: string;
 }
@@ -63,12 +84,16 @@ interface OperationItem {
   description?: string;
   groupCode: string;
   groupName?: string;
+  groupSourceName?: string;
+  groupOrder?: number | string;
   key: string;
   method: string;
   operationId?: string;
   path: string;
   raw: any;
+  searchText: string;
   serviceName?: string;
+  serviceOrder?: number | string;
   serviceUrl?: string;
   summary?: string;
   tags?: string[];
@@ -91,6 +116,7 @@ interface AggregationServiceTreeNode {
   allOperations: OperationItem[];
   groups: AggregationGroupTreeNode[];
   hasGroupLevel: boolean;
+  key: string;
   operations: OperationItem[];
   serviceName: string;
   serviceUrl: string;
@@ -102,7 +128,22 @@ interface ServiceExportDocItem {
   service: ServiceItem;
 }
 
+interface ExportFormatOption {
+  description: string;
+  format: ExportFormat;
+  icon: Component;
+  title: string;
+}
+
 const HTTP_METHODS = new Set(['delete', 'get', 'patch', 'post', 'put']);
+const PREVIEW_AUTO_DELAY = 120;
+const PREVIEW_AUTO_DELAY_LARGE = 260;
+const PREVIEW_LARGE_DATA_THRESHOLD = 200;
+const PREVIEW_RENDER_YIELD_THRESHOLD = 120;
+const PREVIEW_VIRTUAL_BLOCK_CHUNK_SIZE = 24;
+const PREVIEW_VIRTUAL_BLOCK_MIN_COUNT = 24;
+const PREVIEW_CHUNK_PREFETCH_COUNT = 1;
+const PREVIEW_CHUNK_ROOT_MARGIN = '1100px 0px';
 const md = new MarkdownIt({
   html: true,
   linkify: true,
@@ -116,10 +157,11 @@ const { isAggregation, services } = storeToRefs(aggregationStore);
 
 const loading = ref(false);
 const previewLoading = ref(false);
-const themeSwitching = ref(false);
+const exportDialogVisible = ref(false);
+const exportSubmitting = ref(false);
 
 const scopeMode = ref<ScopeMode>('all');
-const selectedOperations = ref<string[]>([]);
+const selectedOperations = shallowRef<string[]>([]);
 const operationKeyword = ref('');
 const operationMethod = ref('all');
 const expandedGroups = ref<Record<string, boolean>>({});
@@ -134,32 +176,33 @@ const includeMarkdownDocs = computed(() =>
 
 const exportFormat = ref<ExportFormat>('docx');
 const previewHtml = ref('');
+const previewChunks = shallowRef<string[]>([]);
+const previewChunkPlaceholderHeights = shallowRef<number[]>([]);
+const previewLoadedChunkIndexes = shallowRef<Set<number>>(new Set());
+const previewVisibleChunkIndexes = shallowRef<Set<number>>(new Set());
+const previewScrollRef = ref<HTMLElement | null>(null);
+const previewChunkElements = shallowRef<(HTMLElement | null)[]>([]);
 
-const currentOpenApi = ref<null | OpenAPISpec>(null);
-const currentSwaggerConfig = ref<null | SwaggerConfig>(null);
-const groupDocs = ref<GroupDocItem[]>([]);
-const operations = ref<OperationItem[]>([]);
-const aggregationGatewayOpenApi = ref<null | OpenAPISpec>(null);
-const aggregationServiceDocs = ref<ServiceExportDocItem[]>([]);
+const currentOpenApi = shallowRef<null | OpenAPISpec>(null);
+const currentSwaggerConfig = shallowRef<null | SwaggerConfig>(null);
+const groupDocs = shallowRef<GroupDocItem[]>([]);
+const operations = shallowRef<OperationItem[]>([]);
+const aggregationGatewayOpenApi = shallowRef<null | OpenAPISpec>(null);
+const aggregationServiceDocs = shallowRef<ServiceExportDocItem[]>([]);
 let previewAutoTimer: null | number = null;
-let themeSwitchTimer: null | number = null;
+let previewGenerationToken = 0;
+let previewChunkObserver: IntersectionObserver | null = null;
+let previewChunkMeasureFrame: null | number = null;
 
 const filteredOperations = computed(() => {
   const keyword = operationKeyword.value.trim().toLowerCase();
+  const method = operationMethod.value;
+  if (!keyword && method === 'all') {
+    return operations.value;
+  }
   return operations.value.filter((item) => {
-    const passMethod =
-      operationMethod.value === 'all' || item.method === operationMethod.value;
-    const passKeyword =
-      !keyword ||
-      (item.serviceName || '').toLowerCase().includes(keyword) ||
-      getGroupTitle(item.groupCode, item.serviceUrl)
-        .toLowerCase()
-        .includes(keyword) ||
-      item.path.toLowerCase().includes(keyword) ||
-      (item.summary || '').toLowerCase().includes(keyword) ||
-      (item.description || '').toLowerCase().includes(keyword) ||
-      (item.operationId || '').toLowerCase().includes(keyword) ||
-      (item.tags || []).join(' ').toLowerCase().includes(keyword);
+    const passMethod = method === 'all' || item.method === method;
+    const passKeyword = !keyword || item.searchText.includes(keyword);
     return passMethod && passKeyword;
   });
 });
@@ -173,15 +216,28 @@ const groupedFilteredOperations = computed<GroupedOperationItem[]>(() => {
     if (!map.has(item.groupCode)) {
       map.set(item.groupCode, {
         code: item.groupCode,
-        name: getGroupTitle(item.groupCode),
+        name: item.groupName || getGroupTitle(item.groupCode),
         operations: [],
       });
     }
     map.get(item.groupCode)!.operations.push(item);
   });
 
-  return [...map.values()].sort((a, b) =>
-    a.name.localeCompare(b.name, 'zh-CN'),
+  return [...map.values()].sort((left, right) =>
+    compareGroupDocs(
+      {
+        code: left.code,
+        name: left.name,
+        'x-order': left.operations[0]?.groupOrder,
+        controllerName: left.operations[0]?.groupSourceName,
+      },
+      {
+        code: right.code,
+        name: right.name,
+        'x-order': right.operations[0]?.groupOrder,
+        controllerName: right.operations[0]?.groupSourceName,
+      },
+    ),
   );
 });
 
@@ -216,7 +272,7 @@ const aggregationServiceTree = computed<AggregationServiceTreeNode[]>(() => {
       target.groupMap.set(groupCode, {
         code: groupCode,
         key: getGroupNodeKey(serviceUrl, groupCode),
-        name: getGroupTitle(groupCode, serviceUrl),
+        name: item.groupName || getGroupTitle(groupCode, serviceUrl),
         operations: [],
       });
     }
@@ -225,22 +281,35 @@ const aggregationServiceTree = computed<AggregationServiceTreeNode[]>(() => {
 
   return [...serviceMap.values()]
     .map((serviceNode) => {
-      const groups = [...serviceNode.groupMap.values()].sort((a, b) =>
-        a.name.localeCompare(b.name, 'zh-CN'),
+      const groups = [...serviceNode.groupMap.values()].sort((left, right) =>
+        compareGroupDocs(
+          {
+            code: left.code,
+            name: left.name,
+            'x-order': left.operations[0]?.groupOrder,
+            controllerName: left.operations[0]?.groupSourceName,
+            url: serviceNode.serviceUrl,
+          },
+          {
+            code: right.code,
+            name: right.name,
+            'x-order': right.operations[0]?.groupOrder,
+            controllerName: right.operations[0]?.groupSourceName,
+            url: serviceNode.serviceUrl,
+          },
+        ),
       );
       const nonAllGroups = groups.filter((group) => group.code !== 'all');
       const hasGroupLevel = nonAllGroups.length > 0;
       const directOperations = hasGroupLevel
         ? []
-        : (serviceNode.groupMap.get('all')?.operations || []).sort((a, b) =>
-            `${a.path}::${a.method}`.localeCompare(`${b.path}::${b.method}`),
+        : [...(serviceNode.groupMap.get('all')?.operations || [])].sort(
+            compareOperationItems,
           );
       const allOperations = hasGroupLevel
         ? nonAllGroups
             .flatMap((group) => group.operations)
-            .sort((a, b) =>
-              `${a.path}::${a.method}`.localeCompare(`${b.path}::${b.method}`),
-            )
+            .sort(compareOperationItems)
         : directOperations;
 
       return {
@@ -249,10 +318,24 @@ const aggregationServiceTree = computed<AggregationServiceTreeNode[]>(() => {
         serviceName: serviceNode.serviceName,
         hasGroupLevel,
         groups: hasGroupLevel ? nonAllGroups : [],
+        key: getServiceNodeKey(serviceNode.serviceUrl),
         operations: directOperations,
       };
     })
-    .sort((a, b) => a.serviceName.localeCompare(b.serviceName, 'zh-CN'));
+    .sort((left, right) =>
+      compareNamedUrlLike(
+        {
+          name: left.serviceName,
+          url: left.serviceUrl,
+          'x-order': left.allOperations[0]?.serviceOrder,
+        },
+        {
+          name: right.serviceName,
+          url: right.serviceUrl,
+          'x-order': right.allOperations[0]?.serviceOrder,
+        },
+      ),
+    );
 });
 
 const selectedOperationItems = computed(() => {
@@ -261,6 +344,45 @@ const selectedOperationItems = computed(() => {
 });
 
 const selectedOperationSet = computed(() => new Set(selectedOperations.value));
+const selectedCountByNodeKey = computed(() => {
+  const counts = new Map<string, number>();
+  const selected = selectedOperationSet.value;
+  if (selected.size <= 0) {
+    return counts;
+  }
+
+  filteredOperations.value.forEach((item) => {
+    if (!selected.has(item.key)) {
+      return;
+    }
+
+    if (isAggregation.value) {
+      const serviceKey = getServiceNodeKey(
+        item.serviceUrl || '__aggregation__',
+      );
+      counts.set(serviceKey, (counts.get(serviceKey) || 0) + 1);
+
+      const groupKey = getGroupNodeKey(
+        item.serviceUrl || '__aggregation__',
+        item.groupCode || 'all',
+      );
+      counts.set(groupKey, (counts.get(groupKey) || 0) + 1);
+      return;
+    }
+
+    const groupKey = item.groupCode || 'all';
+    counts.set(groupKey, (counts.get(groupKey) || 0) + 1);
+  });
+
+  return counts;
+});
+const previewNoticeText = computed(() => '');
+const activeExportOption = computed<ExportFormatOption>(() => {
+  return (
+    exportFormatOptions.find((item) => item.format === exportFormat.value) ||
+    exportFormatOptions[0]!
+  );
+});
 
 const summaryText = computed(() => {
   const base = currentOpenApi.value;
@@ -268,7 +390,9 @@ const summaryText = computed(() => {
 
   const totalOps = operations.value.length;
   const totalGroups = isAggregation.value
-    ? aggregationServiceTree.value.length
+    ? new Set(
+        operations.value.map((item) => item.serviceUrl || '__aggregation__'),
+      ).size
     : new Set(operations.value.map((item) => item.groupCode)).size;
   if (scopeMode.value === 'all') {
     return isAggregation.value
@@ -280,7 +404,9 @@ const summaryText = computed(() => {
     : `当前已选择接口 ${selectedOperationItems.value.length} 个（可按分组勾选部分接口）`;
 });
 
-const isPreviewEmpty = computed(() => !previewHtml.value);
+const isPreviewEmpty = computed(
+  () => !previewHtml.value && previewChunks.value.length <= 0,
+);
 const exportFormatTextMap: Record<ExportFormat, string> = {
   docx: 'Word(.docx)',
   pdf: 'PDF',
@@ -288,6 +414,38 @@ const exportFormatTextMap: Record<ExportFormat, string> = {
   html: 'HTML',
   'openapi.json': 'OpenAPI JSON',
 };
+const exportFormatOptions: ExportFormatOption[] = [
+  {
+    format: 'docx',
+    title: 'Word 文档',
+    description: '适合发送、归档和继续编辑，保留清晰的章节结构。',
+    icon: SvgDocExportWordIcon,
+  },
+  {
+    format: 'pdf',
+    title: 'PDF',
+    description: '适合打印和正式交付，导出后可直接另存为 PDF。',
+    icon: SvgDocExportPdfIcon,
+  },
+  {
+    format: 'markdown',
+    title: 'Markdown',
+    description: '适合纳入代码仓库、继续改写或二次加工。',
+    icon: SvgDocExportMarkdownIcon,
+  },
+  {
+    format: 'html',
+    title: 'HTML',
+    description: '适合浏览器查看与网页分发，结构完整、打开直接可读。',
+    icon: SvgDocExportHtmlIcon,
+  },
+  {
+    format: 'openapi.json',
+    title: 'OpenAPI JSON',
+    description: '适合导入其他工具链，继续测试、生成 SDK 或同步文档。',
+    icon: SvgDocExportOpenapiIcon,
+  },
+];
 
 function parseGroupCode(url: string) {
   const segments = url.split('/');
@@ -302,6 +460,117 @@ function getOperationKey(
   operationId?: string,
 ) {
   return `${serviceUrl}::${groupCode}::${method}::${path}::${operationId || ''}`;
+}
+
+function buildOperationSearchText(item: {
+  description?: string;
+  groupName?: string;
+  operationId?: string;
+  path: string;
+  serviceName?: string;
+  summary?: string;
+  tags?: string[];
+}) {
+  return [
+    item.serviceName,
+    item.groupName,
+    item.path,
+    item.summary,
+    item.description,
+    item.operationId,
+    (item.tags || []).join(' '),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+}
+
+function resolveGroupTagMeta(
+  doc?: null | OpenAPISpec,
+  preferredName?: string,
+): GroupDocItem | null {
+  if (!doc?.tags || doc.tags.length <= 0) {
+    return null;
+  }
+
+  const target =
+    doc.tags.find((item) => item.name === preferredName) || doc.tags[0];
+
+  if (!target) {
+    return null;
+  }
+
+  return {
+    code: target.name || preferredName || 'default',
+    name: target.name || preferredName || 'default',
+    'x-order': target['x-order'],
+    controllerName:
+      target['x-controller-name'] ||
+      target['x-controller'] ||
+      target.controllerName ||
+      target.className ||
+      target['x-class-name'] ||
+      target.sourceName ||
+      target['x-origin-name'],
+  };
+}
+
+function compareGroupDocs(
+  left?: GroupDocItem | null,
+  right?: GroupDocItem | null,
+) {
+  const tagCompare = compareTagLike(left, right);
+  if (tagCompare !== 0) {
+    return tagCompare;
+  }
+  return compareNamedUrlLike(left, right);
+}
+
+function compareOperationItems(left: OperationItem, right: OperationItem) {
+  const serviceCompare = compareNamedUrlLike(
+    {
+      name: left.serviceName,
+      url: left.serviceUrl,
+      'x-order': left.serviceOrder,
+    },
+    {
+      name: right.serviceName,
+      url: right.serviceUrl,
+      'x-order': right.serviceOrder,
+    },
+  );
+  if (serviceCompare !== 0) {
+    return serviceCompare;
+  }
+
+  const groupCompare = compareGroupDocs(
+    {
+      code: left.groupCode,
+      name: left.groupName || left.groupCode,
+      'x-order': left.groupOrder,
+      controllerName: left.groupSourceName,
+      url: left.serviceUrl,
+    },
+    {
+      code: right.groupCode,
+      name: right.groupName || right.groupCode,
+      'x-order': right.groupOrder,
+      controllerName: right.groupSourceName,
+      url: right.serviceUrl,
+    },
+  );
+  if (groupCompare !== 0) {
+    return groupCompare;
+  }
+
+  const leftPrimaryTag = `${left.tags?.find((item) => `${item || ''}`.trim()) || ''}`;
+  const rightPrimaryTag = `${right.tags?.find((item) => `${item || ''}`.trim()) || ''}`;
+  const tagCompare = compareTagNames(leftPrimaryTag, rightPrimaryTag);
+  if (tagCompare !== 0) {
+    return tagCompare;
+  }
+
+  return compareOperationLike(left, right);
 }
 
 function getServiceNodeKey(serviceUrl: string) {
@@ -404,7 +673,10 @@ function collectOperationsFromPaths(
     | {
         groupCode: string;
         groupName?: string;
+        groupOrder?: number | string;
+        groupSourceName?: string;
         serviceName?: string;
+        serviceOrder?: number | string;
         serviceUrl?: string;
       },
 ): OperationItem[] {
@@ -412,8 +684,11 @@ function collectOperationsFromPaths(
     typeof options === 'string' ? { groupCode: options } : options;
   const serviceUrl = normalizedOptions.serviceUrl || '__single__';
   const serviceName = normalizedOptions.serviceName || '当前文档';
+  const serviceOrder = normalizedOptions.serviceOrder;
   const groupCode = normalizedOptions.groupCode;
   const groupName = normalizedOptions.groupName || groupCode;
+  const groupOrder = normalizedOptions.groupOrder;
+  const groupSourceName = normalizedOptions.groupSourceName;
   const result: OperationItem[] = [];
 
   Object.entries(paths || {}).forEach(([path, methodConfig]) => {
@@ -433,20 +708,32 @@ function collectOperationsFromPaths(
         ),
         groupCode,
         groupName,
+        groupOrder,
+        groupSourceName,
         method: methodName,
         path,
         serviceName,
+        serviceOrder,
         serviceUrl,
         summary: raw?.summary,
         description: raw?.description,
         operationId: raw?.operationId,
+        searchText: buildOperationSearchText({
+          groupName,
+          path,
+          serviceName,
+          summary: raw?.summary,
+          description: raw?.description,
+          operationId: raw?.operationId,
+          tags: raw?.tags ?? [],
+        }),
         tags: raw?.tags ?? [],
         raw,
       });
     });
   });
 
-  return result;
+  return result.sort((left, right) => compareOperationItems(left, right));
 }
 
 function mergeComponents(docs: OpenAPISpec[]) {
@@ -742,6 +1029,21 @@ function parseSchemaRef(ref?: string) {
   return ref.replace('#/components/schemas/', '');
 }
 
+const SCHEMA_REF_MARKER = '__docExportSchemaRefName';
+
+function appendSchemaSeen(schema: any, seen: Set<string>) {
+  const refName =
+    schema?.[SCHEMA_REF_MARKER] ||
+    (schema?.$ref ? parseSchemaRef(schema.$ref) : '');
+  if (!refName || seen.has(refName)) {
+    return seen;
+  }
+
+  const nextSeen = new Set(seen);
+  nextSeen.add(refName);
+  return nextSeen;
+}
+
 function resolveSchemaRef(
   schema: any,
   doc: OpenAPISpec,
@@ -753,6 +1055,7 @@ function resolveSchemaRef(
   const refName = parseSchemaRef(schema.$ref);
   if (!refName || seen.has(refName)) {
     return {
+      [SCHEMA_REF_MARKER]: refName,
       description: schema.description || '',
       title: refName || schema.$ref,
       type: 'object',
@@ -762,6 +1065,7 @@ function resolveSchemaRef(
   const source = doc.components?.schemas?.[refName];
   if (!source) {
     return {
+      [SCHEMA_REF_MARKER]: refName,
       description: schema.description || '',
       title: refName,
       type: 'object',
@@ -772,7 +1076,9 @@ function resolveSchemaRef(
   nextSeen.add(refName);
   const resolved = resolveSchemaRef(source, doc, nextSeen);
   return {
+    ...schema,
     ...resolved,
+    [SCHEMA_REF_MARKER]: refName,
     description: schema.description || resolved?.description || '',
     title: resolved?.title || refName,
   };
@@ -802,15 +1108,20 @@ function normalizeSchema(
   seen = new Set<string>(),
 ): any {
   if (!schema) return null;
+  const nextSeen = appendSchemaSeen(schema, seen);
   const resolvedRef = resolveSchemaRef(schema, doc, seen);
   if (!resolvedRef) return null;
 
   if (resolvedRef.allOf?.length) {
-    return mergeAllOf(resolvedRef, doc, seen);
+    return mergeAllOf(resolvedRef, doc, nextSeen);
   }
 
   if (resolvedRef.oneOf?.length) {
-    return normalizeSchema(resolvedRef.oneOf[0], doc, seen);
+    return normalizeSchema(resolvedRef.oneOf[0], doc, nextSeen);
+  }
+
+  if (resolvedRef.anyOf?.length) {
+    return normalizeSchema(resolvedRef.anyOf[0], doc, nextSeen);
   }
 
   return resolvedRef;
@@ -848,14 +1159,16 @@ function collectSchemaFields(
   schema: any,
   doc: OpenAPISpec,
   parentPath = '',
+  seen = new Set<string>(),
 ): SchemaFieldRow[] {
-  const normalized = normalizeSchema(schema, doc);
+  const normalized = normalizeSchema(schema, doc, seen);
   if (!normalized) return [];
 
+  const nextSeen = appendSchemaSeen(schema, seen);
   const rows: SchemaFieldRow[] = [];
 
   if (normalized.type === 'array') {
-    const itemSchema = normalizeSchema(normalized.items, doc);
+    const itemSchema = normalizeSchema(normalized.items, doc, nextSeen);
     const arrayPath = parentPath ? `${parentPath}[]` : '[]';
     rows.push({
       name: arrayPath,
@@ -869,7 +1182,14 @@ function collectSchemaFields(
     });
 
     if (itemSchema?.type === 'object' || itemSchema?.properties) {
-      rows.push(...collectSchemaFields(itemSchema, doc, arrayPath));
+      rows.push(
+        ...collectSchemaFields(
+          normalized.items || itemSchema,
+          doc,
+          arrayPath,
+          nextSeen,
+        ),
+      );
     }
     return rows;
   }
@@ -877,7 +1197,7 @@ function collectSchemaFields(
   if (normalized.type === 'object' || normalized.properties) {
     const requiredSet = new Set<string>(normalized.required || []);
     Object.entries(normalized.properties || {}).forEach(([key, raw]) => {
-      const field = normalizeSchema(raw, doc);
+      const field = normalizeSchema(raw, doc, nextSeen);
       const path = parentPath ? `${parentPath}.${key}` : key;
       rows.push({
         name: path,
@@ -888,9 +1208,9 @@ function collectSchemaFields(
       });
 
       if (field?.type === 'object' || field?.properties) {
-        rows.push(...collectSchemaFields(field, doc, path));
+        rows.push(...collectSchemaFields(raw || field, doc, path, nextSeen));
       } else if (field?.type === 'array') {
-        rows.push(...collectSchemaFields(field, doc, path));
+        rows.push(...collectSchemaFields(raw || field, doc, path, nextSeen));
       }
     });
     return rows;
@@ -915,6 +1235,7 @@ function extractSchemaVariants(
   doc: OpenAPISpec,
   seen = new Set<string>(),
 ): any[] {
+  const nextSeen = appendSchemaSeen(schema, seen);
   const resolved = resolveSchemaRef(schema, doc, seen);
   if (!resolved) {
     return [];
@@ -922,13 +1243,13 @@ function extractSchemaVariants(
 
   if (resolved.oneOf?.length) {
     return resolved.oneOf.flatMap((item: any) =>
-      extractSchemaVariants(item, doc, new Set(seen)),
+      extractSchemaVariants(item, doc, new Set(nextSeen)),
     );
   }
 
   if (resolved.anyOf?.length) {
     return resolved.anyOf.flatMap((item: any) =>
-      extractSchemaVariants(item, doc, new Set(seen)),
+      extractSchemaVariants(item, doc, new Set(nextSeen)),
     );
   }
 
@@ -980,22 +1301,30 @@ function toDisplayFieldName(path: string) {
 
 function loadGroupDocsForSingleFromCache(config: SwaggerConfig) {
   const groupedApiData = apiStore.apiData || {};
-  const groupCodes = Object.keys(groupedApiData).filter(
-    (code) => code !== 'all',
-  );
-  const nameMap = new Map(
-    (config.urls || []).map((item) => [
-      parseGroupCode(item.url),
-      item.name?.trim(),
-    ]),
+  const groupCodeSet = new Set(
+    Object.keys(groupedApiData).filter((code) => code !== 'all'),
   );
 
-  groupDocs.value = groupCodes.map((code) => ({
-    code,
-    name: nameMap.get(code) || code,
-    url: (config.urls || []).find((item) => parseGroupCode(item.url) === code)
-      ?.url,
-  }));
+  groupDocs.value = (config.urls || [])
+    .filter((item) => {
+      const code = parseGroupCode(item.url);
+      return code !== 'all' && groupCodeSet.has(code);
+    })
+    .map((item) => {
+      const code = parseGroupCode(item.url);
+      const tagMeta = resolveGroupTagMeta(
+        currentOpenApi.value,
+        item.name?.trim(),
+      );
+      return {
+        code,
+        name: item.name?.trim() || code,
+        'x-order': tagMeta?.['x-order'] ?? item['x-order'],
+        controllerName: tagMeta?.controllerName,
+        url: item.url,
+      };
+    })
+    .sort(compareGroupDocs);
 }
 
 async function loadGroupDocsForService(
@@ -1012,15 +1341,18 @@ async function loadGroupDocsForService(
 
     const fullUrl = `${servicePrefix}${item.url}`;
     const openApi = await aggregationStore.getServiceGroupDoc(service, fullUrl);
+    const tagMeta = resolveGroupTagMeta(openApi, item.name?.trim());
     docs.push({
       code,
       name: item.name?.trim() || code,
+      'x-order': tagMeta?.['x-order'] ?? item['x-order'],
+      controllerName: tagMeta?.controllerName,
       openApi,
       url: fullUrl,
     });
   }
 
-  return docs;
+  return docs.sort(compareGroupDocs);
 }
 
 function rebuildOperations(useCachedGrouping = false) {
@@ -1034,6 +1366,9 @@ function rebuildOperations(useCachedGrouping = false) {
           collectOperationsFromPaths(group.openApi?.paths || {}, {
             groupCode: group.code,
             groupName: group.name,
+            groupOrder: group['x-order'],
+            groupSourceName: group.controllerName,
+            serviceOrder: serviceDoc.service['x-order'],
             serviceUrl: serviceDoc.service.url,
             serviceName: serviceDoc.service.name,
           }).forEach((item) => {
@@ -1046,6 +1381,7 @@ function rebuildOperations(useCachedGrouping = false) {
       collectOperationsFromPaths(serviceDoc.openApi?.paths || {}, {
         groupCode: 'all',
         groupName: '所有接口',
+        serviceOrder: serviceDoc.service['x-order'],
         serviceUrl: serviceDoc.service.url,
         serviceName: serviceDoc.service.name,
       }).forEach((item) => {
@@ -1053,12 +1389,7 @@ function rebuildOperations(useCachedGrouping = false) {
       });
     });
 
-    operations.value = [...map.values()].sort((a, b) => {
-      return `${a.serviceName || ''}::${a.groupName || ''}::${a.path}::${a.method}`.localeCompare(
-        `${b.serviceName || ''}::${b.groupName || ''}::${b.path}::${b.method}`,
-        'zh-CN',
-      );
-    });
+    operations.value = [...map.values()].sort(compareOperationItems);
 
     selectedOperations.value = [];
     expandedGroups.value = {};
@@ -1092,13 +1423,29 @@ function rebuildOperations(useCachedGrouping = false) {
               ),
               groupCode,
               groupName: getGroupTitle(groupCode),
+              groupOrder: groupDocs.value.find(
+                (item) => item.code === groupCode,
+              )?.['x-order'],
+              groupSourceName: groupDocs.value.find(
+                (item) => item.code === groupCode,
+              )?.controllerName,
               method: methodName,
               path: api.path,
               serviceName: currentOpenApi.value?.info?.title || '当前文档',
+              serviceOrder: undefined,
               serviceUrl: '__single__',
               summary: source?.summary,
               description: source?.description,
               operationId: source?.operationId,
+              searchText: buildOperationSearchText({
+                groupName: getGroupTitle(groupCode),
+                path: api.path,
+                serviceName: currentOpenApi.value?.info?.title || '当前文档',
+                summary: source?.summary,
+                description: source?.description,
+                operationId: source?.operationId,
+                tags: source?.tags ?? api?.tags ?? [],
+              }),
               tags: source?.tags ?? api?.tags ?? [],
               raw: source,
             },
@@ -1112,6 +1459,7 @@ function rebuildOperations(useCachedGrouping = false) {
     collectOperationsFromPaths(currentOpenApi.value?.paths || {}, {
       groupCode: 'all',
       groupName: '所有接口',
+      serviceOrder: undefined,
       serviceUrl: '__single__',
       serviceName: currentOpenApi.value?.info?.title || '当前文档',
     }).forEach((item) => {
@@ -1123,6 +1471,9 @@ function rebuildOperations(useCachedGrouping = false) {
     collectOperationsFromPaths(group.openApi?.paths || {}, {
       groupCode: group.code,
       groupName: group.name,
+      groupOrder: group['x-order'],
+      groupSourceName: group.controllerName,
+      serviceOrder: undefined,
       serviceUrl: '__single__',
       serviceName: currentOpenApi.value?.info?.title || '当前文档',
     }).forEach((item) => {
@@ -1130,12 +1481,7 @@ function rebuildOperations(useCachedGrouping = false) {
     });
   });
 
-  operations.value = [...map.values()].sort((a, b) => {
-    return `${a.groupCode}${a.path}${a.method}`.localeCompare(
-      `${b.groupCode}${b.path}${b.method}`,
-      'zh-CN',
-    );
-  });
+  operations.value = [...map.values()].sort(compareOperationItems);
 
   selectedOperations.value = [];
   expandedGroups.value = {};
@@ -1143,6 +1489,7 @@ function rebuildOperations(useCachedGrouping = false) {
 
 async function loadDocContext() {
   loading.value = true;
+  previewGenerationToken += 1;
   resetPreviewState();
   try {
     aggregationServiceDocs.value = [];
@@ -1552,13 +1899,34 @@ function getCheckedCountInGroup(items: OperationItem[]) {
   return items.filter((item) => selected.has(item.key)).length;
 }
 
-function isGroupChecked(items: OperationItem[]) {
-  return items.length > 0 && getCheckedCountInGroup(items) === items.length;
+function getCheckedCountInGroupByNode(nodeKey: string, items: OperationItem[]) {
+  return (
+    selectedCountByNodeKey.value.get(nodeKey) ?? getCheckedCountInGroup(items)
+  );
 }
 
-function isGroupIndeterminate(items: OperationItem[]) {
-  const checkedCount = getCheckedCountInGroup(items);
+function isGroupChecked(items: OperationItem[], nodeKey?: string) {
+  const checkedCount = nodeKey
+    ? getCheckedCountInGroupByNode(nodeKey, items)
+    : getCheckedCountInGroup(items);
+  return items.length > 0 && checkedCount === items.length;
+}
+
+function isGroupIndeterminate(items: OperationItem[], nodeKey?: string) {
+  const checkedCount = nodeKey
+    ? getCheckedCountInGroupByNode(nodeKey, items)
+    : getCheckedCountInGroup(items);
   return checkedCount > 0 && checkedCount < items.length;
+}
+
+function getPreviewOperations(selectedOps: OperationItem[]) {
+  return selectedOps;
+}
+
+function waitForNextFrame() {
+  return new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => resolve());
+  });
 }
 
 function toggleGroupSelection(items: OperationItem[], checked: boolean) {
@@ -1611,13 +1979,35 @@ function buildMarkdownDocument(doc: OpenAPISpec, selectedOps: OperationItem[]) {
           serviceName: info?.title || '当前文档',
           serviceUrl: '__single__',
         })
-  ).sort((a, b) => {
-    const aTag = `${a.tags?.[0] || '默认标签'}`;
-    const bTag = `${b.tags?.[0] || '默认标签'}`;
-    return `${a.serviceName || ''}::${a.groupCode}::${aTag}::${a.path}::${a.method}`.localeCompare(
-      `${b.serviceName || ''}::${b.groupCode}::${bTag}::${b.path}::${b.method}`,
-      'zh-CN',
+  ).sort((left, right) => {
+    const groupCompare = compareGroupDocs(
+      {
+        code: left.groupCode,
+        name: getGroupTitle(left.groupCode, left.serviceUrl),
+        'x-order': left.groupOrder,
+        controllerName: left.groupSourceName,
+        url: left.serviceUrl,
+      },
+      {
+        code: right.groupCode,
+        name: getGroupTitle(right.groupCode, right.serviceUrl),
+        'x-order': right.groupOrder,
+        controllerName: right.groupSourceName,
+        url: right.serviceUrl,
+      },
     );
+    if (groupCompare !== 0) {
+      return groupCompare;
+    }
+
+    const leftTag = `${left.tags?.find((item) => `${item || ''}`.trim()) || '默认标签'}`;
+    const rightTag = `${right.tags?.find((item) => `${item || ''}`.trim()) || '默认标签'}`;
+    const tagCompare = compareTagNames(leftTag, rightTag, doc);
+    if (tagCompare !== 0) {
+      return tagCompare;
+    }
+
+    return compareOperationItems(left, right);
   });
 
   const getTagTitle = (op: OperationItem) => {
@@ -1782,6 +2172,84 @@ function buildExportHtml(markdownContent: string, title: string) {
 </head>
 <body>${htmlBody}</body>
 </html>`;
+}
+
+function buildPreviewContent(markdownContent: string) {
+  const rendered = md.render(markdownContent);
+  if (typeof window === 'undefined') {
+    return {
+      html: rendered,
+      chunks: [] as string[],
+      placeholderHeights: [] as number[],
+    };
+  }
+  const template = document.createElement('template');
+  template.innerHTML = rendered;
+  const topLevelBlocks = [...template.content.children];
+  if (topLevelBlocks.length <= PREVIEW_VIRTUAL_BLOCK_MIN_COUNT) {
+    return {
+      html: rendered,
+      chunks: [],
+      placeholderHeights: [],
+    };
+  }
+
+  const chunks: string[] = [];
+  const placeholderHeights: number[] = [];
+  const appendChunk = (nodes: Element[]) => {
+    if (nodes.length <= 0) {
+      return;
+    }
+    const container = document.createElement('section');
+    nodes.forEach((node) => {
+      container.append(node);
+    });
+    chunks.push(container.innerHTML);
+    placeholderHeights.push(Math.max(560, nodes.length * 56));
+  };
+
+  const semanticChunks: Element[][] = [];
+  let currentChunk: Element[] = [];
+  let chunkHasOperationHeading = false;
+
+  topLevelBlocks.forEach((block) => {
+    const isOperationHeading = block.tagName === 'H4';
+    if (isOperationHeading && chunkHasOperationHeading) {
+      semanticChunks.push(currentChunk);
+      currentChunk = [];
+      chunkHasOperationHeading = false;
+    }
+    currentChunk.push(block);
+    if (isOperationHeading) {
+      chunkHasOperationHeading = true;
+    }
+  });
+
+  if (currentChunk.length > 0) {
+    semanticChunks.push(currentChunk);
+  }
+
+  if (semanticChunks.length <= 1) {
+    for (
+      let index = 0;
+      index < topLevelBlocks.length;
+      index += PREVIEW_VIRTUAL_BLOCK_CHUNK_SIZE
+    ) {
+      appendChunk(
+        topLevelBlocks.slice(index, index + PREVIEW_VIRTUAL_BLOCK_CHUNK_SIZE),
+      );
+    }
+  } else {
+    semanticChunks.forEach((chunkNodes) => {
+      appendChunk(chunkNodes);
+    });
+  }
+
+  return {
+    html: '',
+    chunks,
+    placeholderHeights,
+  };
 }
 
 function decodeHtmlEntities(text: string) {
@@ -2002,14 +2470,213 @@ function downloadFile(content: BlobPart, fileName: string, mimeType: string) {
   URL.revokeObjectURL(url);
 }
 
+function resetPreviewChunkObserver() {
+  if (previewChunkObserver) {
+    previewChunkObserver.disconnect();
+    previewChunkObserver = null;
+  }
+  previewVisibleChunkIndexes.value = new Set();
+}
+
+function resetPreviewChunkMeasureFrame() {
+  if (previewChunkMeasureFrame) {
+    window.cancelAnimationFrame(previewChunkMeasureFrame);
+    previewChunkMeasureFrame = null;
+  }
+}
+
+function isSameNumberSet(a: Set<number>, b: Set<number>) {
+  if (a.size !== b.size) {
+    return false;
+  }
+  for (const value of a) {
+    if (!b.has(value)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function initPreviewLoadedChunkIndexes(totalChunkCount: number) {
+  const loaded = new Set<number>();
+  const initialCount = Math.min(
+    totalChunkCount,
+    PREVIEW_CHUNK_PREFETCH_COUNT * 2 + 1,
+  );
+  for (let index = 0; index < initialCount; index += 1) {
+    loaded.add(index);
+  }
+  previewLoadedChunkIndexes.value = loaded;
+}
+
+function updatePreviewLoadedChunkIndexesByVisible() {
+  if (previewChunks.value.length <= 0) {
+    previewLoadedChunkIndexes.value = new Set();
+    return;
+  }
+
+  const nextLoaded = new Set<number>();
+  if (previewVisibleChunkIndexes.value.size <= 0) {
+    initPreviewLoadedChunkIndexes(previewChunks.value.length);
+    return;
+  }
+
+  previewVisibleChunkIndexes.value.forEach((chunkIndex) => {
+    const startIndex = Math.max(0, chunkIndex - PREVIEW_CHUNK_PREFETCH_COUNT);
+    const endIndex = Math.min(
+      previewChunks.value.length - 1,
+      chunkIndex + PREVIEW_CHUNK_PREFETCH_COUNT,
+    );
+    for (let index = startIndex; index <= endIndex; index += 1) {
+      nextLoaded.add(index);
+    }
+  });
+
+  if (!isSameNumberSet(nextLoaded, previewLoadedChunkIndexes.value)) {
+    previewLoadedChunkIndexes.value = nextLoaded;
+  }
+}
+
+function syncPreviewChunkPlaceholderHeights() {
+  const nextHeights = [...previewChunkPlaceholderHeights.value];
+  let changed = false;
+  previewLoadedChunkIndexes.value.forEach((index) => {
+    const element = previewChunkElements.value[index];
+    if (!element) {
+      return;
+    }
+    const height = Math.ceil(element.getBoundingClientRect().height);
+    if (height <= 0) {
+      return;
+    }
+    const currentHeight = nextHeights[index] || 0;
+    if (Math.abs(currentHeight - height) > 12) {
+      nextHeights[index] = height;
+      changed = true;
+    }
+  });
+  if (changed) {
+    previewChunkPlaceholderHeights.value = nextHeights;
+  }
+}
+
+function scheduleSyncPreviewChunkPlaceholderHeights() {
+  if (previewChunkMeasureFrame) {
+    return;
+  }
+  previewChunkMeasureFrame = window.requestAnimationFrame(() => {
+    previewChunkMeasureFrame = null;
+    syncPreviewChunkPlaceholderHeights();
+  });
+}
+
+function isPreviewChunkLoaded(index: number) {
+  return previewLoadedChunkIndexes.value.has(index);
+}
+
+function setPreviewChunkRef(element: Element | null, index: number) {
+  previewChunkElements.value[index] = (element as HTMLElement) || null;
+}
+
+function setupPreviewChunkObserver() {
+  resetPreviewChunkObserver();
+
+  if (previewChunks.value.length <= 0) {
+    return;
+  }
+
+  const root = previewScrollRef.value;
+  if (!root || typeof window === 'undefined') {
+    previewLoadedChunkIndexes.value = new Set(
+      previewChunks.value.map((_, index) => index),
+    );
+    return;
+  }
+
+  if (window.IntersectionObserver === undefined) {
+    previewLoadedChunkIndexes.value = new Set(
+      previewChunks.value.map((_, index) => index),
+    );
+    return;
+  }
+
+  const observer = new window.IntersectionObserver(
+    (entries) => {
+      const nextVisible = new Set(previewVisibleChunkIndexes.value);
+      let visibleChanged = false;
+      entries.forEach((entry) => {
+        const chunkIndex = Number.parseInt(
+          (entry.target as HTMLElement).dataset.previewChunkIndex || '-1',
+          10,
+        );
+        if (chunkIndex < 0 || chunkIndex >= previewChunks.value.length) {
+          return;
+        }
+        if (entry.isIntersecting) {
+          if (!nextVisible.has(chunkIndex)) {
+            nextVisible.add(chunkIndex);
+            visibleChanged = true;
+          }
+        } else if (nextVisible.delete(chunkIndex)) {
+          visibleChanged = true;
+        }
+      });
+      if (!visibleChanged) {
+        return;
+      }
+      previewVisibleChunkIndexes.value = nextVisible;
+      updatePreviewLoadedChunkIndexesByVisible();
+      void nextTick().then(() => {
+        scheduleSyncPreviewChunkPlaceholderHeights();
+      });
+    },
+    {
+      root,
+      rootMargin: PREVIEW_CHUNK_ROOT_MARGIN,
+      threshold: 0,
+    },
+  );
+
+  previewChunkObserver = observer;
+  previewChunkElements.value.forEach((element) => {
+    if (element) {
+      observer.observe(element);
+    }
+  });
+}
+
 function resetPreviewState() {
+  resetPreviewChunkObserver();
+  resetPreviewChunkMeasureFrame();
+  previewLoading.value = false;
   previewHtml.value = '';
+  previewChunks.value = [];
+  previewChunkPlaceholderHeights.value = [];
+  previewLoadedChunkIndexes.value = new Set();
+  previewVisibleChunkIndexes.value = new Set();
+  previewChunkElements.value = [];
 }
 
 async function generatePreview(silentOrEvent?: boolean | Event) {
   const silent = typeof silentOrEvent === 'boolean' ? silentOrEvent : false;
   const selectedOps = buildSelectedOperations();
-  const subset = buildSubsetOpenApi(selectedOps);
+  if (selectedOps.length <= 0) {
+    resetPreviewState();
+    if (!silent) {
+      ElMessage.warning('请先选择导出范围');
+    }
+    return;
+  }
+
+  const previewOps = getPreviewOperations(selectedOps);
+  const currentToken = ++previewGenerationToken;
+  previewLoading.value = true;
+  await waitForNextFrame();
+  if (currentToken !== previewGenerationToken) {
+    return;
+  }
+
+  const subset = buildSubsetOpenApi(previewOps);
   if (!subset) {
     resetPreviewState();
     if (!silent) {
@@ -2018,12 +2685,48 @@ async function generatePreview(silentOrEvent?: boolean | Event) {
     return;
   }
 
-  previewLoading.value = true;
   try {
-    const markdownContent = buildMarkdownDocument(subset, selectedOps);
-    previewHtml.value = md.render(markdownContent);
+    if (previewOps.length > PREVIEW_RENDER_YIELD_THRESHOLD) {
+      await waitForNextFrame();
+      if (currentToken !== previewGenerationToken) {
+        return;
+      }
+    }
+    const markdownContent = buildMarkdownDocument(subset, previewOps);
+    if (currentToken !== previewGenerationToken) {
+      return;
+    }
+    if (previewOps.length > PREVIEW_RENDER_YIELD_THRESHOLD) {
+      await waitForNextFrame();
+      if (currentToken !== previewGenerationToken) {
+        return;
+      }
+    }
+    const previewContent = buildPreviewContent(markdownContent);
+    previewHtml.value = previewContent.html;
+    previewChunks.value = previewContent.chunks;
+    previewChunkPlaceholderHeights.value = previewContent.placeholderHeights;
+    previewChunkElements.value = Array.from(
+      { length: previewContent.chunks.length },
+      () => null,
+    );
+    if (previewContent.chunks.length > 0) {
+      initPreviewLoadedChunkIndexes(previewContent.chunks.length);
+    } else {
+      previewLoadedChunkIndexes.value = new Set();
+      resetPreviewChunkObserver();
+    }
   } finally {
-    previewLoading.value = false;
+    if (currentToken === previewGenerationToken) {
+      previewLoading.value = false;
+      if (previewChunks.value.length > 0) {
+        await nextTick();
+        if (currentToken === previewGenerationToken) {
+          setupPreviewChunkObserver();
+          scheduleSyncPreviewChunkPlaceholderHeights();
+        }
+      }
+    }
   }
 }
 
@@ -2032,7 +2735,7 @@ async function exportDocument() {
   const subset = buildSubsetOpenApi(selectedOps);
   if (!subset) {
     ElMessage.warning('请先选择导出范围');
-    return;
+    return false;
   }
 
   const title = subset.info?.title || 'api-doc';
@@ -2054,11 +2757,11 @@ async function exportDocument() {
           'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
         const docxBlob = await DocxPacker.toBlob(docxDocument);
         downloadFile(docxBlob, `${title}.docx`, mimeType);
-        break;
+        return true;
       }
       case 'html': {
         downloadFile(htmlContent, `${title}.html`, 'text/html;charset=utf-8');
-        break;
+        return true;
       }
       case 'markdown': {
         downloadFile(
@@ -2066,7 +2769,7 @@ async function exportDocument() {
           `${title}.md`,
           'text/markdown;charset=utf-8',
         );
-        break;
+        return true;
       }
       case 'openapi.json': {
         downloadFile(
@@ -2074,13 +2777,13 @@ async function exportDocument() {
           `${title}.openapi.json`,
           'application/json;charset=utf-8',
         );
-        break;
+        return true;
       }
       case 'pdf': {
         const printWindow = window.open('', '_blank');
         if (!printWindow) {
           ElMessage.warning('浏览器拦截了弹窗，请允许后重试');
-          return;
+          return false;
         }
         printWindow.document.open();
         printWindow.document.write(htmlContent);
@@ -2088,42 +2791,59 @@ async function exportDocument() {
         printWindow.focus();
         printWindow.print();
         ElMessage.success('已打开打印窗口，请选择“另存为 PDF”');
-        break;
+        return true;
       }
     }
   } catch (error: any) {
     console.error(error);
     ElMessage.error(error?.message || '导出失败，请稍后重试');
+    return false;
   }
+
+  return false;
 }
 
-async function handleExportCommand(command: ExportFormat) {
-  exportFormat.value = command;
-  await exportDocument();
+function openExportDialog() {
+  exportDialogVisible.value = true;
+}
+
+async function confirmExportDocument() {
+  if (exportSubmitting.value) {
+    return;
+  }
+
+  exportSubmitting.value = true;
+  try {
+    const success = await exportDocument();
+    if (success) {
+      exportDialogVisible.value = false;
+    }
+  } finally {
+    exportSubmitting.value = false;
+  }
 }
 
 function scheduleAutoPreview() {
   if (previewAutoTimer) {
     window.clearTimeout(previewAutoTimer);
   }
-  previewAutoTimer = window.setTimeout(() => {
-    previewAutoTimer = null;
-    if (loading.value) {
-      return;
-    }
-    void generatePreview(true);
-  }, 120);
-}
-
-function toggleThemeSwitchingState() {
-  themeSwitching.value = true;
-  if (themeSwitchTimer) {
-    window.clearTimeout(themeSwitchTimer);
-  }
-  themeSwitchTimer = window.setTimeout(() => {
-    themeSwitching.value = false;
-    themeSwitchTimer = null;
-  }, 220);
+  const previewOperationCount =
+    scopeMode.value === 'all'
+      ? operations.value.length
+      : selectedOperationItems.value.length;
+  previewGenerationToken += 1;
+  previewAutoTimer = window.setTimeout(
+    () => {
+      previewAutoTimer = null;
+      if (loading.value) {
+        return;
+      }
+      void generatePreview(true);
+    },
+    previewOperationCount > PREVIEW_LARGE_DATA_THRESHOLD
+      ? PREVIEW_AUTO_DELAY_LARGE
+      : PREVIEW_AUTO_DELAY,
+  );
 }
 
 watch(
@@ -2148,14 +2868,13 @@ watch(
     scopeMode,
     selectedOperations,
     operations,
-    exportDocOptions,
+    () => exportDocOptions.value.join('|'),
     currentOpenApi,
     aggregationGatewayOpenApi,
   ],
   () => {
     scheduleAutoPreview();
   },
-  { deep: true },
 );
 
 watch(loading, (value) => {
@@ -2164,30 +2883,19 @@ watch(loading, (value) => {
   }
 });
 
-watch(
-  () => preferences.theme.mode,
-  () => {
-    toggleThemeSwitchingState();
-  },
-);
-
 onBeforeUnmount(() => {
   if (previewAutoTimer) {
     window.clearTimeout(previewAutoTimer);
     previewAutoTimer = null;
   }
-  if (themeSwitchTimer) {
-    window.clearTimeout(themeSwitchTimer);
-    themeSwitchTimer = null;
-  }
+  previewGenerationToken += 1;
+  resetPreviewChunkObserver();
+  resetPreviewChunkMeasureFrame();
 });
 </script>
 
 <template>
-  <div
-    class="doc-export-page h-full overflow-hidden px-5 pb-2 pt-5"
-    :class="[{ 'theme-switching': themeSwitching }]"
-  >
+  <div class="doc-export-page h-full overflow-hidden px-5 pb-2 pt-5">
     <ElRow :gutter="16" class="doc-export-layout">
       <ElCol :span="10" class="doc-export-col">
         <div class="doc-left-column">
@@ -2253,17 +2961,24 @@ onBeforeUnmount(() => {
                             class="service-header flex items-center justify-between px-1 py-1"
                             :class="{
                               'group-node--checked':
-                                getCheckedCountInGroup(
+                                getCheckedCountInGroupByNode(
+                                  serviceNode.key,
                                   serviceNode.allOperations,
                                 ) > 0,
                             }"
                           >
                             <ElCheckbox
                               :model-value="
-                                isGroupChecked(serviceNode.allOperations)
+                                isGroupChecked(
+                                  serviceNode.allOperations,
+                                  serviceNode.key,
+                                )
                               "
                               :indeterminate="
-                                isGroupIndeterminate(serviceNode.allOperations)
+                                isGroupIndeterminate(
+                                  serviceNode.allOperations,
+                                  serviceNode.key,
+                                )
                               "
                               @change="
                                 (value) =>
@@ -2280,7 +2995,8 @@ onBeforeUnmount(() => {
                                 class="ml-1 text-xs text-[var(--el-text-color-secondary)]"
                               >
                                 ({{
-                                  getCheckedCountInGroup(
+                                  getCheckedCountInGroupByNode(
+                                    serviceNode.key,
                                     serviceNode.allOperations,
                                   )
                                 }}/{{ serviceNode.allOperations.length }})
@@ -2291,33 +3007,21 @@ onBeforeUnmount(() => {
                               role="button"
                               tabindex="0"
                               :aria-label="
-                                isGroupExpanded(
-                                  getServiceNodeKey(serviceNode.serviceUrl),
-                                )
+                                isGroupExpanded(serviceNode.key)
                                   ? '收起微服务'
                                   : '展开微服务'
                               "
-                              @click.stop="
-                                toggleGroupExpanded(
-                                  getServiceNodeKey(serviceNode.serviceUrl),
-                                )
-                              "
+                              @click.stop="toggleGroupExpanded(serviceNode.key)"
                               @keydown.enter.prevent.stop="
-                                toggleGroupExpanded(
-                                  getServiceNodeKey(serviceNode.serviceUrl),
-                                )
+                                toggleGroupExpanded(serviceNode.key)
                               "
                               @keydown.space.prevent.stop="
-                                toggleGroupExpanded(
-                                  getServiceNodeKey(serviceNode.serviceUrl),
-                                )
+                                toggleGroupExpanded(serviceNode.key)
                               "
                             >
                               <component
                                 :is="
-                                  isGroupExpanded(
-                                    getServiceNodeKey(serviceNode.serviceUrl),
-                                  )
+                                  isGroupExpanded(serviceNode.key)
                                     ? SvgDoubleArrowUpIcon
                                     : SvgDoubleArrowDownIcon
                                 "
@@ -2328,11 +3032,7 @@ onBeforeUnmount(() => {
 
                           <Transition name="group-submenu-motion">
                             <div
-                              v-show="
-                                isGroupExpanded(
-                                  getServiceNodeKey(serviceNode.serviceUrl),
-                                )
-                              "
+                              v-if="isGroupExpanded(serviceNode.key)"
                               class="group-submenu-wrap ml-3 mt-2 border-l border-dashed border-[var(--el-border-color)] pl-3"
                             >
                               <template v-if="serviceNode.hasGroupLevel">
@@ -2346,17 +3046,24 @@ onBeforeUnmount(() => {
                                       class="group-header flex items-center justify-between px-1 py-1"
                                       :class="{
                                         'group-node--checked':
-                                          getCheckedCountInGroup(
+                                          getCheckedCountInGroupByNode(
+                                            group.key,
                                             group.operations,
                                           ) > 0,
                                       }"
                                     >
                                       <ElCheckbox
                                         :model-value="
-                                          isGroupChecked(group.operations)
+                                          isGroupChecked(
+                                            group.operations,
+                                            group.key,
+                                          )
                                         "
                                         :indeterminate="
-                                          isGroupIndeterminate(group.operations)
+                                          isGroupIndeterminate(
+                                            group.operations,
+                                            group.key,
+                                          )
                                         "
                                         @change="
                                           (value) =>
@@ -2373,7 +3080,8 @@ onBeforeUnmount(() => {
                                           class="ml-1 text-xs text-[var(--el-text-color-secondary)]"
                                         >
                                           ({{
-                                            getCheckedCountInGroup(
+                                            getCheckedCountInGroupByNode(
+                                              group.key,
                                               group.operations,
                                             )
                                           }}/{{ group.operations.length }})
@@ -2411,7 +3119,7 @@ onBeforeUnmount(() => {
 
                                     <Transition name="group-submenu-motion">
                                       <div
-                                        v-show="isGroupExpanded(group.key)"
+                                        v-if="isGroupExpanded(group.key)"
                                         class="group-submenu-wrap ml-3 mt-2 border-l border-dashed border-[var(--el-border-color)] pl-3"
                                       >
                                         <div class="group-submenu-list py-1">
@@ -2513,13 +3221,21 @@ onBeforeUnmount(() => {
                             class="group-header flex items-center justify-between px-1 py-1"
                             :class="{
                               'group-node--checked':
-                                getCheckedCountInGroup(group.operations) > 0,
+                                getCheckedCountInGroupByNode(
+                                  group.code,
+                                  group.operations,
+                                ) > 0,
                             }"
                           >
                             <ElCheckbox
-                              :model-value="isGroupChecked(group.operations)"
+                              :model-value="
+                                isGroupChecked(group.operations, group.code)
+                              "
                               :indeterminate="
-                                isGroupIndeterminate(group.operations)
+                                isGroupIndeterminate(
+                                  group.operations,
+                                  group.code,
+                                )
                               "
                               @change="
                                 (value) =>
@@ -2534,7 +3250,10 @@ onBeforeUnmount(() => {
                                 class="ml-1 text-xs text-[var(--el-text-color-secondary)]"
                               >
                                 ({{
-                                  getCheckedCountInGroup(group.operations)
+                                  getCheckedCountInGroupByNode(
+                                    group.code,
+                                    group.operations,
+                                  )
                                 }}/{{ group.operations.length }})
                               </span>
                             </ElCheckbox>
@@ -2568,7 +3287,7 @@ onBeforeUnmount(() => {
 
                           <Transition name="group-submenu-motion">
                             <div
-                              v-show="isGroupExpanded(group.code)"
+                              v-if="isGroupExpanded(group.code)"
                               class="group-submenu-wrap ml-3 mt-2 border-l border-dashed border-[var(--el-border-color)] pl-3"
                             >
                               <div class="group-submenu-list py-1">
@@ -2615,7 +3334,7 @@ onBeforeUnmount(() => {
               </template>
               <template v-else>
                 <div
-                  class="rounded border p-3 text-sm text-[var(--el-text-color-secondary)]"
+                  class="doc-all-selected-tip rounded border p-3 text-sm text-[var(--el-text-color-secondary)]"
                 >
                   已选择全部接口文档，无需单独勾选。
                 </div>
@@ -2647,47 +3366,136 @@ onBeforeUnmount(() => {
             <template #header>
               <div class="flex flex-wrap items-center justify-between gap-3">
                 <span class="font-medium">Markdown 实时预览</span>
-                <ElSpace wrap>
-                  <ElDropdown trigger="click" @command="handleExportCommand">
-                    <ElButton type="primary">
-                      导出：{{ exportFormatTextMap[exportFormat] }}
-                    </ElButton>
-                    <template #dropdown>
-                      <ElDropdownMenu>
-                        <ElDropdownItem command="docx">
-                          Word(.docx)
-                        </ElDropdownItem>
-                        <ElDropdownItem command="pdf">PDF</ElDropdownItem>
-                        <ElDropdownItem command="markdown">
-                          Markdown
-                        </ElDropdownItem>
-                        <ElDropdownItem command="html">HTML</ElDropdownItem>
-                        <ElDropdownItem command="openapi.json">
-                          OpenAPI JSON
-                        </ElDropdownItem>
-                      </ElDropdownMenu>
-                    </template>
-                  </ElDropdown>
-                </ElSpace>
+                <div class="flex items-center gap-3">
+                  <span class="text-xs text-[var(--el-text-color-secondary)]">
+                    当前格式：{{ exportFormatTextMap[exportFormat] }}
+                  </span>
+                  <ElButton type="primary" @click="openExportDialog">
+                    导出文档
+                  </ElButton>
+                </div>
               </div>
             </template>
 
             <ElSkeleton v-if="previewLoading" :rows="8" animated />
             <template v-else>
+              <ElAlert
+                v-if="previewNoticeText"
+                class="mb-4"
+                type="warning"
+                :closable="false"
+              >
+                <template #default>{{ previewNoticeText }}</template>
+              </ElAlert>
               <ElEmpty
                 v-if="isPreviewEmpty"
                 description="请选择导出范围或接口，预览将自动更新"
               />
               <div
                 v-else
+                ref="previewScrollRef"
                 class="doc-preview-html overflow-auto [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:p-2 [&_th]:border [&_th]:p-2"
-                v-html="previewHtml"
-              ></div>
+              >
+                <div
+                  v-if="previewChunks.length <= 0"
+                  class="doc-preview-html-content"
+                  v-html="previewHtml"
+                ></div>
+                <template v-else>
+                  <section
+                    v-for="(chunk, index) in previewChunks"
+                    :key="`preview-chunk-${index}`"
+                    :ref="
+                      (el) => setPreviewChunkRef(el as Element | null, index)
+                    "
+                    :data-preview-chunk-index="index"
+                    class="doc-preview-virtual-block"
+                    :style="
+                      isPreviewChunkLoaded(index)
+                        ? undefined
+                        : {
+                            minHeight: `${previewChunkPlaceholderHeights[index] || 720}px`,
+                          }
+                    "
+                    v-html="isPreviewChunkLoaded(index) ? chunk : ''"
+                  ></section>
+                </template>
+              </div>
             </template>
           </ElCard>
         </div>
       </ElCol>
     </ElRow>
+
+    <ElDialog
+      v-model="exportDialogVisible"
+      title="选择导出格式"
+      width="780px"
+      class="doc-export-dialog"
+      destroy-on-close
+      align-center
+    >
+      <div class="export-dialog-panel">
+        <div class="export-dialog-intro">
+          <div class="export-dialog-intro__title">
+            选择一个适合当前场景的导出格式
+          </div>
+          <div class="export-dialog-intro__desc">
+            左侧导出范围与附加内容会一并生效。当前已选格式为
+            <strong>{{ activeExportOption.title }}</strong>
+            ，确认后立即开始导出。
+          </div>
+        </div>
+
+        <div class="export-format-grid">
+          <button
+            v-for="option in exportFormatOptions"
+            :key="option.format"
+            type="button"
+            class="export-format-card"
+            :class="{
+              'is-active': exportFormat === option.format,
+            }"
+            @click="exportFormat = option.format"
+          >
+            <span
+              v-if="exportFormat === option.format"
+              class="export-format-card__badge"
+            >
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                <path
+                  d="M2 5.2L4 7.2L8 3"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </span>
+            <span class="export-format-card__logo">
+              <component :is="option.icon" class="export-format-card__icon" />
+            </span>
+            <span class="export-format-card__title">{{ option.title }}</span>
+            <span class="export-format-card__desc">
+              {{ option.description }}
+            </span>
+          </button>
+        </div>
+      </div>
+
+      <template #footer>
+        <div class="export-dialog-footer">
+          <ElButton @click="exportDialogVisible = false">取消</ElButton>
+          <ElButton
+            type="primary"
+            :loading="exportSubmitting"
+            @click="confirmExportDocument"
+          >
+            导出 {{ activeExportOption.title }}
+          </ElButton>
+        </div>
+      </template>
+    </ElDialog>
   </div>
 </template>
 
@@ -2766,6 +3574,194 @@ onBeforeUnmount(() => {
   margin-bottom: 6px;
 }
 
+.doc-all-selected-tip {
+  margin-top: 8px;
+}
+
+:deep(.doc-export-dialog) {
+  max-width: calc(100vw - 24px);
+}
+
+:deep(.doc-export-dialog .el-dialog) {
+  overflow: hidden;
+  background: linear-gradient(
+    180deg,
+    rgb(var(--el-color-primary-rgb) / 12%) 0%,
+    var(--el-bg-color) 22%,
+    var(--el-bg-color) 100%
+  );
+  border: 1px solid var(--el-border-color);
+  border-radius: 28px;
+  box-shadow: 0 28px 80px rgb(15 23 42 / 18%);
+}
+
+:deep(.doc-export-dialog .el-dialog__header) {
+  padding: 24px 24px 0;
+  margin-right: 0;
+}
+
+:deep(.doc-export-dialog .el-dialog__title) {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+  letter-spacing: 0.01em;
+}
+
+:deep(.doc-export-dialog .el-dialog__body) {
+  padding: 20px 24px 8px;
+}
+
+:deep(.doc-export-dialog .el-dialog__footer) {
+  padding: 0 24px 24px;
+}
+
+.export-dialog-panel {
+  --doc-export-card-radius: calc(var(--radius) * 2.75);
+  --doc-export-card-inner-radius: calc(var(--radius) * 2.25);
+  --doc-export-badge-radius: calc(var(--radius) * 2);
+
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding-bottom: 12px;
+}
+
+.export-dialog-intro {
+  padding: 18px 20px;
+  background: linear-gradient(
+    135deg,
+    rgb(var(--el-color-primary-rgb) / 14%) 0%,
+    rgb(var(--el-color-primary-rgb) / 4%) 52%,
+    var(--el-fill-color-light) 100%
+  );
+  border: 1px solid rgb(var(--el-color-primary-rgb) / 18%);
+  border-radius: 22px;
+}
+
+.export-dialog-intro__title {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--el-text-color-primary);
+}
+
+.export-dialog-intro__desc {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--el-text-color-regular);
+}
+
+.export-format-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.export-format-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-height: 176px;
+  padding: 14px;
+  text-align: left;
+  cursor: pointer;
+  user-select: none;
+  background: linear-gradient(
+    180deg,
+    var(--el-bg-color) 0%,
+    var(--el-fill-color-lighter) 100%
+  );
+  border: 1px solid var(--el-border-color);
+  border-radius: var(--doc-export-card-radius);
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease;
+}
+
+.export-format-card:hover,
+.export-format-card:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--el-color-primary) 42%, transparent);
+  box-shadow: 0 18px 36px rgb(15 23 42 / 10%);
+  transform: translateY(-2px);
+}
+
+.export-format-card.is-active {
+  background: linear-gradient(
+    180deg,
+    rgb(var(--el-color-primary-rgb) / 12%) 0%,
+    var(--el-bg-color) 100%
+  );
+  border-color: var(--el-color-primary);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--el-color-primary) 22%, transparent),
+    0 20px 44px color-mix(in srgb, var(--el-color-primary) 16%, transparent);
+}
+
+.export-format-card__badge {
+  position: absolute;
+  top: max(7px, calc(var(--radius) * 1.1));
+  right: max(8px, calc(var(--radius) * 1.1));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  color: var(--el-color-primary);
+  background: transparent;
+  border: 1.5px solid var(--el-color-primary);
+  border-radius: var(--doc-export-badge-radius);
+  box-shadow: 0 0 0 2px var(--el-bg-color);
+}
+
+.export-format-card__logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 72px;
+  margin-bottom: 14px;
+  background: linear-gradient(
+    180deg,
+    rgb(var(--el-color-primary-rgb) / 12%) 0%,
+    rgb(var(--el-color-primary-rgb) / 4%) 100%
+  );
+  border: 1px solid rgb(var(--el-color-primary-rgb) / 14%);
+  border-radius: var(--doc-export-card-inner-radius);
+}
+
+.export-format-card__icon {
+  width: 52px;
+  height: 52px;
+}
+
+.export-format-card__title {
+  display: block;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--el-text-color-primary);
+}
+
+.export-format-card__desc {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--el-text-color-secondary);
+}
+
+.export-dialog-footer {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
 .scope-tree-panel {
   flex: 1;
   width: 100%;
@@ -2835,6 +3831,20 @@ onBeforeUnmount(() => {
   min-height: 0;
   line-height: 1.85;
   overflow-wrap: anywhere;
+}
+
+.doc-preview-html-content,
+.doc-preview-virtual-block {
+  width: 100%;
+}
+
+@supports (content-visibility: auto) {
+  .doc-preview-html:deep(.doc-preview-virtual-block) {
+    display: block;
+    contain-intrinsic-size: auto 1200px;
+    contain: content;
+    content-visibility: auto;
+  }
 }
 
 .doc-preview-html:deep(p) {
@@ -2925,11 +3935,41 @@ onBeforeUnmount(() => {
   opacity: 1;
 }
 
-.doc-export-page.theme-switching {
-  :deep(*) {
-    transition-duration: 0s !important;
-    animation-duration: 0s !important;
-    animation-delay: 0s !important;
+@media (max-width: 920px) {
+  .export-format-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  :deep(.doc-export-dialog .el-dialog__header) {
+    padding: 20px 20px 0;
+  }
+
+  :deep(.doc-export-dialog .el-dialog__body) {
+    padding: 16px 20px 8px;
+  }
+
+  :deep(.doc-export-dialog .el-dialog__footer) {
+    padding: 0 20px 20px;
+  }
+
+  .export-dialog-intro__title {
+    font-size: 18px;
+  }
+
+  .export-format-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .export-format-card {
+    min-height: 168px;
+  }
+}
+
+@media (max-width: 520px) {
+  .export-format-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

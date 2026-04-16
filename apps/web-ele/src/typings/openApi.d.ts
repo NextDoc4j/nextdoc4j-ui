@@ -11,11 +11,26 @@ export interface SwaggerConfig {
 export interface SwaggerServiceItem {
   name: string;
   url: string;
+  'x-order'?: number | string;
   contextPath?: string;
   disabled?: boolean;
   reason?: string;
   serviceId?: string;
   status?: 'DOWN' | 'UNKNOWN' | 'UP';
+}
+
+export interface OpenApiTagObject {
+  name: string;
+  description?: string;
+  'x-order'?: number | string;
+  controllerName?: string;
+  className?: string;
+  sourceName?: string;
+  'x-class-name'?: string;
+  'x-controller'?: string;
+  'x-controller-name'?: string;
+  'x-origin-name'?: string;
+  [key: string]: any;
 }
 export type Paths = Record<string, PathItem>;
 
@@ -37,6 +52,7 @@ export interface OpenAPISpec {
     version: string;
   };
   security?: any[];
+  tags?: OpenApiTagObject[];
   paths: Paths;
   components: {
     schemas: Record<string, SchemaObject>;
@@ -89,6 +105,7 @@ export interface ApiData {
 
 export interface OperationObject {
   tags?: string[];
+  'x-order'?: number | string;
   summary?: string;
   description?: string;
   operationId?: string;

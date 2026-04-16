@@ -8,12 +8,15 @@ import { errorMessageResponseInterceptor, RequestClient } from '@vben/request';
 
 import { ElMessage } from 'element-plus';
 
+import { REQUEST_TIMEOUTS } from '#/constants/request-timeout';
+
 const { apiURL } = useAppConfig(import.meta.env, import.meta.env.PROD);
 
 function createRequestClient(baseURL: string, options?: RequestClientOptions) {
   const client = new RequestClient({
     ...options,
     baseURL,
+    timeout: options?.timeout ?? REQUEST_TIMEOUTS.openApiDocument,
   });
 
   // 通用的错误处理,如果没有进入上面的错误处理逻辑，就会进入这里

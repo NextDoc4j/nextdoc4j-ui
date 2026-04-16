@@ -23,8 +23,6 @@ interface AppPreferences {
   accessMode: AccessModeType;
   /** 登录注册页面布局 */
   authPageLayout: AuthPageLayoutType;
-  /** 检查更新轮询时间 */
-  checkUpdatesInterval: number;
   /** 是否开启灰色模式 */
   colorGrayMode: boolean;
   /** 是否开启色弱模式 */
@@ -51,8 +49,6 @@ interface AppPreferences {
   defaultHomePath: string;
   // /** 开启动态标题 */
   dynamicTitle: boolean;
-  /** 是否开启检查更新 */
-  enableCheckUpdates: boolean;
   /** 是否显示偏好设置 */
   enablePreferences: boolean;
   /**

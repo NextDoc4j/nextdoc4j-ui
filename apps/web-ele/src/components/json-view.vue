@@ -1,11 +1,5 @@
 <script setup lang="ts">
-import {
-  computed,
-  onBeforeMount,
-  onBeforeUnmount,
-  onMounted,
-  watch,
-} from 'vue';
+import { computed, onBeforeUnmount, onMounted, watch } from 'vue';
 
 import { SvgCopyIcon, SvgFormatLeftIcon } from '@vben/icons';
 import { preferences } from '@vben/preferences';
@@ -14,6 +8,7 @@ import { usePreferredDark } from '@vueuse/core';
 import { ElImage, ElMessage, ElTooltip } from 'element-plus';
 
 import monaco from '#/monaco';
+import { copyText } from '#/utils/clipboard';
 
 const props = withDefaults(
   defineProps<{
@@ -49,11 +44,16 @@ const globalMonacoThemeState = ((globalThis as any)[
   themesInitialized?: boolean;
 };
 
-// 递归查找所有 base64 图片及其 key
 const findBase64Images = (obj: any): Array<{ key: string; value: string }> => {
   const images: Array<{ key: string; value: string }> = [];
+  const seen = new Set();
 
   const traverse = (item: any, parentKey = '') => {
+    if (item !== null && typeof item === 'object') {
+      if (seen.has(item)) return;
+      seen.add(item);
+    }
+
     if (typeof item === 'string' && isBase64Image(item)) {
       images.push({ key: parentKey, value: item });
     } else if (Array.isArray(item)) {
@@ -73,25 +73,14 @@ const findBase64Images = (obj: any): Array<{ key: string; value: string }> => {
   return images;
 };
 
-// 计算属性：是否有 base64 图片
-const hasBase64Images = computed(() => {
-  return base64Images.value.length > 0;
-});
+const hasBase64Images = computed(() => base64Images.value.length > 0);
+const base64Images = computed(() => findBase64Images(props.data));
 
-// 计算属性：所有 base64 图片数据
-const base64Images = computed(() => {
-  return findBase64Images(props.data);
-});
-
-// 检测是否为 base64 图片
 const isBase64Image = (value: string): boolean => {
-  // 检查是否为 base64 编码的图片
-  const base64ImageRegex =
-    /^data:image\/(?:jpeg|jpg|png|gif|webp|svg\+xml);base64,/i;
-  return base64ImageRegex.test(value);
+  return /^data:image\/(?:jpeg|jpg|png|gif|webp|svg\+xml);base64,/i.test(value);
 };
 
-const id = `json-viewer-${Math.random().toString(36).slice(2, 11)}-${Date.now()}`;
+const id = `json-viewer-${Math.random().toString(36).slice(2, 11)}`;
 let editor: any = null;
 let isDestroyed = false;
 let resizeObserver: null | ResizeObserver = null;
@@ -99,34 +88,30 @@ let updateEditorHeight: (() => void) | null = null;
 let themeSwitchFrame: null | number = null;
 const preferredDark = usePreferredDark();
 
-// 处理 HTML 标签
 const processDescription = (desc: string) => {
-  if (desc === undefined) {
-    return '';
-  } else if (desc.includes('<span')) {
-    return desc.match(/\{([^}]+)\}/g);
-  } else {
-    return desc;
+  if (!desc) return '';
+  if (desc.includes('<span')) {
+    const matches = desc.match(/\{([^}]+)\}/g);
+    return matches
+      ? matches.map((m) => m.replaceAll(/[{}]/g, '')).join(' ')
+      : desc;
   }
+  return desc;
 };
-// 格式化 JSON 并添加注释
+
 const formatJsonWithComments = (data: any) => {
   const jsonStr = JSON.stringify(data, null, 2);
-  if (typeof jsonStr !== 'string') {
-    return '';
-  }
-  const lines = jsonStr.split('\n');
+  if (typeof jsonStr !== 'string') return '';
 
-  // 获取字段的完整路径
+  const lines = jsonStr.split('\n');
   const getFieldPath = (lineIndex: number): string[] => {
     const line = lines[lineIndex] ?? '';
     const indentation = line.match(/^\s*/)?.[0].length || 0;
     const level = indentation / 2;
     const currentKey = line.match(/"([^"]+)":/)?.[1] ?? '';
     const pathParts = [];
-    if (currentKey) {
-      pathParts.unshift(currentKey);
-    }
+    if (currentKey) pathParts.unshift(currentKey);
+
     let currentLevel = level;
     while (lineIndex > 0) {
       lineIndex--;
@@ -146,13 +131,12 @@ const formatJsonWithComments = (data: any) => {
     return pathParts;
   };
 
-  // 处理每一行
   return lines
     .map((line, index) => {
       const keyMatch = line.match(/"([^"]+)":\s*([^,}\]]*)/);
       const key = keyMatch?.[1] ?? '';
       const fullPath = getFieldPath(index);
-      // 尝试获取描述（按优先级：完整路径 > 父路径+当前字段 > 当前字段）
+
       const desc =
         props.descriptions?.[fullPath.join('.')] ||
         props.descriptions?.[key] ||
@@ -161,21 +145,14 @@ const formatJsonWithComments = (data: any) => {
       if (desc) {
         return `${line} ${line.trim() === '}' || line.trim() === ']' ? '' : `// ${processDescription(desc)}`}`;
       }
-
       return line;
     })
     .join('\n');
 };
 
 const resolveEditorValue = (data: any, language: string) => {
-  if (language === 'json') {
-    return formatJsonWithComments(data);
-  }
-
-  if (typeof data === 'string') {
-    return data;
-  }
-
+  if (language === 'json') return formatJsonWithComments(data);
+  if (typeof data === 'string') return data;
   try {
     return JSON.stringify(data, null, 2) ?? '';
   } catch {
@@ -183,71 +160,65 @@ const resolveEditorValue = (data: any, language: string) => {
   }
 };
 
-// 创建自定义主题
 const createCustomTheme = () => {
-  if (globalMonacoThemeState.themesInitialized) {
-    return;
-  }
+  if (globalMonacoThemeState.themesInitialized) return;
 
   monaco.editor.defineTheme('jsonCustomTheme', {
     base: 'vs',
     inherit: true,
     rules: [
-      { token: 'string.key.json', foreground: '333333', fontStyle: 'bold' },
-      { token: 'string.value.json', foreground: 'c41d7f' },
-      { token: 'number.json', foreground: '1890ff' },
-      { token: 'keyword.json', foreground: 'd32029' },
-      { token: 'delimiter.bracket.json', foreground: '666666' },
-      { token: 'delimiter.comma.json', foreground: '666666' },
-      { token: 'comment.json', foreground: '666666', fontStyle: 'italic' },
+      { token: 'string.key.json', foreground: 'C41D7F' },
+      { token: 'string.value.json', foreground: '008000' },
+      { token: 'number.json', foreground: '1890FF' },
+      { token: 'keyword.json', foreground: '722ED1' },
+      { token: 'delimiter.bracket.json', foreground: '333333' },
+      { token: 'delimiter.comma.json', foreground: '333333' },
+      { token: 'comment.json', foreground: '008000' },
     ],
     colors: {
-      'editor.background': '#ffffff',
-      'editor.lineHighlightBackground': '#000000',
+      'editor.background': '#00000000',
+      'editorLineNumber.foreground': '#D9D9D9',
+      'editor.lineHighlightBackground': '#00000000',
+      'editor.lineHighlightBorder': '#00000000',
     },
   });
+
   monaco.editor.defineTheme('jsonCustomDarkTheme', {
     base: 'vs-dark',
     inherit: true,
     rules: [
-      { token: 'string.key.json', foreground: '666666', fontStyle: 'bold' },
-      { token: 'string.value.json', foreground: 'c41d7f' },
-      { token: 'number.json', foreground: '1890ff' },
-      { token: 'keyword.json', foreground: 'd32029' },
-      { token: 'delimiter.bracket.json', foreground: '666666' },
-      { token: 'delimiter.comma.json', foreground: '666666' },
-      { token: 'comment.json', foreground: '666666', fontStyle: 'italic' },
+      { token: 'string.key.json', foreground: 'E879F9' },
+      { token: 'string.value.json', foreground: '4ADE80' },
+      { token: 'number.json', foreground: '60A5FA' },
+      { token: 'keyword.json', foreground: 'C084FC' },
+      { token: 'delimiter.bracket.json', foreground: 'A3A3A3' },
+      { token: 'delimiter.comma.json', foreground: 'A3A3A3' },
+      { token: 'comment.json', foreground: '4ADE80', fontStyle: 'italic' },
     ],
     colors: {
-      'editor.lineHighlightBackground': '#000000',
+      'editor.background': '#00000000',
+      'editorLineNumber.foreground': '#525252',
+      'editor.lineHighlightBackground': '#00000000',
+      'editor.lineHighlightBorder': '#00000000',
     },
   });
   globalMonacoThemeState.themesInitialized = true;
 };
 
-const resolveThemeName = (mode: string) => {
-  return mode === 'dark' ? 'jsonCustomDarkTheme' : 'jsonCustomTheme';
-};
+const resolveThemeName = (mode: string) =>
+  mode === 'dark' ? 'jsonCustomDarkTheme' : 'jsonCustomTheme';
 
 const resolveThemeMode = (mode: string) => {
-  if (mode === 'auto') {
-    return preferredDark.value ? 'dark' : 'light';
-  }
+  if (mode === 'auto') return preferredDark.value ? 'dark' : 'light';
   return mode;
 };
 
 const applyTheme = (mode: string) => {
   const themeName = resolveThemeName(resolveThemeMode(mode));
-  if (globalMonacoThemeState.currentTheme === themeName) {
-    return;
-  }
+  if (globalMonacoThemeState.currentTheme === themeName) return;
   monaco.editor.setTheme(themeName);
   globalMonacoThemeState.currentTheme = themeName;
 };
-
-onBeforeMount(() => {
-  isDestroyed = false;
-});
 
 onMounted(() => {
   if (isDestroyed) return;
@@ -268,41 +239,48 @@ onMounted(() => {
     readOnly: props.readOnly,
     minimap: { enabled: false },
     tabSize: 2,
-    insertSpaces: false,
+    insertSpaces: true,
     formatOnType: true,
     formatOnPaste: true,
     folding: true,
-    lineNumbers: 'off',
+    lineNumbers: 'on',
+    lineNumbersMinChars: 3,
+    lineDecorationsWidth: 0,
+    fontFamily:
+      'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
     fontSize: 13,
     lineHeight: 1.6,
     renderLineHighlight: 'none',
-    showFoldingControls: 'always',
+    showFoldingControls: 'mouseover',
     scrollBeyondLastLine: false,
     automaticLayout: false,
     wordWrap: 'on',
-    wrappingStrategy: 'advanced',
-    padding: { top: 8, bottom: 8 },
+    // 关键修改 1：大幅增加 bottom padding，保证代码最后一行下面永远有足够大的空白属于编辑器可以点击
+    padding: { top: 16, bottom: 80 },
     scrollbar: {
       vertical: 'hidden',
       horizontal: 'hidden',
-      useShadows: false,
-      alwaysConsumeMouseWheel: false,
       verticalScrollbarSize: 0,
       horizontalScrollbarSize: 0,
+      alwaysConsumeMouseWheel: false,
+      useShadows: false,
     },
     overviewRulerBorder: false,
-    fixedOverflowWidgets: true,
-    foldingStrategy: 'indentation',
+    hideCursorInOverviewRuler: true,
     contextmenu: false,
+    matchBrackets: 'never',
   });
-  // 添加高度自适应，设置合理的默认高度
+
   updateEditorHeight = () => {
     if (!editorContainer) return;
     const contentHeight = editor.getContentHeight();
-    const defaultHeight = 500; // 默认高度，避免内容少时留白过多
-
-    // 使用默认高度和内容高度的最大值，确保不会小于默认值
-    const targetHeight = Math.max(defaultHeight, contentHeight);
+    const containerHeight = editorContainer.parentElement?.clientHeight ?? 0;
+    const defaultHeight = 200;
+    const targetHeight = Math.max(
+      defaultHeight,
+      contentHeight,
+      containerHeight,
+    );
     const nextHeight = `${targetHeight}px`;
     if (editorContainer.style.height !== nextHeight) {
       editorContainer.style.height = nextHeight;
@@ -324,53 +302,133 @@ onMounted(() => {
 
   applyTheme(preferences.theme.mode);
 
-  // 初始化高度
   requestAnimationFrame(() => {
     updateEditorHeight?.();
     requestAnimationFrame(() => updateEditorHeight?.());
   });
 });
-const getEditorValue = () => {
-  return editor.getValue();
-};
 
+const getEditorValue = () => editor?.getValue();
 const setEditorValue = (value: string) => {
   if (!editor) return;
   editor.setValue(value ?? '');
   updateEditorHeight?.();
 };
+
+const prettyFormatXml = (xmlString: string) => {
+  const compact = xmlString
+    .replaceAll(/>\s+</g, '><')
+    .replaceAll(/(>)(<)(\/*)/g, '$1\n$2$3')
+    .trim();
+
+  if (!compact) return '';
+
+  const lines = compact
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  let indent = 0;
+  const output: string[] = [];
+
+  lines.forEach((line) => {
+    if (/^<\//.test(line)) {
+      indent = Math.max(indent - 1, 0);
+    }
+
+    output.push(`${'  '.repeat(indent)}${line}`);
+
+    const isDeclaration = /^<\?xml/i.test(line);
+    const isDocType = line.startsWith('<!');
+    const isClosing = /^<\//.test(line);
+    const isSelfClosing = /\/>$/.test(line);
+    const hasInlinePair = /^<[^/!][^>]*>.*<\/[^>]+>$/.test(line);
+    const isOpenTag = /^<[^!?/][^>]*>$/.test(line);
+
+    if (
+      !isDeclaration &&
+      !isDocType &&
+      !isClosing &&
+      !isSelfClosing &&
+      !hasInlinePair &&
+      isOpenTag
+    ) {
+      indent += 1;
+    }
+  });
+
+  return output.join('\n');
+};
+
+const formatXmlForEditor = (source: string) => {
+  const raw = (source || '').trim();
+  if (!raw) return '';
+
+  const declaration = raw.match(/^<\?xml[^>]*\?>/i)?.[0] || '';
+
+  try {
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(raw, 'application/xml');
+    const parserError = xmlDoc.querySelector('parsererror');
+
+    if (parserError) {
+      ElMessage.error('无效的 XML');
+      return source;
+    }
+
+    const serialized = new XMLSerializer().serializeToString(xmlDoc);
+    const formatted = prettyFormatXml(serialized);
+
+    if (declaration && !formatted.startsWith('<?xml')) {
+      return `${declaration}\n${formatted}`;
+    }
+
+    return formatted;
+  } catch {
+    ElMessage.error('XML 格式化失败');
+    return source;
+  }
+};
+
 const handleFormat = () => {
   if (!editor) return;
-
+  if (props.language === 'xml') {
+    const source = editor.getValue();
+    const formatted = formatXmlForEditor(source);
+    if (formatted !== source) {
+      editor.setValue(formatted);
+      updateEditorHeight?.();
+    }
+    return;
+  }
   if (props.language !== 'json') {
     editor.getAction('editor.action.formatDocument').run();
     return;
   }
-
   try {
-    // 验证JSON有效性
     JSON.parse(editor.getValue());
-    // 执行格式化
     editor.getAction('editor.action.formatDocument').run();
-  } catch (error: unknown) {
-    if (error instanceof Error) {
-      ElMessage.error(`无效的JSON: ${error.message}`);
-    } else {
-      ElMessage.error(`无效的JSON: ${String(error)}`);
-    }
-  }
-};
-const handleCopy = async () => {
-  try {
-    const value = editor.getValue();
-    await navigator.clipboard.writeText(value);
-    ElMessage.success('复制成功');
   } catch {
-    ElMessage.error('复制失败');
+    ElMessage.error(`无效的 JSON`);
   }
 };
 
-// 监听数据变化
+const handleCopy = async () => {
+  const copied = await copyText(editor.getValue());
+  if (copied) {
+    ElMessage.success('复制成功');
+    return;
+  }
+  ElMessage.error('复制失败');
+};
+
+// 关键修改 3：增加点击全区域聚焦功能
+const focusEditor = () => {
+  if (editor) {
+    editor.focus();
+  }
+};
+
 watch(
   () => props.data,
   (newData) => {
@@ -386,7 +444,6 @@ watch(
   () => props.language,
   (newLanguage) => {
     if (!editor) return;
-
     const model = editor.getModel();
     if (model) {
       monaco.editor.setModelLanguage(model, newLanguage || 'plaintext');
@@ -403,109 +460,89 @@ watch(
 
 watch([() => preferences.theme.mode, () => preferredDark.value], ([mode]) => {
   if (!editor) return;
-  if (themeSwitchFrame) {
-    cancelAnimationFrame(themeSwitchFrame);
-  }
+  if (themeSwitchFrame) cancelAnimationFrame(themeSwitchFrame);
   themeSwitchFrame = requestAnimationFrame(() => {
     applyTheme(mode);
     themeSwitchFrame = null;
   });
 });
 
-// 清理
 onBeforeUnmount(() => {
   isDestroyed = true;
-
-  if (themeSwitchFrame) {
-    cancelAnimationFrame(themeSwitchFrame);
-    themeSwitchFrame = null;
-  }
-
-  if (resizeObserver) {
-    resizeObserver.disconnect();
-    resizeObserver = null;
-  }
-
+  if (themeSwitchFrame) cancelAnimationFrame(themeSwitchFrame);
+  if (resizeObserver) resizeObserver.disconnect();
   updateEditorHeight = null;
-
   if (editor) {
-    try {
-      editor.onDidContentSizeChange(() => {});
-      editor.dispose();
-      editor = null;
-    } catch (error) {
-      console.warn('Editor disposal error:', error);
-    }
+    editor.dispose();
+    editor = null;
   }
 });
-defineExpose({
-  getEditorValue,
-  setEditorValue,
-});
+
+defineExpose({ getEditorValue, setEditorValue, focusEditor });
 </script>
 
 <template>
-  <div class="group relative">
-    <div
-      class="absolute right-0 top-0 z-[2] hidden cursor-pointer group-hover:flex"
-    >
+  <div class="json-viewer-ultimate group relative w-full bg-transparent">
+    <div class="absolute right-2 top-2 z-10 hidden gap-1.5 group-hover:flex">
       <ElTooltip content="复制" placement="top" v-if="copyable">
-        <div @click="handleCopy" class="mx-2 size-8">
-          <SvgCopyIcon />
-        </div>
+        <button
+          @click="handleCopy"
+          class="flex size-7 cursor-pointer items-center justify-center rounded border border-gray-100 bg-white/80 text-gray-400 shadow-sm backdrop-blur-sm transition-all hover:text-blue-500 dark:border-gray-800 dark:bg-black/50 dark:text-gray-300 dark:hover:text-blue-400"
+        >
+          <SvgCopyIcon class="size-3.5" />
+        </button>
       </ElTooltip>
       <ElTooltip content="格式化" placement="top" v-if="!readOnly">
-        <div @click="handleFormat" class="mx-2 size-8">
-          <SvgFormatLeftIcon />
-        </div>
+        <button
+          @click="handleFormat"
+          class="flex size-7 cursor-pointer items-center justify-center rounded border border-gray-100 bg-white/80 text-gray-400 shadow-sm backdrop-blur-sm transition-all hover:text-blue-500 dark:border-gray-800 dark:bg-black/50 dark:text-gray-300 dark:hover:text-blue-400"
+        >
+          <SvgFormatLeftIcon class="size-3.5" />
+        </button>
       </ElTooltip>
     </div>
 
-    <!-- 主要内容区域：JSON 编辑器和图片预览并排显示 -->
-    <div class="flex gap-4">
-      <!-- JSON 编辑器 -->
-      <div class="relative flex-1">
-        <div :id="id"></div>
-        <!-- Loading 覆盖层 -->
+    <div class="flex w-full">
+      <div class="relative w-full flex-1 cursor-text" @click="focusEditor">
+        <div :id="id" class="json-editor-instance w-full"></div>
+
         <div
           v-if="loading"
-          class="absolute inset-0 z-10 flex items-center justify-center bg-white bg-opacity-75"
+          class="absolute inset-0 z-20 flex items-center justify-center bg-white/50 backdrop-blur-sm dark:bg-black/50"
         >
-          <svg class="animate-spin" width="24" height="24" viewBox="0 0 24 24">
+          <svg class="size-5 animate-spin text-blue-500" viewBox="0 0 24 24">
+            <circle
+              class="opacity-25"
+              cx="12"
+              cy="12"
+              r="10"
+              stroke="currentColor"
+              stroke-width="4"
+              fill="none"
+            />
             <path
-              fill="#409EFF"
-              d="M12,4V2A10,10 0 0,0 2,12H4A8,8 0 0,1 12,4Z"
+              class="opacity-75"
+              fill="currentColor"
+              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
             />
           </svg>
         </div>
       </div>
 
-      <!-- Base64 图片预览区域 -->
       <div
         v-if="hasBase64Images && imageRender"
-        class="base64-images-preview w-64 flex-shrink-0"
+        class="w-64 flex-shrink-0 border-l border-gray-100 bg-transparent p-3 dark:border-gray-800"
       >
-        <div class="sticky top-4">
-          <h4 class="mb-3 text-sm font-medium text-gray-700">图片预览</h4>
-          <div class="space-y-3">
-            <div
-              v-for="(imageItem, index) in base64Images"
-              :key="index"
-              class="base64-image-container"
-            >
-              <div class="image-key mb-2 text-xs font-medium text-gray-600">
-                {{ imageItem.key }}
-              </div>
-              <ElImage
-                :src="imageItem.value"
-                :alt="`Base64 image: ${imageItem.key}`"
-                class="base64-image"
-                fit="contain"
-                :preview-src-list="[imageItem.value]"
-                :initial-index="0"
-                preview-teleported
-              />
-            </div>
+        <div class="space-y-3">
+          <div v-for="(item, index) in base64Images" :key="index">
+            <div class="mb-1 text-xs text-gray-400">{{ item.key }}</div>
+            <ElImage
+              :src="item.value"
+              class="w-full rounded border border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-[#1A1A1A]"
+              fit="contain"
+              :preview-src-list="[item.value]"
+              lazy
+            />
           </div>
         </div>
       </div>
@@ -514,51 +551,37 @@ defineExpose({
 </template>
 
 <style lang="scss">
-/* Base64 图片样式 */
-.base64-images-preview {
-  padding-left: 16px;
-  border-left: 1px solid var(--el-border-color);
+.json-viewer-ultimate {
+  min-height: 0;
+
+  &,
+  &:focus-within,
+  *:focus {
+    outline: none !important;
+    box-shadow: none !important;
+  }
+
+  .monaco-editor,
+  .monaco-editor-background,
+  .monaco-editor .inputarea.ime-input,
+  .monaco-editor .margin,
+  .monaco-editor .monaco-scrollable-element {
+    outline: none !important;
+    background-color: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+
+  .monaco-editor .margin-view-overlays .line-numbers {
+    color: #d9d9d9 !important;
+  }
+
+  html.dark & .monaco-editor .margin-view-overlays .line-numbers {
+    color: #404040 !important;
+  }
 }
 
-.base64-image-container {
-  padding: 12px;
-  background: var(--el-bg-color);
-  border: 1px solid var(--el-border-color);
-  border-radius: var(--el-border-radius-base);
-}
-
-.base64-image-container:hover {
-  border-color: var(--el-color-primary);
-  box-shadow: 0 2px 8px var(--el-color-primary-light-8);
-}
-
-.image-key {
-  padding: 6px 8px;
-  margin-bottom: 8px;
-  font-size: var(--el-font-size-extra-small);
-  font-weight: 500;
-  color: var(--el-text-color-regular);
-  word-break: break-all;
-  background: var(--el-color-primary-light-9);
-  border: 1px solid var(--el-color-primary-light-7);
-  border-radius: var(--el-border-radius-base);
-}
-
-.base64-image {
-  width: 100%;
-  height: auto;
-  border-radius: var(--el-border-radius-base);
-}
-
-.base64-image :deep(.el-image__inner) {
-  border-radius: var(--el-border-radius-base);
-}
-
-.base64-images-preview h4 {
-  padding-bottom: 8px;
-  margin-bottom: 16px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
-  border-bottom: 1px solid var(--el-border-color-lighter);
+.json-editor-instance {
+  min-height: 100%;
 }
 </style>

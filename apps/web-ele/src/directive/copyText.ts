@@ -2,6 +2,8 @@ import type { Directive, DirectiveBinding } from 'vue';
 
 import { ElMessage } from 'element-plus';
 
+import { copyText } from '#/utils/clipboard';
+
 interface ElType extends HTMLElement {
   copyData: string;
   __handleClick__: any;
@@ -22,22 +24,12 @@ const copy: Directive = {
 
 async function handleClick(this: ElType, e: Event) {
   e.stopPropagation();
-  try {
-    // 优先使用现代API
-    await navigator.clipboard.writeText(this.copyData);
+  const copied = await copyText(this.copyData);
+  if (copied) {
     ElMessage.success('复制成功');
-  } catch {
-    // 降级方案
-    const textarea = document.createElement('textarea');
-    textarea.value = this.copyData;
-    textarea.style.position = 'fixed';
-    textarea.style.opacity = '0';
-    document.body.append(textarea);
-    textarea.select();
-    document.execCommand('Copy');
-    textarea.remove();
-    ElMessage.success('复制成功');
+    return;
   }
+  ElMessage.error('复制失败');
 }
 
 export default copy;

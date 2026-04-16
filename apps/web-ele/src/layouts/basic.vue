@@ -10,11 +10,11 @@ import ServiceSelector from '#/components/service-selector.vue';
 const { destroyWatermark, updateWatermark } = useWatermark();
 
 watch(
-  () => preferences.app.watermark,
-  async (enable) => {
+  () => [preferences.app.watermark, preferences.app.watermarkContent] as const,
+  async ([enable, content]) => {
     if (enable) {
       await updateWatermark({
-        content: preferences.app.watermarkContent,
+        content: content || 'Nextdoc4j',
       });
     } else {
       destroyWatermark();

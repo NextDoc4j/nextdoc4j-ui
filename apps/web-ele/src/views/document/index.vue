@@ -1,235 +1,359 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, ref, shallowRef } from 'vue';
+import type { ApiInfo } from '#/typings/openApi';
 
-import { Pane, Splitpanes } from 'splitpanes';
+import {
+  computed,
+  defineAsyncComponent,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  shallowRef,
+  watch,
+} from 'vue';
+
+import { usePreferences } from '@vben/preferences';
+
+import { ElEmpty, ElTabPane, ElTabs } from 'element-plus';
 
 import Loading from '#/components/loading.vue';
 
-import 'splitpanes/dist/splitpanes.css';
-
-// 懒加载组件
-const apiTest = defineAsyncComponent(() => import('#/components/api-test.vue'));
-const document = defineAsyncComponent(
+const loadApiTestPanel = () => import('#/components/api-test.vue');
+const ApiTestPanel = defineAsyncComponent(loadApiTestPanel);
+const DocumentPanel = defineAsyncComponent(
   () => import('./components/document.vue'),
 );
 
-const drawer = ref(false);
-const method = ref();
-const path = ref();
-const parameters = ref();
+interface DocumentExpose {
+  getDebugPayload?: () => {
+    info?: ApiInfo;
+    requestBodyType?: string;
+    requestBodyVariantState?: Record<string, number>;
+  };
+}
+
+interface DebugTriggerPayload {
+  info: ApiInfo;
+  requestBodyType?: string;
+  requestBodyVariantState?: Record<string, number>;
+}
+
+const activeView = ref<'debug' | 'detail'>('detail');
+const method = ref('');
+const path = ref('');
+const parameters = ref<any[]>([]);
+const responses = ref<Record<string, any>>({});
 const requestBody = ref();
+const requestBodyType = ref('');
+const requestBodyVariantState = ref<Record<string, number>>({});
 const security = ref();
-const testDrawRef = ref();
-const info = ref();
+const info = ref<ApiInfo | null>(null);
 
-// 使用 shallowRef 优化大对象响应性
-const documentRef = shallowRef();
+const documentRef = shallowRef<DocumentExpose | null>(null);
+const { isDark } = usePreferences();
+let apiTestPanelPreloadPromise: null | Promise<unknown> = null;
+let debugPreloadTimer: null | number = null;
+let debugPreloadIdleHandle: null | number = null;
 
-const handleTest = (data: any) => {
-  info.value = data;
-  method.value = data.method;
-  path.value = data.path;
-  parameters.value = data?.parameters ?? [];
-  requestBody.value = data.requestBody;
-  security.value = data.security;
-  drawer.value = true;
+const preloadApiTestPanel = () => {
+  apiTestPanelPreloadPromise ||= loadApiTestPanel();
+  return apiTestPanelPreloadPromise;
 };
 
-const requestBodyType = computed(() => {
-  return documentRef.value?.requestBodyType ?? '';
+const clearDebugPreloadTask = () => {
+  if (debugPreloadTimer !== null) {
+    window.clearTimeout(debugPreloadTimer);
+    debugPreloadTimer = null;
+  }
+
+  if (
+    debugPreloadIdleHandle !== null &&
+    'cancelIdleCallback' in window &&
+    typeof window.cancelIdleCallback === 'function'
+  ) {
+    window.cancelIdleCallback(debugPreloadIdleHandle);
+    debugPreloadIdleHandle = null;
+  }
+};
+
+const scheduleDebugPanelPreload = () => {
+  if (typeof window === 'undefined' || apiTestPanelPreloadPromise) {
+    return;
+  }
+
+  const warmUp = () => {
+    debugPreloadTimer = null;
+    debugPreloadIdleHandle = null;
+    void preloadApiTestPanel();
+  };
+
+  if (
+    'requestIdleCallback' in window &&
+    typeof window.requestIdleCallback === 'function'
+  ) {
+    debugPreloadIdleHandle = window.requestIdleCallback(warmUp, {
+      timeout: 1200,
+    });
+    return;
+  }
+
+  debugPreloadTimer = window.setTimeout(warmUp, 360);
+};
+
+const syncDebugState = (
+  payload?: ApiInfo,
+  selectedRequestBodyType?: string,
+  selectedRequestBodyVariantState?: Record<string, number>,
+) => {
+  const detailPayload = documentRef.value?.getDebugPayload?.();
+  const currentInfo = payload || detailPayload?.info;
+
+  if (!currentInfo) {
+    return false;
+  }
+
+  info.value = currentInfo;
+  method.value = currentInfo.method;
+  path.value = currentInfo.path;
+  parameters.value = currentInfo.parameters ?? [];
+  responses.value = currentInfo.responses ?? {};
+  requestBody.value = currentInfo.requestBody;
+  security.value = currentInfo.security;
+  requestBodyType.value =
+    selectedRequestBodyType ?? detailPayload?.requestBodyType ?? '';
+  requestBodyVariantState.value = {
+    ...(selectedRequestBodyVariantState ??
+      detailPayload?.requestBodyVariantState),
+  };
+  return true;
+};
+
+const handleTest = (payload: DebugTriggerPayload) => {
+  syncDebugState(
+    payload.info,
+    payload.requestBodyType,
+    payload.requestBodyVariantState,
+  );
+  void preloadApiTestPanel();
+  activeView.value = 'debug';
+};
+const handleClose = () => {
+  activeView.value = 'detail';
+};
+
+watch(activeView, async (view) => {
+  if (view === 'detail') {
+    return;
+  }
+
+  await nextTick();
+  syncDebugState();
 });
 
-const handleClose = () => {
-  drawer.value = false;
-};
+const debugReady = computed(() =>
+  Boolean(info.value && method.value && path.value),
+);
+
+onMounted(() => {
+  scheduleDebugPanelPreload();
+});
+
+onBeforeUnmount(() => {
+  clearDebugPreloadTask();
+});
 </script>
 
 <template>
-  <Splitpanes class="default-theme h-full" ref="testDrawRef">
-    <Pane :size="60" :min-size="50">
-      <Suspense>
-        <template #default>
-          <document
-            v-memo="[drawer]"
-            ref="documentRef"
-            @test="handleTest"
-            :show-test="drawer"
-          />
+  <div
+    class="document-page h-full overflow-hidden"
+    :class="{ 'document-page--dark': isDark }"
+  >
+    <ElTabs v-model="activeView" class="document-tabs h-full">
+      <ElTabPane name="detail" lazy>
+        <template #label>
+          <div class="document-tab-label">
+            <span class="document-tab-label__title">接口详情</span>
+          </div>
         </template>
-        <template #fallback>
-          <Loading />
+
+        <Suspense>
+          <template #default>
+            <DocumentPanel
+              ref="documentRef"
+              @test="handleTest"
+              :show-test="activeView === 'debug'"
+            />
+          </template>
+          <template #fallback>
+            <Loading />
+          </template>
+        </Suspense>
+      </ElTabPane>
+
+      <ElTabPane name="debug" lazy>
+        <template #label>
+          <div class="document-tab-label">
+            <span class="document-tab-label__title">在线调试</span>
+          </div>
         </template>
-      </Suspense>
-    </Pane>
-    <Pane :size="40" :min-size="30" :max-size="50" v-if="drawer">
-      <Suspense>
-        <template #default>
-          <api-test
-            :method="method"
-            :path="path"
-            :parameters="parameters"
-            :request-body="info.requestBody"
-            :security="security"
-            :request-body-type="requestBodyType"
-            @cancel="handleClose"
-          />
-        </template>
-        <template #fallback>
-          <Loading />
-        </template>
-      </Suspense>
-    </Pane>
-  </Splitpanes>
+
+        <Suspense>
+          <template #default>
+            <ApiTestPanel
+              v-if="debugReady && info"
+              :method="method"
+              :path="path"
+              :parameters="parameters"
+              :responses="responses"
+              :request-body="requestBody"
+              :security="security"
+              :request-body-type="requestBodyType"
+              :request-body-variant-state="requestBodyVariantState"
+              @cancel="handleClose"
+            />
+            <div
+              v-else
+              class="document-empty flex h-full items-center justify-center"
+            >
+              <ElEmpty description="未获取到当前接口信息，请先进入详情页" />
+            </div>
+          </template>
+          <template #fallback>
+            <Loading />
+          </template>
+        </Suspense>
+      </ElTabPane>
+    </ElTabs>
+  </div>
 </template>
 
-<style lang="scss">
-.full-space {
-  > :deep(.el-space__item) {
-    width: 100%;
+<style scoped lang="scss">
+.document-page {
+  --doc-radius-xl: calc(var(--radius) * 1.42);
+  --doc-radius-lg: calc(var(--radius) * 1.18);
+  --doc-radius-md: calc(var(--radius) * 0.94);
+  --doc-radius-sm: calc(var(--radius) * 0.72);
+  --doc-page-bg: var(--el-bg-color);
+  --el-border-radius-base: calc(var(--radius) * 0.75);
+  --el-border-radius-small: calc(var(--radius) * 0.62);
+
+  padding: 20px;
+  background: var(--doc-page-bg);
+}
+
+.document-page--dark {
+  --doc-page-bg: color-mix(
+    in srgb,
+    var(--el-bg-color) 90%,
+    var(--el-fill-color-light) 10%
+  );
+}
+
+.document-tabs {
+  :deep(.el-tabs__header) {
+    margin: 0 0 12px;
+    overflow: hidden;
+    background: var(--doc-page-bg);
+    border: 1px solid
+      color-mix(in srgb, var(--el-border-color) 92%, transparent);
+    border-radius: var(--doc-radius-lg);
+    box-shadow: 0 8px 18px
+      color-mix(in srgb, var(--el-text-color-primary) 4%, transparent);
+  }
+
+  :deep(.el-tabs__nav-wrap) {
+    padding: 4px;
+    border-radius: var(--doc-radius-md);
+  }
+
+  :deep(.el-tabs__nav-wrap::after) {
+    display: none;
+  }
+
+  :deep(.el-tabs__nav) {
+    gap: 6px;
+  }
+
+  :deep(.el-tabs__active-bar) {
+    display: none;
+  }
+
+  :deep(.el-tabs__item) {
+    height: auto;
+    padding: 0;
+  }
+
+  :deep(.el-tabs__content) {
+    height: calc(100% - 60px);
+    overflow: hidden;
+  }
+
+  :deep(.el-tab-pane) {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  :deep(.is-active .document-tab-label) {
+    color: var(--el-color-primary);
+    background: color-mix(
+      in srgb,
+      var(--el-bg-color) 82%,
+      var(--el-color-primary-light-9) 18%
+    );
+    border-color: color-mix(in srgb, var(--el-color-primary) 45%, transparent);
+    box-shadow:
+      inset 0 0 0 1px
+        color-mix(in srgb, var(--el-color-primary) 28%, transparent),
+      0 10px 22px color-mix(in srgb, var(--el-color-primary) 20%, transparent);
+    transform: translateY(-1px);
+  }
+
+  :deep(.is-active .document-tab-label__title) {
+    font-weight: 800;
+  }
+
+  :deep(.el-tabs__item:not(.is-active) .document-tab-label:hover) {
+    color: var(--el-text-color-primary);
+    background: color-mix(
+      in srgb,
+      var(--el-bg-color) 90%,
+      var(--el-fill-color-light) 10%
+    );
+    border-color: color-mix(
+      in srgb,
+      var(--el-text-color-primary) 16%,
+      transparent
+    );
   }
 }
 
-.app-json-schema-viewer {
-  width: 100%;
-  max-width: 800px;
-
-  & > .index-node-wrap:first-child {
-    & > .index-node {
-      @apply pt-0;
-    }
-  }
-
-  .index-node {
-    @apply relative max-w-full;
-  }
-
-  /* stylelint-disable-next-line selector-class-pattern */
-  .index-child-stack {
-    @apply my-0 ms-5;
-
-    .index-node-wrap {
-      @apply border-l last:border-0;
-
-      &:last-child {
-        /* stylelint-disable-next-line selector-class-pattern */
-        .index-sub-border {
-          margin-left: 0;
-          border-left: 1px solid var(--el-border-color);
-        }
-      }
-    }
-
-    .index-node {
-      @apply ps-5;
-    }
-
-    /* stylelint-disable-next-line selector-class-pattern */
-    .index-sub-border {
-      position: absolute;
-      top: -1.65rem;
-      left: -1.25rem;
-      width: 1.25rem;
-      height: 2.5rem;
-      margin-left: -12px;
-      border-bottom: 1px solid var(--el-border-color);
-      border-radius: 0;
-    }
-  }
-
-  .index-key {
-    flex-grow: 0;
-    flex-shrink: 0;
-    margin-right: 4px;
-    font-weight: 400;
-    color: #667085;
-  }
-
-  .index-value {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0 6px;
-    font-size: 12px;
-    font-weight: 400;
-    line-height: 20px;
-    color: #667085;
-    word-break: break-all;
-    background: rgb(16 24 40 / 4%);
-    border-radius: 6px;
-  }
-
-  .text-muted-big {
-    font-size: 14px;
-    font-weight: 500;
-    color: #667085;
-  }
-
-  /* stylelint-disable-next-line selector-class-pattern */
-  .index-additionalInformation__title {
-    margin: 0 8px;
-    color: #667085;
-  }
-
-  .property-name {
-    padding: 0 8px;
-    margin-right: 8px;
-    font-size: 12px;
-    font-weight: 600;
-    line-height: 22px;
-    color: #1890ff;
-    background-color: rgb(24 144 255 / 4%);
-    border-radius: 6px;
-  }
+.document-tab-label {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 108px;
+  padding: 8px 14px;
+  color: var(--el-text-color-secondary);
+  background: color-mix(
+    in srgb,
+    var(--el-bg-color) 92%,
+    var(--el-fill-color-light) 8%
+  );
+  border: 1px solid transparent;
+  border-radius: var(--doc-radius-sm);
+  transition: all 0.18s ease;
 }
 
-.index-required {
-  height: 22px;
-  padding: 0 12px;
-  font-size: 12px;
-  line-height: 22px;
-  color: #f79009;
-  white-space: nowrap;
+.document-tab-label__title {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
 }
 
-.index-optional {
-  height: 22px;
-  padding: 0 12px;
-  font-size: 12px;
-  line-height: 22px;
-  color: #667085;
-  white-space: nowrap;
-}
-
-.index-divider {
-  flex: 1;
-  height: 0;
-  margin: 0 6px;
-  border: 1px dashed transparent !important;
-}
-
-.index-node:hover {
-  .index-divider {
-    border: 1px dashed var(--el-border-color) !important;
-  }
-}
-
-.el-card {
-  border-radius: 12px;
-}
-
-.default-theme.splitpanes {
-  background-color: transparent;
-  transition: none;
-
-  .splitpanes__pane {
-    background-color: transparent;
-    transition: none;
-  }
-
-  .splitpanes__splitter {
-    background-color: var(--el-bg-color);
-    border: 1px dashed var(--el-border-color);
-    border-left: 1px dashed var(--el-border-color) !important;
-  }
+.document-empty {
+  background: var(--doc-page-bg);
+  border: 1px dashed var(--el-border-color);
+  border-radius: var(--doc-radius-xl);
 }
 </style>

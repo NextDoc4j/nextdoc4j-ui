@@ -38,11 +38,11 @@ const pathSegments = computed(() => {
     <span
       v-for="(segment, index) in pathSegments"
       :key="index"
-      class="cursor-pointer font-bold transition-all duration-200"
+      class="path-segment-item cursor-pointer font-bold transition-all duration-200"
       :class="[
         {
           'text-gray-400': segment.text === '/',
-          'mx-1 rounded-lg border-2 border-solid px-1 py-0.5': segment.isParam,
+          'mx-1 border-2 border-solid px-1 py-0.5': segment.isParam,
           'px-0.5': !segment.isParam && segment.text !== '/',
         },
       ]"
@@ -52,3 +52,9 @@ const pathSegments = computed(() => {
     </span>
   </span>
 </template>
+
+<style scoped>
+.path-segment-item {
+  border-radius: calc(var(--radius) * 0.62);
+}
+</style>
