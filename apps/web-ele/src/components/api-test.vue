@@ -188,7 +188,7 @@ const normalizeHeaderName = (name: string) => name.trim().toLowerCase();
 const PATH_PLACEHOLDER_SEGMENT_RE = /^\{[^/{}]+\}$/;
 
 const splitRequestUrlParts = (url: string) => {
-  const [pathAndSearch, hashFragment = ''] = `${url || ''}`.split('#', 2);
+  const [pathAndSearch = '', hashFragment = ''] = `${url || ''}`.split('#', 2);
   const [pathname = '', searchQuery = ''] = pathAndSearch.split('?', 2);
   return {
     hash: hashFragment ? `#${hashFragment}` : '',
