@@ -257,7 +257,7 @@ function handleMouseleave() {
     v-if="domVisible"
     :class="theme"
     :style="hiddenSideStyle"
-    class="duration-180 h-full transition-[flex-basis,margin-left,max-width,min-width,width] ease-[cubic-bezier(0.22,1,0.36,1)]"
+    class="layout-sidebar__ease duration-180 h-full transition-[flex-basis,margin-left,max-width,min-width,width]"
   ></div>
   <aside
     :class="[
@@ -268,7 +268,7 @@ function handleMouseleave() {
       },
     ]"
     :style="style"
-    class="duration-180 fixed left-0 top-0 h-full transition-[flex-basis,margin-left,max-width,min-width,width] ease-[cubic-bezier(0.22,1,0.36,1)]"
+    class="layout-sidebar__ease duration-180 fixed left-0 top-0 h-full transition-[flex-basis,margin-left,max-width,min-width,width]"
     @mouseenter="handleMouseenter"
     @mouseleave="handleMouseleave"
   >
@@ -297,7 +297,7 @@ function handleMouseleave() {
         'border-l': extraVisible,
       }"
       :style="extraStyle"
-      class="border-border bg-sidebar fixed top-0 h-full overflow-hidden border-r transition-[left,width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]"
+      class="layout-sidebar__ease border-border bg-sidebar fixed top-0 h-full overflow-hidden border-r transition-[left,width] duration-200"
     >
       <SidebarCollapseButton
         v-if="isSidebarMixed && expandOnHover"
@@ -322,3 +322,9 @@ function handleMouseleave() {
     </div>
   </aside>
 </template>
+
+<style scoped>
+.layout-sidebar__ease {
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+</style>

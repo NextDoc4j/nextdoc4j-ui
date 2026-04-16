@@ -738,15 +738,18 @@ function collectOperationsFromPaths(
 
 function mergeComponents(docs: OpenAPISpec[]) {
   const schemas: Record<string, any> = {};
+  const examples: Record<string, any> = {};
   const securitySchemes: Record<string, any> = {};
 
   docs.forEach((doc) => {
     Object.assign(schemas, doc.components?.schemas ?? {});
+    Object.assign(examples, (doc.components as any)?.examples ?? {});
     Object.assign(securitySchemes, doc.components?.securitySchemes ?? {});
   });
 
   return {
     schemas,
+    ...(Object.keys(examples).length > 0 ? { examples } : {}),
     ...(Object.keys(securitySchemes).length > 0 ? { securitySchemes } : {}),
   };
 }
@@ -835,6 +838,9 @@ function filterComponentsBySelectedPaths(
     ...(Object.keys(filteredSchemas).length > 0
       ? { schemas: filteredSchemas }
       : {}),
+    ...(Object.keys((components as any)?.examples || {}).length > 0
+      ? { examples: (components as any).examples }
+      : {}),
     ...(Object.keys(components?.securitySchemes || {}).length > 0
       ? { securitySchemes: components.securitySchemes }
       : {}),
@@ -876,6 +882,18 @@ function formatExampleValue(value: any) {
   }
 }
 
+function stringifyJson(value: unknown) {
+  if (value === undefined) {
+    return '';
+  }
+
+  try {
+    return JSON.stringify(value, null, 2) || '';
+  } catch {
+    return `${value ?? ''}`;
+  }
+}
+
 function toMarkdownCell(value: any) {
   const text = `${value ?? ''}`.trim();
   if (!text) {
@@ -894,6 +912,458 @@ function mergeDescriptionWithEnum(description: string, schema?: any) {
     return `可选值: ${enumText}`;
   }
   return base || '-';
+}
+
+function decodeJsonPointerToken(value: string) {
+  return value.replaceAll('~1', '/').replaceAll('~0', '~');
+}
+
+function normalizeExampleValue(value: unknown): unknown {
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  const trimmed = value.trim();
+  if (
+    trimmed === 'true' ||
+    trimmed === 'false' ||
+    trimmed === 'null' ||
+    /^-?\d+(?:\.\d+)?$/.test(trimmed) ||
+    (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+    (trimmed.startsWith('[') && trimmed.endsWith(']'))
+  ) {
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return value;
+    }
+  }
+
+  return value;
+}
+
+function normalizeMatchText(value?: unknown) {
+  return `${value ?? ''}`.trim().toLowerCase();
+}
+
+function splitDescriptionTokens(value?: string) {
+  const normalized = `${value || ''}`.trim();
+  if (!normalized) {
+    return [];
+  }
+
+  return [
+    normalized,
+    ...normalized
+      .split(/[|/、,，;；]+/u)
+      .map((item) => item.trim())
+      .filter(Boolean),
+  ];
+}
+
+function getComponentExampleMap(doc: OpenAPISpec) {
+  return (((doc.components as any) || {}).examples ?? {}) as Record<
+    string,
+    any
+  >;
+}
+
+function resolveExampleReference(ref: string | undefined, doc: OpenAPISpec) {
+  if (!ref) {
+    return undefined;
+  }
+
+  const segments = ref
+    .replace(/^#\/+/u, '')
+    .split('/')
+    .map((item) => decodeJsonPointerToken(item));
+  const explicitKey = segments.length > 2 ? segments.slice(2).join('/') : '';
+  const fallbackKey = segments.at(-1) || '';
+  const componentExamples = getComponentExampleMap(doc);
+
+  return componentExamples[explicitKey] ?? componentExamples[fallbackKey];
+}
+
+function resolveExampleValue(example: any, doc: OpenAPISpec): unknown {
+  if (example === undefined) {
+    return undefined;
+  }
+
+  if (example === null) {
+    return null;
+  }
+
+  if (typeof example !== 'object') {
+    return normalizeExampleValue(example);
+  }
+
+  if (typeof example.$ref === 'string') {
+    return resolveExampleValue(resolveExampleReference(example.$ref, doc), doc);
+  }
+
+  if (example.value !== undefined) {
+    return normalizeExampleValue(example.value);
+  }
+
+  if (example.example !== undefined) {
+    return normalizeExampleValue(example.example);
+  }
+
+  if (
+    example.summary !== undefined ||
+    example.description !== undefined ||
+    example.externalValue !== undefined
+  ) {
+    return undefined;
+  }
+
+  return normalizeExampleValue(example);
+}
+
+function pickContentSchema(content?: Record<string, any>) {
+  if (!content) return null;
+
+  return (
+    content['application/json']?.schema ||
+    content['*/*']?.schema ||
+    Object.values(content).find((item) => Boolean((item as any)?.schema))
+      ?.schema ||
+    null
+  );
+}
+
+function pickContentType(content?: Record<string, any>) {
+  if (!content) return '';
+  return Object.keys(content)[0] || '';
+}
+
+function pickContentEntry(content?: Record<string, any>) {
+  if (!content) {
+    return {
+      contentType: '',
+      value: null,
+    };
+  }
+
+  const preferredEntries = [
+    ['application/json', content['application/json']],
+    ['*/*', content['*/*']],
+    ...Object.entries(content).filter(
+      ([contentType]) =>
+        contentType !== 'application/json' && contentType !== '*/*',
+    ),
+  ].filter(([, value]) => Boolean(value));
+
+  if (preferredEntries.length <= 0) {
+    return {
+      contentType: '',
+      value: null,
+    };
+  }
+
+  const picked =
+    preferredEntries.find(([, value]) => {
+      return Boolean(
+        (value as any)?.examples ||
+          (value as any)?.example ||
+          (value as any)?.schema,
+      );
+    }) || preferredEntries[0];
+
+  return {
+    contentType: picked?.[0] || '',
+    value: (picked?.[1] as any) ?? null,
+  };
+}
+
+function resolveExampleScore(
+  exampleKey: string,
+  exampleSummary: string,
+  exampleDescription: string,
+  responseCode: string,
+  responseDescription?: string,
+) {
+  let score = 0;
+  const normalizedCode = normalizeMatchText(responseCode);
+  const normalizedKey = normalizeMatchText(exampleKey);
+  const normalizedSummary = normalizeMatchText(exampleSummary);
+  const normalizedDescription = normalizeMatchText(exampleDescription);
+
+  if (normalizedCode) {
+    if (normalizedKey === normalizedCode) {
+      score += 100;
+    }
+    if (
+      normalizedKey.startsWith(`${normalizedCode}_`) ||
+      normalizedKey.startsWith(`${normalizedCode}.`) ||
+      normalizedKey.startsWith(`${normalizedCode}-`)
+    ) {
+      score += 80;
+    }
+  }
+
+  const responseDescriptionTokens = splitDescriptionTokens(
+    responseDescription,
+  ).map((item) => normalizeMatchText(item));
+
+  responseDescriptionTokens.forEach((token) => {
+    if (!token) {
+      return;
+    }
+
+    [normalizedSummary, normalizedDescription].forEach((label) => {
+      if (!label) {
+        return;
+      }
+
+      if (label === token) {
+        score += 60;
+        return;
+      }
+
+      if (label.includes(token) || token.includes(label)) {
+        score += 40;
+      }
+    });
+  });
+
+  return score;
+}
+
+function resolveResponseExampleFromExamples(
+  examples: Record<string, any>,
+  responseCode: string,
+  responseDescription: string | undefined,
+  doc: OpenAPISpec,
+) {
+  const candidates = Object.entries(examples)
+    .map(([key, example], index) => {
+      const value = resolveExampleValue(example, doc);
+      if (value === undefined) {
+        return null;
+      }
+
+      const summary = `${example?.summary || ''}`;
+      const description = `${example?.description || ''}`;
+      return {
+        description,
+        index,
+        key,
+        label: summary || description || key,
+        score: resolveExampleScore(
+          key,
+          summary,
+          description,
+          responseCode,
+          responseDescription,
+        ),
+        value,
+      };
+    })
+    .filter(Boolean) as Array<{
+    description: string;
+    index: number;
+    key: string;
+    label: string;
+    score: number;
+    value: unknown;
+  }>;
+
+  if (candidates.length <= 0) {
+    return {
+      defaultKey: '',
+      hasValue: false,
+      options: [],
+      value: undefined,
+    };
+  }
+
+  const matched = [...candidates].sort((a, b) => {
+    if (b.score !== a.score) {
+      return b.score - a.score;
+    }
+    return a.index - b.index;
+  })[0];
+
+  return {
+    defaultKey: matched?.key || '',
+    hasValue: true,
+    options: candidates.map((item) => ({
+      description: item.description,
+      key: item.key,
+      label: item.label,
+      value: item.value,
+    })),
+    value: matched?.value,
+  };
+}
+
+function resolveResponseExampleData(
+  responseCode: string,
+  responseDescription: string | undefined,
+  contentValue: any,
+  doc: OpenAPISpec,
+) {
+  if (contentValue?.examples && typeof contentValue.examples === 'object') {
+    const matched = resolveResponseExampleFromExamples(
+      contentValue.examples,
+      responseCode,
+      responseDescription,
+      doc,
+    );
+    if (matched.hasValue) {
+      return matched;
+    }
+  }
+
+  if (contentValue?.example !== undefined) {
+    return {
+      defaultKey: '',
+      hasValue: true,
+      options: [],
+      value: resolveExampleValue(contentValue.example, doc),
+    };
+  }
+
+  return {
+    defaultKey: '',
+    hasValue: false,
+    options: [],
+    value: undefined,
+  };
+}
+
+function resolveSchemaKind(schema: any) {
+  if (!schema || typeof schema !== 'object') {
+    return '';
+  }
+  if (schema.type) {
+    return schema.type;
+  }
+  if (schema.properties) {
+    return 'object';
+  }
+  if (schema.items) {
+    return 'array';
+  }
+  if (Array.isArray(schema.enum) && schema.enum.length > 0) {
+    return typeof schema.enum[0];
+  }
+  return '';
+}
+
+function getStringExampleByFormat(format?: string) {
+  const normalized = `${format || ''}`.toLowerCase();
+  switch (normalized) {
+    case 'binary': {
+      return '<binary>';
+    }
+    case 'byte': {
+      return '<base64>';
+    }
+    case 'date': {
+      return '2026-01-01';
+    }
+    case 'date-time': {
+      return '2026-01-01T00:00:00Z';
+    }
+    case 'email': {
+      return 'user@example.com';
+    }
+    case 'uri':
+    case 'url': {
+      return 'https://example.com';
+    }
+    case 'uuid': {
+      return '123e4567-e89b-12d3-a456-426614174000';
+    }
+    default: {
+      return 'string';
+    }
+  }
+}
+
+function generateSchemaExample(
+  schema: any,
+  doc: OpenAPISpec,
+  seen = new Set<string>(),
+  depth = 0,
+): any {
+  if (schema === null || schema === undefined || depth > 40) {
+    return null;
+  }
+
+  const normalized = normalizeSchema(schema, doc, seen);
+  if (normalized === null || normalized === undefined) {
+    return null;
+  }
+  if (typeof normalized !== 'object') {
+    return normalized;
+  }
+
+  if (normalized.example !== undefined) {
+    return normalizeExampleValue(normalized.example);
+  }
+
+  if (
+    Array.isArray(normalized.examples) &&
+    normalized.examples.length > 0 &&
+    normalized.examples[0] !== undefined
+  ) {
+    return normalizeExampleValue(normalized.examples[0]);
+  }
+
+  if (normalized.default !== undefined) {
+    return normalizeExampleValue(normalized.default);
+  }
+
+  if (normalized.const !== undefined) {
+    return normalizeExampleValue(normalized.const);
+  }
+
+  if (normalized._const !== undefined) {
+    return normalizeExampleValue(normalized._const);
+  }
+
+  if (Array.isArray(normalized.enum) && normalized.enum.length > 0) {
+    return normalized.enum[0];
+  }
+
+  const nextSeen = appendSchemaSeen(schema, seen);
+  const schemaKind = resolveSchemaKind(normalized);
+
+  switch (schemaKind) {
+    case 'array': {
+      return normalized.items
+        ? [generateSchemaExample(normalized.items, doc, nextSeen, depth + 1)]
+        : [];
+    }
+    case 'boolean': {
+      return false;
+    }
+    case 'integer': {
+      return normalized.format === 'int64' ? 0 : 1;
+    }
+    case 'number': {
+      return 0;
+    }
+    case 'object': {
+      const result: Record<string, any> = {};
+      Object.entries(normalized.properties || {}).forEach(([key, value]) => {
+        result[key] = generateSchemaExample(value, doc, nextSeen, depth + 1);
+      });
+      return result;
+    }
+    case 'string': {
+      return getStringExampleByFormat(normalized.format);
+    }
+    default: {
+      if (normalized.nullable === true) {
+        return null;
+      }
+      return null;
+    }
+  }
 }
 
 function normalizeSecurityMetadata(raw: any) {
@@ -1151,8 +1621,44 @@ type SchemaFieldRow = {
 
 type SchemaFieldGroup = {
   description: string;
+  exampleValue?: unknown;
   rows: SchemaFieldRow[];
   title: string;
+};
+
+type CompositionKeyword = 'allOf' | 'anyOf' | 'oneOf';
+
+type SchemaCompositionOption = {
+  description: string;
+  schema: any;
+  title: string;
+};
+
+type SchemaCompositionSection = {
+  description: string;
+  keyword: CompositionKeyword;
+  nodeTitle: string;
+  options: SchemaCompositionOption[];
+};
+
+type ResponseExampleOption = {
+  description?: string;
+  key: string;
+  label: string;
+  value: unknown;
+};
+
+type ResponseExportItem = {
+  code: string;
+  contentType: string;
+  defaultExampleKey: string;
+  description: string;
+  exampleOptions: ResponseExampleOption[];
+  exampleValue: unknown;
+  groups: SchemaFieldGroup[];
+  hasExampleValue: boolean;
+  schema: any;
+  structureSignature: string;
 };
 
 function collectSchemaFields(
@@ -1270,6 +1776,7 @@ function buildSchemaFieldGroups(
       {
         title: '',
         description: variants[0]?.description || '',
+        exampleValue: generateSchemaExample(variants[0], doc),
         rows: collectSchemaFields(variants[0], doc),
       },
     ];
@@ -1282,9 +1789,144 @@ function buildSchemaFieldGroups(
       title:
         normalized?.title || variant?.title || refTitle || `方案 ${index + 1}`,
       description: normalized?.description || variant?.description || '',
+      exampleValue: generateSchemaExample(normalized || variant, doc),
       rows: collectSchemaFields(normalized || variant, doc),
     };
   });
+}
+
+function getSchemaNodeTitle(path: string, schema: any, resolved: any) {
+  const refTitle =
+    resolved?.[SCHEMA_REF_MARKER] ||
+    parseSchemaRef(schema?.$ref) ||
+    parseSchemaRef(resolved?.$ref) ||
+    '';
+  if (refTitle) {
+    return refTitle;
+  }
+  if (resolved?.title) {
+    return resolved.title;
+  }
+  if (!path || path === '$') {
+    return '根结构';
+  }
+  return path.replace(/^\$\./u, '').replaceAll('.allOf.', '.').trim();
+}
+
+function getCompositionOptionTitle(
+  keyword: CompositionKeyword,
+  nodeTitle: string,
+  normalized: any,
+  item: any,
+) {
+  const refTitle = item?.$ref ? parseSchemaRef(item.$ref) : '';
+  const directTitle = normalized?.title || item?.title || refTitle || '';
+  if (directTitle) {
+    return directTitle;
+  }
+
+  if (keyword === 'allOf' && nodeTitle && nodeTitle !== '根结构') {
+    return `${nodeTitle}（自身字段）`;
+  }
+
+  return '';
+}
+
+function collectSchemaCompositionSections(
+  schema: any,
+  doc: OpenAPISpec,
+  path = '$',
+  seen = new Set<string>(),
+  appended = new Set<string>(),
+  result: SchemaCompositionSection[] = [],
+) {
+  const resolved = resolveSchemaRef(schema, doc, seen);
+  if (!resolved || typeof resolved !== 'object') {
+    return result;
+  }
+
+  const nextSeen = appendSchemaSeen(schema, seen);
+  (['oneOf', 'allOf', 'anyOf'] as CompositionKeyword[]).forEach((keyword) => {
+    const options = Array.isArray(resolved[keyword]) ? resolved[keyword] : [];
+    if (options.length <= 0) {
+      return;
+    }
+
+    const nodeTitle = getSchemaNodeTitle(path, schema, resolved);
+    const sectionKey = `${keyword}:${nodeTitle}`;
+    if (!appended.has(sectionKey)) {
+      appended.add(sectionKey);
+      result.push({
+        description: resolved.description || '',
+        keyword,
+        nodeTitle,
+        options: options.map((item: any) => {
+          const normalized = normalizeSchema(item, doc, new Set(nextSeen));
+          return {
+            description: normalized?.description || item?.description || '',
+            schema: item,
+            title: getCompositionOptionTitle(
+              keyword,
+              nodeTitle,
+              normalized,
+              item,
+            ),
+          };
+        }),
+      });
+    }
+  });
+
+  Object.entries(resolved.properties || {}).forEach(([key, value]) => {
+    collectSchemaCompositionSections(
+      value,
+      doc,
+      path === '$' ? `$.${key}` : `${path}.${key}`,
+      new Set(nextSeen),
+      appended,
+      result,
+    );
+  });
+
+  if (resolved.items) {
+    collectSchemaCompositionSections(
+      resolved.items,
+      doc,
+      `${path}[]`,
+      new Set(nextSeen),
+      appended,
+      result,
+    );
+  }
+
+  if (Array.isArray(resolved.prefixItems)) {
+    resolved.prefixItems.forEach((item: any, index: number) => {
+      collectSchemaCompositionSections(
+        item,
+        doc,
+        `${path}[${index}]`,
+        new Set(nextSeen),
+        appended,
+        result,
+      );
+    });
+  }
+
+  (['oneOf', 'allOf', 'anyOf'] as CompositionKeyword[]).forEach((keyword) => {
+    const options = Array.isArray(resolved[keyword]) ? resolved[keyword] : [];
+    options.forEach((item: any, index: number) => {
+      collectSchemaCompositionSections(
+        item,
+        doc,
+        `${path}.${keyword}[${index}]`,
+        new Set(nextSeen),
+        appended,
+        result,
+      );
+    });
+  });
+
+  return result;
 }
 
 function toDisplayFieldName(path: string) {
@@ -1701,7 +2343,29 @@ function appendSchemaRows(lines: string[], rows: SchemaFieldRow[]) {
   lines.push('');
 }
 
-function appendSchemaFieldGroups(lines: string[], groups: SchemaFieldGroup[]) {
+function appendJsonExampleBlock(
+  lines: string[],
+  value: unknown,
+  title = 'JSON 示例',
+) {
+  lines.push(`###### ${title}`, '');
+
+  const jsonText = stringifyJson(value);
+  if (!jsonText) {
+    lines.push('-', '');
+    return;
+  }
+
+  lines.push('```json', jsonText, '```', '');
+}
+
+function appendSchemaFieldGroups(
+  lines: string[],
+  groups: SchemaFieldGroup[],
+  options: {
+    includeExamples?: boolean;
+  } = {},
+) {
   if (groups.length <= 0) {
     appendSchemaRows(lines, []);
     return;
@@ -1709,6 +2373,9 @@ function appendSchemaFieldGroups(lines: string[], groups: SchemaFieldGroup[]) {
 
   if (groups.length === 1) {
     appendSchemaRows(lines, groups[0]?.rows || []);
+    if (options.includeExamples) {
+      appendJsonExampleBlock(lines, groups[0]?.exampleValue);
+    }
     return;
   }
 
@@ -1721,6 +2388,65 @@ function appendSchemaFieldGroups(lines: string[], groups: SchemaFieldGroup[]) {
       lines.push(`- 说明: ${group.description}`, '');
     }
     appendSchemaRows(lines, group.rows || []);
+    if (options.includeExamples) {
+      appendJsonExampleBlock(lines, group.exampleValue);
+    }
+  });
+}
+
+function appendSchemaCompositionSections(
+  lines: string[],
+  schema: any,
+  doc: OpenAPISpec,
+  options: {
+    coveredTitles?: string[];
+    skipRootSection?: boolean;
+  } = {},
+) {
+  const rootResolved = resolveSchemaRef(schema, doc, new Set<string>());
+  const rootNodeTitle = getSchemaNodeTitle('$', schema, rootResolved);
+  const coveredTitleSet = new Set(
+    (options.coveredTitles || [])
+      .map((item) => `${item || ''}`.trim())
+      .filter(Boolean),
+  );
+  const sections = collectSchemaCompositionSections(schema, doc).filter(
+    (section) => {
+      if (options.skipRootSection && section.nodeTitle === rootNodeTitle) {
+        return false;
+      }
+      if (coveredTitleSet.has(section.nodeTitle)) {
+        return false;
+      }
+      return true;
+    },
+  );
+  if (sections.length <= 0) {
+    return;
+  }
+
+  lines.push('###### 组合结构', '');
+
+  sections.forEach((section) => {
+    lines.push(`${section.keyword} · ${section.nodeTitle}`, '');
+    if (section.description) {
+      lines.push(`说明: ${section.description}`, '');
+    }
+
+    section.options.forEach((option, index) => {
+      lines.push(
+        `${section.keyword === 'allOf' ? '组成' : '方案'} ${index + 1}${option.title ? `：${option.title}` : ''}`,
+        '',
+      );
+      if (option.description) {
+        lines.push(`说明: ${option.description}`, '');
+      }
+      appendSchemaFieldGroups(
+        lines,
+        buildSchemaFieldGroups(option.schema, doc),
+      );
+      appendJsonExampleBlock(lines, generateSchemaExample(option.schema, doc));
+    });
   });
 }
 
@@ -1779,6 +2505,241 @@ function buildParameterRowsFromParameters(params: any[], doc: OpenAPISpec) {
           normalizedSchema?.default,
       ),
     };
+  });
+}
+
+function appendResponseSummaryTable(
+  lines: string[],
+  items: ResponseExportItem[],
+) {
+  if (items.length <= 0) {
+    lines.push('-', '');
+    return;
+  }
+
+  lines.push('| 响应码 | 说明 | 类型 |', '| :-- | :----- | :--------------- |');
+  items.forEach((item) => {
+    lines.push(
+      `| ${toMarkdownCell(item.code)} | ${toMarkdownCell(item.description || '-')} | ${toMarkdownCell(item.contentType || '-')} |`,
+    );
+  });
+  lines.push('');
+}
+
+function getSchemaGroupSignature(groups: SchemaFieldGroup[]) {
+  return JSON.stringify(
+    groups.map((group) => ({
+      description: group.description || '',
+      rows: (group.rows || []).map((row) => ({
+        description: row.description || '',
+        example: row.example || '',
+        name: row.name || '',
+        required: row.required,
+        type: row.type || '',
+      })),
+      title: group.title || '',
+    })),
+  );
+}
+
+function getCompositionSectionsSignatureForDoc(
+  sections: SchemaCompositionSection[],
+  doc: OpenAPISpec,
+) {
+  return JSON.stringify(
+    sections.map((section) => ({
+      description: section.description || '',
+      keyword: section.keyword,
+      nodeTitle: section.nodeTitle,
+      options: section.options.map((option) => ({
+        description: option.description || '',
+        groupSignature: getSchemaGroupSignature(
+          buildSchemaFieldGroups(option.schema, doc),
+        ),
+        title: option.title || '',
+      })),
+    })),
+  );
+}
+
+function isIgnoredResponseContentType(contentType: string) {
+  const normalized = `${contentType || ''}`.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  return (
+    normalized.includes('text/event-stream') ||
+    normalized.includes('octet-stream') ||
+    normalized.startsWith('image/') ||
+    normalized.startsWith('audio/') ||
+    normalized.startsWith('video/') ||
+    normalized.includes('application/pdf')
+  );
+}
+
+function shouldDisplayResponseSchema(
+  schema: any,
+  contentType: string,
+  groups: SchemaFieldGroup[],
+  doc: OpenAPISpec,
+) {
+  if (!schema || isIgnoredResponseContentType(contentType)) {
+    return false;
+  }
+
+  const normalized = normalizeSchema(schema, doc);
+  const schemaKind = resolveSchemaKind(normalized);
+
+  if (
+    !schemaKind ||
+    schemaKind === 'string' ||
+    schemaKind === 'boolean' ||
+    schemaKind === 'integer' ||
+    schemaKind === 'number'
+  ) {
+    return false;
+  }
+
+  if (schemaKind === 'array') {
+    const itemKind = resolveSchemaKind(normalizeSchema(normalized?.items, doc));
+    if (itemKind && itemKind !== 'array' && itemKind !== 'object') {
+      return false;
+    }
+  }
+
+  return groups.some((group) => (group.rows || []).length > 0);
+}
+
+function buildResponseStructureSignature(
+  schema: any,
+  groups: SchemaFieldGroup[],
+  doc: OpenAPISpec,
+) {
+  return JSON.stringify({
+    composition: getCompositionSectionsSignatureForDoc(
+      collectSchemaCompositionSections(schema, doc),
+      doc,
+    ),
+    groups: getSchemaGroupSignature(groups),
+  });
+}
+
+function buildResponseExportItems(
+  responses: Record<string, any> | undefined,
+  doc: OpenAPISpec,
+) {
+  return Object.entries(responses || {})
+    .map(([code, response]: [string, any]): null | ResponseExportItem => {
+      const { contentType, value: contentValue } = pickContentEntry(
+        response?.content,
+      );
+      const finalContentType =
+        contentType || pickContentType(response?.content) || '';
+      const schema =
+        pickContentSchema(response?.content) ||
+        contentValue?.schema ||
+        response?.schema ||
+        null;
+      const groups = schema ? buildSchemaFieldGroups(schema, doc) : [];
+      if (!shouldDisplayResponseSchema(schema, finalContentType, groups, doc)) {
+        return null;
+      }
+
+      const exampleData = resolveResponseExampleData(
+        code,
+        response?.description,
+        contentValue,
+        doc,
+      );
+      let exampleValue = exampleData.hasValue ? exampleData.value : undefined;
+      if (!exampleData.hasValue && schema) {
+        exampleValue = generateSchemaExample(schema, doc);
+      }
+
+      return {
+        code,
+        contentType: finalContentType,
+        defaultExampleKey: exampleData.defaultKey,
+        description: response?.description || '-',
+        exampleOptions: exampleData.options as ResponseExampleOption[],
+        exampleValue,
+        groups,
+        hasExampleValue: exampleValue !== undefined,
+        schema,
+        structureSignature: buildResponseStructureSignature(
+          schema,
+          groups,
+          doc,
+        ),
+      };
+    })
+    .filter((item): item is ResponseExportItem => item !== null);
+}
+
+function groupResponseExportItems(items: ResponseExportItem[]) {
+  const groupMap = new Map<
+    string,
+    {
+      items: ResponseExportItem[];
+      schema: any;
+    }
+  >();
+
+  items.forEach((item) => {
+    if (!groupMap.has(item.structureSignature)) {
+      groupMap.set(item.structureSignature, {
+        items: [],
+        schema: item.schema,
+      });
+    }
+    groupMap.get(item.structureSignature)!.items.push(item);
+  });
+
+  return [...groupMap.values()];
+}
+
+function appendResponseExamples(lines: string[], items: ResponseExportItem[]) {
+  const exampleMap = new Map<
+    string,
+    {
+      labels: string[];
+      value: unknown;
+    }
+  >();
+
+  items.forEach((item) => {
+    if (!item.hasExampleValue) {
+      return;
+    }
+
+    const signature = stringifyJson(item.exampleValue);
+    if (!signature) {
+      return;
+    }
+
+    if (!exampleMap.has(signature)) {
+      exampleMap.set(signature, {
+        labels: [],
+        value: item.exampleValue,
+      });
+    }
+
+    exampleMap
+      .get(signature)!
+      .labels.push(
+        item.description && item.description !== '-'
+          ? `${item.code} - ${item.description}`
+          : item.code,
+      );
+  });
+
+  [...exampleMap.values()].forEach((item) => {
+    appendJsonExampleBlock(
+      lines,
+      item.value,
+      `JSON 示例（${item.labels.join('、')}）`,
+    );
   });
 }
 
@@ -2049,38 +3010,44 @@ function buildMarkdownDocument(doc: OpenAPISpec, selectedOps: OperationItem[]) {
     if (raw.requestBody?.content) {
       Object.entries(raw.requestBody.content).forEach(([contentType, body]) => {
         lines.push(`##### 请求体参数（${contentType}）`, '');
-        const groups = buildSchemaFieldGroups((body as any)?.schema, doc);
-        appendSchemaFieldGroups(lines, groups);
+        const schema = (body as any)?.schema;
+        const groups = buildSchemaFieldGroups(schema, doc);
+        appendSchemaFieldGroups(lines, groups, {
+          includeExamples: groups.length > 1,
+        });
+        if (groups.length <= 1) {
+          appendJsonExampleBlock(lines, generateSchemaExample(schema, doc));
+        }
+        appendSchemaCompositionSections(lines, schema, doc, {
+          coveredTitles: groups.map((group) => group.title),
+          skipRootSection: true,
+        });
       });
     }
 
     if (raw.responses) {
-      Object.entries(raw.responses).forEach(
-        ([code, response]: [string, any]) => {
-          if (!response?.content) {
-            lines.push(
-              `##### 响应参数（${code}）`,
-              '',
-              `- ${response?.description || '-'}：无响应体`,
-              '',
-            );
-            return;
+      const responseItems = buildResponseExportItems(raw.responses, doc);
+      if (responseItems.length > 0) {
+        const responseGroups = groupResponseExportItems(responseItems);
+        lines.push('##### 响应参数', '');
+        appendResponseSummaryTable(lines, responseItems);
+
+        responseGroups.forEach((group, index) => {
+          if (responseGroups.length > 1) {
+            const codes = group.items.map((item) => item.code).join('、');
+            lines.push(`###### 响应结构 ${index + 1}（${codes}）`, '');
           }
-          Object.entries(response.content).forEach(
-            ([contentType, content]: [string, any]) => {
-              const responseDescription = response?.description
-                ? ` - ${response.description}`
-                : '';
-              lines.push(
-                `##### 响应参数（${code}${responseDescription} / ${contentType}）`,
-                '',
-              );
-              const groups = buildSchemaFieldGroups(content?.schema, doc);
-              appendSchemaFieldGroups(lines, groups);
-            },
-          );
-        },
-      );
+
+          appendSchemaFieldGroups(lines, group.items[0]?.groups || []);
+          appendSchemaCompositionSections(lines, group.schema, doc, {
+            coveredTitles: (group.items[0]?.groups || []).map(
+              (item) => item.title,
+            ),
+            skipRootSection: true,
+          });
+          appendResponseExamples(lines, group.items);
+        });
+      }
     }
   };
 
@@ -2358,6 +3325,40 @@ function buildDocxChildrenFromMarkdown(markdownContent: string) {
 
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index] || '';
+    const trimmedLine = line.trim();
+
+    if (trimmedLine.startsWith('```')) {
+      const codeLines: string[] = [];
+      let codeIndex = index + 1;
+      while (codeIndex < lines.length) {
+        const codeLine = lines[codeIndex] || '';
+        if (codeLine.trim().startsWith('```')) {
+          break;
+        }
+        codeLines.push(codeLine);
+        codeIndex += 1;
+      }
+
+      if (codeLines.length <= 0) {
+        codeLines.push('');
+      }
+
+      codeLines.forEach((codeLine) => {
+        children.push(
+          new DocxParagraph({
+            children: [
+              new DocxTextRun({
+                font: 'Courier New',
+                text: codeLine || ' ',
+              }),
+            ],
+          }),
+        );
+      });
+      children.push(new DocxParagraph({ text: '' }));
+      index = codeIndex;
+      continue;
+    }
 
     if (
       isMarkdownTableHeaderLine(line) &&
@@ -2436,6 +3437,16 @@ function buildDocxChildrenFromMarkdown(markdownContent: string) {
         new DocxParagraph({
           text: normalized.slice(6).trim(),
           heading: DocxHeadingLevel.HEADING_5,
+        }),
+      );
+      continue;
+    }
+
+    if (normalized.startsWith('###### ')) {
+      children.push(
+        new DocxParagraph({
+          text: normalized.slice(7).trim(),
+          heading: DocxHeadingLevel.HEADING_6,
         }),
       );
       continue;
