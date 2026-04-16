@@ -868,10 +868,10 @@ const showSchemaStack = computed(() => {
 }
 
 .schema-item__headline-main {
-  display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr);
+  display: flex;
+  flex-wrap: wrap;
   gap: 4px 10px;
-  align-items: center;
+  align-items: flex-start;
   min-width: 0;
 }
 
@@ -907,13 +907,17 @@ const showSchemaStack = computed(() => {
 
 .schema-item__name {
   position: relative;
-  display: inline-block;
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: flex-start;
+  min-width: 0;
   max-width: 100%;
   font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
   font-size: 14px;
   font-weight: 700;
   color: var(--el-text-color-primary);
-  overflow-wrap: anywhere;
+  word-break: normal;
+  overflow-wrap: break-word;
 }
 
 .schema-item__name--required {
@@ -933,10 +937,17 @@ const showSchemaStack = computed(() => {
 }
 
 .schema-item__type {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
   font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
   font-size: 12px;
   font-weight: 600;
   color: var(--el-text-color-secondary);
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .schema-item__summary,
@@ -948,6 +959,7 @@ const showSchemaStack = computed(() => {
 }
 
 .schema-item__summary {
+  flex: 1 1 240px;
   min-width: 0;
 }
 
@@ -1096,11 +1108,11 @@ const showSchemaStack = computed(() => {
   }
 
   .schema-item__headline-main {
-    grid-template-columns: auto minmax(0, 1fr);
+    gap: 6px 8px;
   }
 
   .schema-item__summary {
-    grid-column: 1 / -1;
+    flex-basis: 240px;
   }
 
   .schema-item__detail-label {
