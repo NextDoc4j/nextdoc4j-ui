@@ -12,7 +12,6 @@ defineOptions({
 const appLocale = defineModel<string>('appLocale');
 const appDynamicTitle = defineModel<boolean>('appDynamicTitle');
 const appWatermark = defineModel<boolean>('appWatermark');
-const appEnableCheckUpdates = defineModel<boolean>('appEnableCheckUpdates');
 </script>
 
 <template>
@@ -24,8 +23,5 @@ const appEnableCheckUpdates = defineModel<boolean>('appEnableCheckUpdates');
   </SwitchItem>
   <SwitchItem v-model="appWatermark">
     {{ $t('preferences.watermark') }}
-  </SwitchItem>
-  <SwitchItem v-model="appEnableCheckUpdates">
-    {{ $t('preferences.checkUpdates') }}
   </SwitchItem>
 </template>

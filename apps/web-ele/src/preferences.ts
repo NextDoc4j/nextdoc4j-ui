@@ -10,7 +10,10 @@ export const overridesPreferences = defineOverridesPreferences({
   app: {
     name: 'Nextdoc4j',
     accessMode: 'mixed',
-    watermarkContent: '',
+    watermarkContent: 'Nextdoc4j',
+  },
+  theme: {
+    mode: 'auto',
   },
   theme: {
     mode: 'auto',

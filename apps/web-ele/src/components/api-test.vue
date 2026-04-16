@@ -1,7 +1,13 @@
 <script lang="ts" setup>
 import type { ParamsType } from './body-params.vue';
 
-import type { ParameterObject, SecuritySchemeObject } from '#/typings/openApi';
+import type {
+  ParameterObject,
+  ResponseObject,
+  SchemaObject,
+  SecuritySchemeObject,
+} from '#/typings/openApi';
+import type { DetectedBase64Image } from '#/utils/base64-image';
 
 import {
   computed,
@@ -9,29 +15,41 @@ import {
   onBeforeUnmount,
   onMounted,
   ref,
+  shallowRef,
   watch,
 } from 'vue';
 
 import { useAppConfig } from '@vben/hooks';
-import { SvgApiPrefixIcon, SvgCloseIcon } from '@vben/icons';
+import {
+  SvgApiPrefixIcon,
+  SvgDocumentLayoutIcon,
+  SvgDocumentOmittedIcon,
+  SvgDocumentResetIcon,
+} from '@vben/icons';
+import { usePreferences } from '@vben/preferences';
 
 import {
   ElButton,
+  ElDrawer,
+  ElDropdown,
+  ElDropdownItem,
+  ElDropdownMenu,
   ElEmpty,
-  ElIcon,
   ElInput,
   ElMessage,
-  ElSpace,
   ElTable,
   ElTableColumn,
   ElTabPane,
   ElTabs,
   ElTooltip,
 } from 'element-plus';
-import { Pane, Splitpanes } from 'splitpanes';
 
-import JsonView from '#/components/json-view.vue';
-import { methodType } from '#/constants/methods';
+import JsonViewer from '#/components/json-viewer/index.vue';
+import { getMethodStyle } from '#/constants/methods';
+import {
+  ONLINE_DEBUG_TIMEOUT_MESSAGE,
+  REQUEST_TIMEOUTS,
+} from '#/constants/request-timeout';
 import {
   useApiStore,
   useApiTestCacheStore,
@@ -39,6 +57,13 @@ import {
   useTokenStore,
 } from '#/store';
 import { useAggregationStore } from '#/store/aggregation';
+import {
+  buildDetectedImageFileName,
+  detectBase64ImagesInData,
+  formatDetectedImageSize,
+} from '#/utils/base64-image';
+import { copyText } from '#/utils/clipboard';
+import { adaptSchemaForView, hasRenderableSchema } from '#/utils/schema';
 
 import bodyParams from './body-params.vue';
 import paramsTable from './params-table.vue';
@@ -49,6 +74,7 @@ interface TableParamsObject {
   enabled: boolean;
   format?: string;
   fromGlobal?: boolean;
+  fromSecurity?: boolean;
   name: string;
   required?: boolean;
   value: any;
@@ -77,27 +103,68 @@ interface DebugRequestStateSnapshot {
   urlEncodedParams: TableParamsObject[];
 }
 
+interface DebugActualRequestSnapshot {
+  bodyText: string;
+  bodyType: string;
+  headers: Array<{ name: string; value: string }>;
+  method: string;
+  pathParams: Array<{ name: string; value: string }>;
+  queryParams: Array<{ name: string; value: string }>;
+  url: string;
+}
+
+interface DebugInlineTab {
+  count?: number;
+  key: string;
+  label: string;
+}
+
+interface DebugBodyTabExpose {
+  bodyType?: string;
+  fileList?: any[];
+  getExample?: () => string;
+  setEditorValue?: (value: string) => Promise<void> | void;
+  syncByRequestBodyType?: (options?: {
+    forceBodyType?: boolean;
+    preserveValue?: boolean;
+  }) => Promise<void> | void;
+}
+
 const props = defineProps<{
   method: string;
   parameters: ParameterObject[];
   path: string;
   requestBody: any;
   requestBodyType: string;
+  requestBodyVariantState?: Record<string, number>;
+  responses?: Record<string, ResponseObject>;
   security: any;
 }>();
 
-// 添加 emit 定义
-const emit = defineEmits(['cancel']);
+defineEmits(['cancel']);
 
 const { apiURL } = useAppConfig(import.meta.env, import.meta.env.PROD);
+const { isDark } = usePreferences();
 const baseUrl = ref();
 const activeTab = ref(props.requestBody ? 'Body' : 'Params');
-const bodyTabRef = ref();
-const responseTab = ref('Body');
+const bodyTabRef = ref<DebugBodyTabExpose | null>(null);
+const responseTab = ref('RealtimeResponse');
+const base64ImageDrawerVisible = ref(false);
+const realtimeResponseJsonRef = ref<InstanceType<typeof JsonViewer> | null>(
+  null,
+);
+const realtimeResponseScrollTop = ref(0);
+const paneLayout = ref<'horizontal' | 'vertical'>('horizontal');
+const paneRatio = ref(0.52);
+const debugLayoutRef = ref<HTMLElement>();
+const isPaneResizing = ref(false);
+const actualRequestSnapshot = ref<DebugActualRequestSnapshot | null>(null);
+let removePaneResizeListeners: (() => void) | null = null;
 const aggregationStore = useAggregationStore();
 const docManageStore = useDocManageStore();
 const apiTestCacheStore = useApiTestCacheStore();
 const apiStore = useApiStore();
+const tokenStore = useTokenStore();
 
 // 组件状态
 const loading = ref(false);
@@ -111,6 +178,10 @@ const cookies = ref<Array<TableParamsObject>>([]);
 const isRestoringCache = ref(false);
 const defaultRequestState = ref<DebugRequestStateSnapshot | null>(null);
 let persistTimer: null | number = null;
+
+const methodPillStyle = computed(() => {
+  return getMethodStyle(props.method, isDark.value);
+});
 
 const normalizeParamName = (name: string) => name.trim();
 const normalizeHeaderName = (name: string) => name.trim().toLowerCase();
@@ -133,6 +204,7 @@ const cloneTableParams = (
     enabled: item.enabled ?? true,
     format: item.format,
     fromGlobal: item.fromGlobal,
+    fromSecurity: item.fromSecurity,
     name: item.name || '',
     required: item.required,
     type: item.type,
@@ -145,14 +217,30 @@ const cloneTableParams = (
   }));
 };
 
+const DEBUG_BODY_TYPES = new Set<DebugBodyType>([
+  'binary',
+  'form-data',
+  'json',
+  'none',
+  'raw',
+  'x-www-form-urlencoded',
+  'xml',
+]);
+
+const toDebugBodyType = (value: unknown): DebugBodyType | undefined => {
+  return DEBUG_BODY_TYPES.has(value as DebugBodyType)
+    ? (value as DebugBodyType)
+    : undefined;
+};
 const resetResponseState = () => {
   responseStatus.value = { code: 0, text: '-', type: 'default' };
   responseTime.value = 0;
   responseSize.value = '0 B';
   responseData.value = null;
+  base64ImageDrawerVisible.value = false;
   responseMimeType.value = '';
-  responseLanguage.value = 'json';
   responseHeaders.value = [];
+  actualRequestSnapshot.value = null;
 };
 
 const resolveBodyContent = () => {
@@ -194,18 +282,20 @@ const applySnapshot = async (
   formDataParams.value = cloneTableParams(snapshot.formDataParams);
   urlEncodedParams.value = cloneTableParams(snapshot.urlEncodedParams);
 
-  if (bodyTabRef.value && snapshot.bodyType) {
-    bodyTabRef.value.bodyType = snapshot.bodyType;
+  const snapshotBodyType = toDebugBodyType(snapshot.bodyType);
+  if (bodyTabRef.value && snapshotBodyType) {
+    bodyTabRef.value.bodyType = snapshotBodyType;
     await nextTick();
     if (
       snapshot.bodyContent &&
-      ['json', 'raw', 'xml'].includes(snapshot.bodyType)
+      ['json', 'raw', 'xml'].includes(snapshotBodyType)
     ) {
       await bodyTabRef.value.setEditorValue?.(snapshot.bodyContent);
     }
   }
 
   if (options.syncGlobal) {
+    syncSecurityParamsToDebugTable();
     syncGlobalParamsToDebugTable();
   }
 
@@ -241,6 +331,18 @@ const restoreDefaultRequestState = async () => {
   resetResponseState();
 };
 
+const syncSelectedRequestBodyType = async (
+  options: { forceBodyType?: boolean; preserveValue?: boolean } = {},
+) => {
+  if (!props.requestBody) {
+    return;
+  }
+  await nextTick();
+  await bodyTabRef.value?.syncByRequestBodyType?.({
+    forceBodyType: options.forceBodyType ?? true,
+    preserveValue: options.preserveValue ?? true,
+  });
+};
 // 监听 props 变化，同步接口信息
 watch(
   () => props.path,
@@ -311,6 +413,7 @@ watch(
       }
     });
 
+    syncSecurityParamsToDebugTable();
     syncGlobalParamsToDebugTable();
   },
   { immediate: true },
@@ -319,22 +422,116 @@ watch(
 watch(
   () => [docManageStore.scopedParams, aggregationStore.currentService?.url],
   () => {
+    syncSecurityParamsToDebugTable();
     syncGlobalParamsToDebugTable();
   },
   { deep: true, immediate: true },
+);
+
+watch(
+  () => props.security,
+  () => {
+    syncSecurityParamsToDebugTable();
+    syncGlobalParamsToDebugTable();
+  },
+  { deep: true },
+);
+
+watch(
+  () => tokenStore.token,
+  () => {
+    syncSecurityParamsToDebugTable();
+    syncGlobalParamsToDebugTable();
+  },
+  { deep: true },
 );
 
 // 响应状态
 const responseStatus = ref({ code: 0, text: '-', type: 'default' });
 const responseTime = ref(0);
 const responseSize = ref('0 B');
-const responseData = ref<any>(null);
+const responseData = shallowRef<any>(null);
 const responseMimeType = ref('');
-const responseLanguage = ref('json');
 const responseHeaders = ref<
   Array<{ enabled: boolean; name: string; value: string }>
 >([]);
-const responseDescriptions = ref({});
+
+const realtimeDetectedBase64Images = computed<DetectedBase64Image[]>(() => {
+  if (responseStatus.value.type === 'default') {
+    return [];
+  }
+  if (responseData.value === null || responseData.value === undefined) {
+    return [];
+  }
+  return detectBase64ImagesInData(responseData.value);
+});
+
+const hasRealtimeBase64Images = computed(() => {
+  return realtimeDetectedBase64Images.value.length > 0;
+});
+
+const pickContentSchema = (
+  content?: Record<string, { schema?: SchemaObject }>,
+) => {
+  if (!content) return null;
+
+  return (
+    content['application/json']?.schema ||
+    content['*/*']?.schema ||
+    Object.values(content).find((item) => Boolean(item?.schema))?.schema ||
+    null
+  );
+};
+
+const findMatchedResponse = (statusCode: number) => {
+  const responseMap = props.responses || {};
+  const entries = Object.entries(responseMap);
+  if (entries.length === 0) {
+    return null;
+  }
+
+  const statusText = String(statusCode || '').trim();
+  const familyKey = /^\d{3}$/.test(statusText) ? `${statusText[0]}xx` : '';
+  const candidates = [
+    statusText,
+    familyKey.toUpperCase(),
+    familyKey,
+    'default',
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    const exact = responseMap[candidate];
+    if (exact) {
+      return exact;
+    }
+
+    const fuzzy = entries.find(
+      ([code]) => code.trim().toLowerCase() === candidate.trim().toLowerCase(),
+    );
+    if (fuzzy?.[1]) {
+      return fuzzy[1];
+    }
+  }
+
+  if (statusCode >= 200 && statusCode < 300 && responseMap['200']) {
+    return responseMap['200'];
+  }
+  return entries[0]?.[1] || null;
+};
+
+const responseSchemaForViewer = computed(() => {
+  if (responseStatus.value.type === 'default') {
+    return null;
+  }
+  const matchedResponse = findMatchedResponse(responseStatus.value.code);
+  const schema =
+    pickContentSchema(matchedResponse?.content) || matchedResponse?.schema;
+  if (!schema || !hasRenderableSchema(schema)) {
+    return null;
+  }
+  const resolved = adaptSchemaForView(schema, { mode: 'response' });
+  return resolved && hasRenderableSchema(resolved) ? resolved : null;
+});
 
 const activeGlobalQueryCount = computed(() => {
   return docManageStore
@@ -347,6 +544,661 @@ const activeGlobalHeaderCount = computed(() => {
     .getMergedHeaderParams(aggregationStore.currentService?.url)
     .filter((item) => item.enabled && item.name).length;
 });
+
+const requestBodyCount = computed(() => {
+  const bodyType = bodyTabRef.value?.bodyType as DebugBodyType | undefined;
+  if (bodyType === 'form-data') {
+    return formDataParams.value.filter((item) => item.enabled && item.name)
+      .length;
+  }
+  if (bodyType === 'x-www-form-urlencoded') {
+    return urlEncodedParams.value.filter((item) => item.enabled && item.name)
+      .length;
+  }
+  return 0;
+});
+
+const requestInlineTabs = computed<DebugInlineTab[]>(() => {
+  return [
+    {
+      key: 'Params',
+      label: 'Params',
+      count: pathParams.value.length + queryParams.value.length,
+    },
+    {
+      key: 'Body',
+      label: 'Body',
+      count: requestBodyCount.value,
+    },
+    {
+      key: 'Headers',
+      label: 'Headers',
+      count: headers.value.length,
+    },
+    {
+      key: 'Cookies',
+      label: 'Cookies',
+      count: cookies.value.length,
+    },
+  ];
+});
+
+const responseInlineTabs = computed<DebugInlineTab[]>(() => {
+  return [
+    {
+      key: 'RealtimeResponse',
+      label: '实时响应',
+    },
+    {
+      key: 'ResponseHeaders',
+      label: '响应头',
+      count: responseHeaders.value.length,
+    },
+    {
+      key: 'ActualRequest',
+      label: '实际请求',
+    },
+  ];
+});
+
+const requestTabsHostRef = ref<HTMLElement>();
+const responseTabsHostRef = ref<HTMLElement>();
+const requestMoreMeasureRef = ref<HTMLElement>();
+const responseMoreMeasureRef = ref<HTMLElement>();
+const requestVisibleTabKeys = ref<string[]>([]);
+const responseVisibleTabKeys = ref<string[]>([]);
+const requestTabMeasureRefs = new Map<string, HTMLElement>();
+const responseTabMeasureRefs = new Map<string, HTMLElement>();
+const TAB_OVERFLOW_GAP = 4;
+let tabOverflowObserver: null | ResizeObserver = null;
+let overflowRaf: null | number = null;
+
+const setRequestTabMeasureRef = (key: string, el: null | unknown) => {
+  if (el instanceof HTMLElement) {
+    requestTabMeasureRefs.set(key, el);
+  } else {
+    requestTabMeasureRefs.delete(key);
+  }
+};
+
+const setResponseTabMeasureRef = (key: string, el: null | unknown) => {
+  if (el instanceof HTMLElement) {
+    responseTabMeasureRefs.set(key, el);
+  } else {
+    responseTabMeasureRefs.delete(key);
+  }
+};
+
+const resolveOverflowVisibleKeys = (options: {
+  activeKey: string;
+  hostElement?: HTMLElement;
+  measureRefs: Map<string, HTMLElement>;
+  moreMeasureElement?: HTMLElement;
+  tabs: DebugInlineTab[];
+}) => {
+  const { activeKey, hostElement, measureRefs, moreMeasureElement, tabs } =
+    options;
+  const keys = tabs.map((tab) => tab.key);
+  if (keys.length === 0 || !hostElement) {
+    return keys;
+  }
+
+  const containerWidth = hostElement.clientWidth;
+  if (!containerWidth) {
+    return keys;
+  }
+
+  const getTabWidth = (key: string) => {
+    const width = measureRefs.get(key)?.getBoundingClientRect().width ?? 0;
+    return Math.max(54, Math.ceil(width) || 72);
+  };
+
+  const moreWidth = Math.max(
+    24,
+    Math.ceil(moreMeasureElement?.getBoundingClientRect().width ?? 0) || 28,
+  );
+
+  const totalTabsWidth =
+    keys.reduce((sum, key) => sum + getTabWidth(key), 0) +
+    TAB_OVERFLOW_GAP * Math.max(0, keys.length - 1);
+  if (totalTabsWidth <= containerWidth) {
+    return keys;
+  }
+
+  const canFitWithMoreButton = (candidateKeys: string[]) => {
+    const tabsWidth = candidateKeys.reduce(
+      (sum, key) => sum + getTabWidth(key),
+      0,
+    );
+    const tabsGap = TAB_OVERFLOW_GAP * Math.max(0, candidateKeys.length - 1);
+    const moreGap = candidateKeys.length > 0 ? TAB_OVERFLOW_GAP : 0;
+    return tabsWidth + tabsGap + moreGap + moreWidth <= containerWidth;
+  };
+
+  const visibleKeys: string[] = [];
+  keys.forEach((key) => {
+    const candidateKeys = [...visibleKeys, key];
+    if (canFitWithMoreButton(candidateKeys)) {
+      visibleKeys.push(key);
+    }
+  });
+
+  if (
+    activeKey &&
+    keys.includes(activeKey) &&
+    !visibleKeys.includes(activeKey)
+  ) {
+    const adjustedKeys = visibleKeys.filter((key) => key !== activeKey);
+    while (
+      adjustedKeys.length > 0 &&
+      !canFitWithMoreButton([...adjustedKeys, activeKey])
+    ) {
+      adjustedKeys.pop();
+    }
+    if (canFitWithMoreButton([...adjustedKeys, activeKey])) {
+      adjustedKeys.push(activeKey);
+    } else {
+      adjustedKeys.splice(0, adjustedKeys.length, activeKey);
+    }
+
+    const keyIndexMap = new Map(keys.map((key, index) => [key, index]));
+    adjustedKeys.sort((a, b) => {
+      return (keyIndexMap.get(a) ?? 0) - (keyIndexMap.get(b) ?? 0);
+    });
+    return adjustedKeys;
+  }
+
+  return visibleKeys;
+};
+
+const requestVisibleTabs = computed(() => {
+  const visibleKeySet = new Set(requestVisibleTabKeys.value);
+  const tabs = requestInlineTabs.value;
+  if (visibleKeySet.size === 0) {
+    return tabs;
+  }
+  return tabs.filter((tab) => visibleKeySet.has(tab.key));
+});
+
+const requestHiddenTabs = computed(() => {
+  const visibleKeySet = new Set(requestVisibleTabs.value.map((tab) => tab.key));
+  return requestInlineTabs.value.filter((tab) => !visibleKeySet.has(tab.key));
+});
+
+const responseVisibleTabs = computed(() => {
+  const visibleKeySet = new Set(responseVisibleTabKeys.value);
+  const tabs = responseInlineTabs.value;
+  if (visibleKeySet.size === 0) {
+    return tabs;
+  }
+  return tabs.filter((tab) => visibleKeySet.has(tab.key));
+});
+
+const responseHiddenTabs = computed(() => {
+  const visibleKeySet = new Set(
+    responseVisibleTabs.value.map((tab) => tab.key),
+  );
+  return responseInlineTabs.value.filter((tab) => !visibleKeySet.has(tab.key));
+});
+
+const updateRequestTabOverflow = () => {
+  requestVisibleTabKeys.value = resolveOverflowVisibleKeys({
+    activeKey: activeTab.value,
+    hostElement: requestTabsHostRef.value,
+    measureRefs: requestTabMeasureRefs,
+    moreMeasureElement: requestMoreMeasureRef.value,
+    tabs: requestInlineTabs.value,
+  });
+};
+
+const updateResponseTabOverflow = () => {
+  responseVisibleTabKeys.value = resolveOverflowVisibleKeys({
+    activeKey: responseTab.value,
+    hostElement: responseTabsHostRef.value,
+    measureRefs: responseTabMeasureRefs,
+    moreMeasureElement: responseMoreMeasureRef.value,
+    tabs: responseInlineTabs.value,
+  });
+};
+
+const updateAllTabOverflow = () => {
+  updateRequestTabOverflow();
+  updateResponseTabOverflow();
+};
+
+const scheduleTabOverflowUpdate = () => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  if (overflowRaf) {
+    window.cancelAnimationFrame(overflowRaf);
+  }
+  overflowRaf = window.requestAnimationFrame(() => {
+    overflowRaf = null;
+    updateAllTabOverflow();
+  });
+};
+
+const syncTabOverflowObserver = () => {
+  if (typeof ResizeObserver === 'undefined') {
+    return;
+  }
+  tabOverflowObserver?.disconnect();
+  tabOverflowObserver = new ResizeObserver(() => {
+    scheduleTabOverflowUpdate();
+  });
+  if (requestTabsHostRef.value) {
+    tabOverflowObserver.observe(requestTabsHostRef.value);
+  }
+  if (responseTabsHostRef.value) {
+    tabOverflowObserver.observe(responseTabsHostRef.value);
+  }
+};
+
+const handleRequestHiddenTabCommand = (command: number | string) => {
+  activeTab.value = `${command}`;
+  scheduleTabOverflowUpdate();
+};
+
+const handleResponseHiddenTabCommand = (command: number | string) => {
+  responseTab.value = `${command}`;
+  scheduleTabOverflowUpdate();
+};
+
+watch(
+  () => [requestInlineTabs.value, activeTab.value],
+  () => {
+    scheduleTabOverflowUpdate();
+  },
+  { deep: true },
+);
+
+watch(
+  () => [responseInlineTabs.value, responseTab.value],
+  () => {
+    scheduleTabOverflowUpdate();
+  },
+  { deep: true },
+);
+
+watch(
+  () => responseTab.value,
+  async (tab, previousTab) => {
+    if (previousTab === 'RealtimeResponse') {
+      realtimeResponseScrollTop.value =
+        realtimeResponseJsonRef.value?.getScrollTop?.() ?? 0;
+    }
+    if (tab !== 'RealtimeResponse') {
+      return;
+    }
+    await nextTick();
+    realtimeResponseJsonRef.value?.setScrollTop?.(
+      realtimeResponseScrollTop.value,
+    );
+  },
+);
+
+watch(hasRealtimeBase64Images, (hasImages) => {
+  if (!hasImages) {
+    base64ImageDrawerVisible.value = false;
+  }
+});
+
+watch([() => requestTabsHostRef.value, () => responseTabsHostRef.value], () => {
+  syncTabOverflowObserver();
+  scheduleTabOverflowUpdate();
+});
+
+const isStackedLayout = computed(() => paneLayout.value === 'vertical');
+const layoutTooltipText = computed(() => {
+  return isStackedLayout.value ? '切换为左右布局' : '切换为上下布局';
+});
+const responseStatusTone = computed(() => {
+  if (responseStatus.value.type === 'success') return 'success';
+  if (responseStatus.value.type === 'error') return 'error';
+  return 'default';
+});
+const layoutGridStyle = computed(() => {
+  if (isStackedLayout.value) {
+    return {
+      gridTemplateRows: `minmax(0, ${paneRatio.value}fr) 10px minmax(0, ${
+        1 - paneRatio.value
+      }fr)`,
+    };
+  }
+  return {
+    gridTemplateColumns: `minmax(0, ${paneRatio.value}fr) 10px minmax(0, ${
+      1 - paneRatio.value
+    }fr)`,
+  };
+});
+
+async function handleCopyBaseUrl() {
+  if (!baseUrl.value) {
+    return;
+  }
+  const copied = await copyText(baseUrl.value);
+  if (copied) {
+    ElMessage.success('Base URL 已复制');
+    return;
+  }
+  ElMessage.error('Base URL 复制失败');
+}
+
+const normalizeResizeRatio = (value: number) => {
+  if (Number.isNaN(value)) return paneRatio.value;
+  return Math.min(0.85, Math.max(0.15, value));
+};
+
+const clearPaneResizeListeners = () => {
+  if (removePaneResizeListeners) {
+    removePaneResizeListeners();
+    removePaneResizeListeners = null;
+  }
+};
+
+const startPaneResize = (event: PointerEvent) => {
+  if (!debugLayoutRef.value) return;
+
+  event.preventDefault();
+  const layoutRect = debugLayoutRef.value.getBoundingClientRect();
+  const containerSize = isStackedLayout.value
+    ? layoutRect.height
+    : layoutRect.width;
+  if (!containerSize) return;
+
+  const startPointer = isStackedLayout.value ? event.clientY : event.clientX;
+  const startRatio = paneRatio.value;
+  isPaneResizing.value = true;
+
+  const onPointerMove = (moveEvent: PointerEvent) => {
+    const currentPointer = isStackedLayout.value
+      ? moveEvent.clientY
+      : moveEvent.clientX;
+    const delta = currentPointer - startPointer;
+    paneRatio.value = normalizeResizeRatio(startRatio + delta / containerSize);
+  };
+
+  const onPointerUp = () => {
+    isPaneResizing.value = false;
+    clearPaneResizeListeners();
+  };
+
+  window.addEventListener('pointermove', onPointerMove);
+  window.addEventListener('pointerup', onPointerUp);
+  removePaneResizeListeners = () => {
+    window.removeEventListener('pointermove', onPointerMove);
+    window.removeEventListener('pointerup', onPointerUp);
+  };
+};
+
+function normalizeSecurityIn(value?: string) {
+  const normalized = (value || '').trim().toLowerCase();
+  if (
+    normalized === 'cookie' ||
+    normalized === 'header' ||
+    normalized === 'query'
+  ) {
+    return normalized as 'cookie' | 'header' | 'query';
+  }
+  return '';
+}
+
+function syncSecurityParamsToDebugTable() {
+  const securityList: any[] = Array.isArray(props.security)
+    ? props.security
+    : [];
+  if (securityList.length === 0) {
+    queryParams.value = queryParams.value.filter(
+      (item) => !item.fromGlobal && !item.fromSecurity,
+    );
+    headers.value = headers.value.filter(
+      (item) => !item.fromGlobal && !item.fromSecurity,
+    );
+    cookies.value = cookies.value.filter(
+      (item) => !item.fromGlobal && !item.fromSecurity,
+    );
+    return;
+  }
+
+  const securitySchemes = apiStore.openApi?.components?.securitySchemes ?? {};
+  const gatewayGlobalSecuritySchemes =
+    aggregationStore.mainConfigCache.config?.['x-nextdoc4j-gateway']
+      ?.globalSecuritySchemes ?? {};
+  const gatewaySecuritySchemes =
+    aggregationStore.mainConfigCache.openApi?.components?.securitySchemes ?? {};
+
+  const resolveSecurityScheme = (
+    key: string,
+  ): SecuritySchemeObject | undefined => {
+    return (
+      securitySchemes?.[key] ||
+      gatewayGlobalSecuritySchemes?.[key] ||
+      gatewaySecuritySchemes?.[key]
+    );
+  };
+
+  const securityKeys = new Set<string>();
+  securityList.forEach((securityItem) => {
+    Object.keys(securityItem || {}).forEach((key) => securityKeys.add(key));
+  });
+
+  const securityQueryNames = new Set<string>();
+  const securityHeaderNames = new Set<string>();
+  const securityCookieNames = new Set<string>();
+  const securityRows: Array<{
+    description: string;
+    in: 'cookie' | 'header' | 'query';
+    name: string;
+    tokenValue: string;
+    type?: string;
+  }> = [];
+
+  securityKeys.forEach((key) => {
+    const securityScheme = resolveSecurityScheme(key);
+    const rawSecurityIn = securityScheme?.in;
+    const securityIn =
+      normalizeSecurityIn(rawSecurityIn) ||
+      (String(securityScheme?.type || '')
+        .trim()
+        .toLowerCase() === 'http'
+        ? 'header'
+        : 'header');
+    const tokenCandidates = [
+      `${key}_${securityIn}`,
+      `${key}_${securityIn.toLowerCase()}`,
+      `${key}_${securityIn.toUpperCase()}`,
+      ...(rawSecurityIn
+        ? [
+            `${key}_${rawSecurityIn}`,
+            `${key}_${rawSecurityIn.toLowerCase()}`,
+            `${key}_${rawSecurityIn.toUpperCase()}`,
+          ]
+        : []),
+    ];
+    const tokenValue =
+      tokenCandidates
+        .map((candidate) => tokenStore?.token?.[candidate])
+        .find((value) => value !== undefined && value !== null) ?? '';
+
+    let name = '';
+    switch (securityIn) {
+      case 'cookie': {
+        name = normalizeParamName(securityScheme?.name ?? key);
+        if (!name) {
+          break;
+        }
+        securityCookieNames.add(name);
+        securityRows.push({
+          in: 'cookie',
+          name,
+          tokenValue,
+          description: securityScheme?.description ?? '',
+          type: securityScheme?.type,
+        });
+        break;
+      }
+      case 'header': {
+        name = normalizeParamName(
+          securityScheme?.name ?? key ?? 'Authorization',
+        );
+        if (!name) {
+          break;
+        }
+        securityHeaderNames.add(normalizeHeaderName(name));
+        securityRows.push({
+          in: 'header',
+          name,
+          tokenValue,
+          description: securityScheme?.description ?? '',
+          type: securityScheme?.type,
+        });
+        break;
+      }
+      case 'query': {
+        name = normalizeParamName(securityScheme?.name ?? key);
+        if (!name) {
+          break;
+        }
+        securityQueryNames.add(name);
+        securityRows.push({
+          in: 'query',
+          name,
+          tokenValue,
+          description: securityScheme?.description ?? '',
+          type: securityScheme?.type,
+        });
+        break;
+      }
+      // No default
+    }
+  });
+
+  const hasSecurityMarkerInState = [
+    ...queryParams.value,
+    ...headers.value,
+    ...cookies.value,
+  ].some((item) => item.fromSecurity !== undefined);
+
+  // 兼容历史缓存：旧数据没有 fromSecurity 标记，导致无法被实时同步接管
+  if (!hasSecurityMarkerInState) {
+    queryParams.value = queryParams.value.map((item) => {
+      const name = normalizeParamName(item.name || '');
+      if (!item.fromGlobal && name && securityQueryNames.has(name)) {
+        return {
+          ...item,
+          fromSecurity: true,
+        };
+      }
+      return item;
+    });
+    headers.value = headers.value.map((item) => {
+      const name = normalizeHeaderName(item.name || '');
+      if (!item.fromGlobal && name && securityHeaderNames.has(name)) {
+        return {
+          ...item,
+          fromSecurity: true,
+        };
+      }
+      return item;
+    });
+    cookies.value = cookies.value.map((item) => {
+      const name = normalizeParamName(item.name || '');
+      if (!item.fromGlobal && name && securityCookieNames.has(name)) {
+        return {
+          ...item,
+          fromSecurity: true,
+        };
+      }
+      return item;
+    });
+  }
+
+  const localQueryRows = queryParams.value.filter(
+    (item) => !item.fromGlobal && !item.fromSecurity,
+  );
+  const localHeaderRows = headers.value.filter(
+    (item) => !item.fromGlobal && !item.fromSecurity,
+  );
+  const localCookieRows = cookies.value.filter(
+    (item) => !item.fromGlobal && !item.fromSecurity,
+  );
+
+  const localQueryNames = new Set(
+    localQueryRows
+      .map((item) => normalizeParamName(item.name || ''))
+      .filter(Boolean),
+  );
+  const localHeaderNames = new Set(
+    localHeaderRows
+      .map((item) => normalizeHeaderName(item.name || ''))
+      .filter(Boolean),
+  );
+  const localCookieNames = new Set(
+    localCookieRows
+      .map((item) => normalizeParamName(item.name || ''))
+      .filter(Boolean),
+  );
+
+  const securityQueryRows: TableParamsObject[] = [];
+  const securityHeaderRows: TableParamsObject[] = [];
+  const securityCookieRows: TableParamsObject[] = [];
+
+  securityRows.forEach((item) => {
+    switch (item.in) {
+      case 'cookie': {
+        if (localCookieNames.has(item.name)) {
+          return;
+        }
+        localCookieNames.add(item.name);
+        securityCookieRows.push({
+          name: item.name,
+          enabled: true,
+          fromSecurity: true,
+          value: item.tokenValue,
+          description: item.description,
+          type: item.type,
+        });
+        return;
+      }
+      case 'header': {
+        const normalizedName = normalizeHeaderName(item.name);
+        if (localHeaderNames.has(normalizedName)) {
+          return;
+        }
+        localHeaderNames.add(normalizedName);
+        securityHeaderRows.push({
+          enabled: true,
+          fromSecurity: true,
+          name: item.name,
+          value: item.tokenValue,
+          description: item.description,
+          type: item.type,
+        });
+        return;
+      }
+      case 'query': {
+        if (localQueryNames.has(item.name)) {
+          return;
+        }
+        localQueryNames.add(item.name);
+        securityQueryRows.push({
+          name: item.name,
+          enabled: true,
+          fromSecurity: true,
+          value: item.tokenValue,
+          description: item.description,
+          type: item.type,
+        });
+      }
+      // No default
+    }
+  });
+
+  queryParams.value = [...localQueryRows, ...securityQueryRows];
+  headers.value = [...localHeaderRows, ...securityHeaderRows];
+  cookies.value = [...localCookieRows, ...securityCookieRows];
+}
 
 function syncGlobalParamsToDebugTable() {
   const localQueryRows = queryParams.value.filter((item) => !item.fromGlobal);
@@ -392,12 +1244,6 @@ function syncGlobalParamsToDebugTable() {
   headers.value = [...localHeaderRows, ...globalHeaderRows];
 }
 
-// 添加关闭处理函数
-const handleClose = (e: any) => {
-  e.stopPropagation();
-  emit('cancel');
-};
-
 const handleRestoreDefault = async () => {
   if (!defaultRequestState.value) {
     ElMessage.warning('默认请求数据尚未初始化');
@@ -405,6 +1251,10 @@ const handleRestoreDefault = async () => {
   }
   await restoreDefaultRequestState();
   ElMessage.success('已恢复默认请求数据');
+};
+
+const togglePaneLayout = () => {
+  paneLayout.value = isStackedLayout.value ? 'horizontal' : 'vertical';
 };
 
 const normalizeContentType = (contentType: null | string) => {
@@ -553,6 +1403,91 @@ const parseUrlEncodedBody = (text: string) => {
   return result;
 };
 
+const toPrettyJson = (value: any) => {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value ?? '');
+  }
+};
+
+const resolveActualRequestBody = (
+  bodyType: DebugBodyType | undefined,
+  bodyData: string,
+) => {
+  switch (bodyType) {
+    case 'binary': {
+      const binaryFile = bodyTabRef.value?.fileList?.[0];
+      return {
+        bodyText: binaryFile?.name ? `file: ${binaryFile.name}` : '',
+        bodyType: 'binary',
+      };
+    }
+    case 'form-data': {
+      const enabledItems = formDataParams.value
+        .filter((item) => item.enabled && item.name)
+        .map((item) => ({
+          contentType: item.contentType || '',
+          name: item.name,
+          value: item.value ?? '',
+        }));
+      return {
+        bodyText: enabledItems.length > 0 ? toPrettyJson(enabledItems) : '',
+        bodyType: 'form-data',
+      };
+    }
+    case 'json': {
+      if (!bodyData) {
+        return {
+          bodyText: '',
+          bodyType: 'json',
+        };
+      }
+      try {
+        return {
+          bodyText: JSON.stringify(JSON.parse(bodyData), null, 2),
+          bodyType: 'json',
+        };
+      } catch {
+        return {
+          bodyText: bodyData,
+          bodyType: 'json',
+        };
+      }
+    }
+    case 'raw': {
+      return {
+        bodyText: bodyData || '',
+        bodyType: 'raw',
+      };
+    }
+    case 'x-www-form-urlencoded': {
+      const enabledItems = urlEncodedParams.value
+        .filter((item) => item.enabled && item.name)
+        .map((item) => ({
+          name: item.name,
+          value: item.value ?? '',
+        }));
+      return {
+        bodyText: enabledItems.length > 0 ? toPrettyJson(enabledItems) : '',
+        bodyType: 'x-www-form-urlencoded',
+      };
+    }
+    case 'xml': {
+      return {
+        bodyText: bodyData || '',
+        bodyType: 'xml',
+      };
+    }
+    default: {
+      return {
+        bodyText: '',
+        bodyType: 'none',
+      };
+    }
+  }
+};
+
 const resolveResponseLanguage = (contentType: string) => {
   if (isJsonContentType(contentType)) return 'json';
   if (isXmlContentType(contentType)) return 'xml';
@@ -659,10 +1594,45 @@ async function parseResponseBody(response: Response, requestUrl: string) {
   };
 }
 
+const openBase64ImageDrawer = () => {
+  if (!hasRealtimeBase64Images.value) {
+    ElMessage.warning('当前响应未检测到可预览的 base64 图片');
+    return;
+  }
+  base64ImageDrawerVisible.value = true;
+};
+
+const closeBase64ImageDrawer = () => {
+  base64ImageDrawerVisible.value = false;
+};
+
+const base64ImageTotalSize = computed(() => {
+  return realtimeDetectedBase64Images.value.reduce((total, item) => {
+    return total + item.sizeBytes;
+  }, 0);
+});
+
+const downloadDetectedBase64Image = (
+  image: DetectedBase64Image,
+  index: number,
+) => {
+  const link = document.createElement('a');
+  link.href = image.dataUrl;
+  link.download = buildDetectedImageFileName(image, index + 1);
+  link.style.display = 'none';
+  document.body.append(link);
+  link.click();
+  link.remove();
+};
+
 async function sendRequest() {
   loading.value = true;
   responseLoading.value = true;
   const startTime = performance.now(); // 记录开始时间;
+  const abortController = new AbortController();
+  const timeoutId = window.setTimeout(() => {
+    abortController.abort();
+  }, REQUEST_TIMEOUTS.onlineDebug);
 
   try {
     // 构建请求URL，处理路径参数
@@ -739,10 +1709,15 @@ async function sendRequest() {
     const formData = new FormData();
     const searchParams = new URLSearchParams();
     let bodyData = '';
-    switch (bodyTabRef.value.bodyType) {
+    const currentBodyType = bodyTabRef.value?.bodyType as
+      | DebugBodyType
+      | undefined;
+    switch (currentBodyType) {
       case 'binary': {
-        const binaryData = bodyTabRef.value.fileList[0];
-        formData.append('file', binaryData);
+        const binaryData = bodyTabRef.value?.fileList?.[0];
+        if (binaryData) {
+          formData.append('file', binaryData);
+        }
         requestHeaders.append('Content-Type', 'multipart/form-data');
         break;
       }
@@ -784,14 +1759,14 @@ async function sendRequest() {
       }
       case 'json': {
         if (props.requestBody) {
-          bodyData = bodyTabRef.value.getExample() ?? '';
+          bodyData = bodyTabRef.value?.getExample?.() ?? '';
         }
         requestHeaders.append('Content-Type', 'application/json');
         break;
       }
       case 'raw': {
         if (props.requestBody) {
-          bodyData = bodyTabRef.value.getExample() ?? '';
+          bodyData = bodyTabRef.value?.getExample?.() ?? '';
         }
         requestHeaders.append('Content-Type', 'text/plain');
         break;
@@ -810,7 +1785,7 @@ async function sendRequest() {
       }
       case 'xml': {
         if (props.requestBody) {
-          bodyData = bodyTabRef.value.getExample() ?? '';
+          bodyData = bodyTabRef.value?.getExample?.() ?? '';
         }
         requestHeaders.append('Content-Type', 'text/xml');
         break;
@@ -819,16 +1794,43 @@ async function sendRequest() {
         requestHeaders.append('Content-Type', 'application/json');
       }
     }
+    const bodyType = bodyTabRef.value?.bodyType as DebugBodyType | undefined;
+    const actualRequestBody = resolveActualRequestBody(bodyType, bodyData);
+    actualRequestSnapshot.value = {
+      bodyText: actualRequestBody.bodyText,
+      bodyType: actualRequestBody.bodyType,
+      headers: [...requestHeaders.entries()].map(([name, value]) => ({
+        name,
+        value,
+      })),
+      method: props.method.toUpperCase(),
+      pathParams: pathParams.value
+        .filter((item) => normalizeParamName(item.name || ''))
+        .map((item) => ({
+          name: normalizeParamName(item.name || ''),
+          value: item.value ?? '',
+        })),
+      queryParams: [...finalUrl.searchParams.entries()].map(
+        ([name, value]) => ({
+          name,
+          value,
+        }),
+      ),
+      url: finalUrl.toString(),
+    };
+    responseTab.value = 'RealtimeResponse';
+
     // 发送请求
     const response = await fetch(finalUrl, {
       method: props.method.toUpperCase(),
       headers: requestHeaders,
+      signal: abortController.signal,
       body:
         props.method.toLowerCase() !== 'get' &&
-        ['binary', 'form-data'].includes(bodyTabRef.value.bodyType)
+        ['binary', 'form-data'].includes(bodyType || '')
           ? formData
           : // eslint-disable-next-line unicorn/no-nested-ternary
-            bodyTabRef.value.bodyType === 'x-www-form-urlencoded'
+            bodyType === 'x-www-form-urlencoded'
             ? searchParams
             : bodyData || undefined,
     });
@@ -846,7 +1848,6 @@ async function sendRequest() {
     };
     responseData.value = parsedResponse.data;
     responseMimeType.value = parsedResponse.contentType || '-';
-    responseLanguage.value = parsedResponse.language || 'plaintext';
 
     const header = Object.fromEntries(response.headers.entries());
     responseHeaders.value = [];
@@ -864,16 +1865,20 @@ async function sendRequest() {
         : JSON.stringify(parsedResponse.data ?? '').length * 2;
     responseSize.value = formatSize(size);
   } catch (error: any) {
-    ElMessage.error(error?.msg || '请求失败');
+    const errorMessage =
+      error?.name === 'AbortError'
+        ? ONLINE_DEBUG_TIMEOUT_MESSAGE
+        : error?.msg || '请求失败';
+    ElMessage.error(errorMessage);
     responseStatus.value = {
       code: 0,
-      text: error?.msg || '请求失败',
+      text: errorMessage,
       type: 'error',
     };
     responseData.value = null;
     responseMimeType.value = '-';
-    responseLanguage.value = 'plaintext';
   } finally {
+    window.clearTimeout(timeoutId);
     loading.value = false;
     responseLoading.value = false;
   }
@@ -951,111 +1956,10 @@ const formDataParams = ref<Array<ParamsType>>([]);
 // URL Encoded 参数相关
 const urlEncodedParams = ref<Array<ParamsType>>([]);
 
-const normalizeSecurityIn = (value?: string) => {
-  const normalized = (value || '').trim().toLowerCase();
-  if (
-    normalized === 'cookie' ||
-    normalized === 'header' ||
-    normalized === 'query'
-  ) {
-    return normalized as 'cookie' | 'header' | 'query';
-  }
-  return '';
-};
-
 onMounted(async () => {
   const openApi = apiStore.openApi;
-  const securityList: any[] = Array.isArray(props.security)
-    ? props.security
-    : [];
-  const tokenStore = useTokenStore();
-  const securitySchemes = openApi?.components?.securitySchemes ?? {};
-  const gatewayGlobalSecuritySchemes =
-    aggregationStore.mainConfigCache.config?.['x-nextdoc4j-gateway']
-      ?.globalSecuritySchemes ?? {};
-  const gatewaySecuritySchemes =
-    aggregationStore.mainConfigCache.openApi?.components?.securitySchemes ?? {};
   baseUrl.value = openApi?.servers?.[0]?.url;
-
-  const resolveSecurityScheme = (
-    key: string,
-  ): SecuritySchemeObject | undefined => {
-    return (
-      securitySchemes?.[key] ||
-      gatewayGlobalSecuritySchemes?.[key] ||
-      gatewaySecuritySchemes?.[key]
-    );
-  };
-
-  const securityKeys = new Set<string>();
-  securityList.forEach((securityItem) => {
-    Object.keys(securityItem || {}).forEach((key) => securityKeys.add(key));
-  });
-
-  securityKeys.forEach((key) => {
-    const securityScheme = resolveSecurityScheme(key);
-    const rawSecurityIn = securityScheme?.in;
-    const securityIn =
-      normalizeSecurityIn(rawSecurityIn) ||
-      (String(securityScheme?.type || '')
-        .trim()
-        .toLowerCase() === 'http'
-        ? 'header'
-        : 'header');
-    const tokenCandidates = [
-      `${key}_${securityIn}`,
-      `${key}_${securityIn.toLowerCase()}`,
-      `${key}_${securityIn.toUpperCase()}`,
-      ...(rawSecurityIn
-        ? [
-            `${key}_${rawSecurityIn}`,
-            `${key}_${rawSecurityIn.toLowerCase()}`,
-            `${key}_${rawSecurityIn.toUpperCase()}`,
-          ]
-        : []),
-    ];
-    const tokenValue =
-      tokenCandidates
-        .map((candidate) => tokenStore?.token?.[candidate])
-        .find((value) => value !== undefined && value !== null) ?? '';
-
-    switch (securityIn) {
-      case 'cookie': {
-        cookies.value.push({
-          name: securityScheme?.name ?? key,
-          enabled: true,
-          value: tokenValue,
-          description: securityScheme?.description ?? '',
-          type: securityScheme?.type,
-        });
-
-        break;
-      }
-      case 'header': {
-        headers.value.push({
-          enabled: true,
-          name: securityScheme?.name ?? key ?? 'Authorization',
-          value: tokenValue,
-          description: securityScheme?.description ?? '',
-        });
-
-        break;
-      }
-      case 'query': {
-        queryParams.value.push({
-          name: securityScheme?.name ?? key,
-          enabled: true,
-          value: tokenValue,
-          description: securityScheme?.description ?? '',
-          type: securityScheme?.type,
-        });
-
-        break;
-      }
-      // No default
-    }
-  });
-
+  syncSecurityParamsToDebugTable();
   syncGlobalParamsToDebugTable();
   await captureDefaultRequestState();
 
@@ -1067,8 +1971,57 @@ onMounted(async () => {
       });
     }
   }
+
+  await syncSelectedRequestBodyType({
+    forceBodyType: true,
+    preserveValue: true,
+  });
+
+  await nextTick();
+  syncTabOverflowObserver();
+  scheduleTabOverflowUpdate();
 });
 
+watch(
+  () => props.requestBodyType,
+  async (newType, oldType) => {
+    if (newType === oldType) {
+      return;
+    }
+    await syncSelectedRequestBodyType({
+      forceBodyType: true,
+      preserveValue: true,
+    });
+  },
+);
+
+watch(
+  () => props.requestBody,
+  async (nextBody, prevBody) => {
+    if (nextBody === prevBody) {
+      return;
+    }
+    await syncSelectedRequestBodyType({
+      forceBodyType: true,
+      preserveValue: false,
+    });
+  },
+  { deep: true },
+);
+
+watch(
+  () => props.requestBodyVariantState,
+  async (nextState, prevState) => {
+    if (nextState === prevState) {
+      return;
+    }
+    await syncSelectedRequestBodyType({
+      forceBodyType: true,
+      preserveValue: false,
+    });
+  },
+  { deep: true },
+);
 watch(
   () => apiTestCacheStore.debugCacheEnabled,
   (enabled) => {
@@ -1095,6 +2048,7 @@ watch(
     urlEncodedParams,
     () => bodyTabRef.value?.bodyType,
     () => props.requestBodyType,
+    () => props.requestBodyVariantState,
   ],
   () => {
     schedulePersistCache();
@@ -1103,236 +2057,669 @@ watch(
 );
 
 onBeforeUnmount(() => {
+  clearPaneResizeListeners();
   if (persistTimer) {
     window.clearTimeout(persistTimer);
     persistTimer = null;
+  }
+  tabOverflowObserver?.disconnect();
+  tabOverflowObserver = null;
+  if (overflowRaf) {
+    window.cancelAnimationFrame(overflowRaf);
+    overflowRaf = null;
   }
 });
 </script>
 
 <template>
-  <Splitpanes class="default-theme max-h-[88vh]" horizontal>
-    <Pane :size="70" class="flex flex-col">
-      <div class="mb-4 flex items-center justify-between px-4 pt-5 font-medium">
-        <ElSpace>
-          <ElIcon @click="handleClose" class="cursor-pointer">
-            <SvgCloseIcon />
-          </ElIcon>
-          <span class="font-medium">在线运行</span>
-        </ElSpace>
-        <ElButton text @click="handleRestoreDefault">恢复默认</ElButton>
-      </div>
-      <div class="mb-4 px-4">
-        <ElSpace direction="vertical" :size="12" class="w-full" fill>
-          <div class="flex">
-            <ElInput
-              v-model="requestUrl"
-              placeholder="请输入正确的URL"
-              class="flex-1"
-            >
-              <template #prefix>
-                <span
-                  class="round font-600 inline-flex h-[24px] max-h-[90px] items-center !rounded px-1.5 py-[2px] text-sm"
-                  :style="{ ...methodType[method?.toUpperCase()] }"
-                >
-                  {{ method?.toUpperCase() }}
-                </span>
-                <ElTooltip placement="top" :content="baseUrl" v-if="baseUrl">
-                  <ElButton size="small" class="ml-2 p-0">
-                    <SvgApiPrefixIcon class="size-4" />
-                  </ElButton>
-                </ElTooltip>
-              </template>
-            </ElInput>
-            <ElButton
-              type="primary"
-              class="ml-2"
-              :loading="loading"
-              @click="sendRequest"
-            >
-              发送
-            </ElButton>
-          </div>
-          <div
-            v-if="activeGlobalQueryCount > 0 || activeGlobalHeaderCount > 0"
-            class="text-xs text-[var(--el-text-color-secondary)]"
-          >
-            已注入全局参数：Query {{ activeGlobalQueryCount }} 项，Header
-            {{ activeGlobalHeaderCount }} 项
-          </div>
-        </ElSpace>
-      </div>
-
-      <div class="flex-1 overflow-hidden">
-        <ElTabs v-model="activeTab">
-          <ElTabPane name="Params" label="Params">
-            <template #label>
-              <span class="px-2 font-normal">Params </span>
-              <span
-                class="highlight"
-                v-if="pathParams.length + queryParams.length"
+  <div class="debug-console">
+    <div class="debug-console__top">
+      <div class="debug-console__request-row">
+        <ElInput
+          v-model="requestUrl"
+          placeholder="请输入正确的URL"
+          class="debug-request-input"
+        >
+          <template #prefix>
+            <span class="method-pill" :style="methodPillStyle">
+              {{ method?.toUpperCase() }}
+            </span>
+            <ElTooltip v-if="baseUrl" placement="top" :content="baseUrl">
+              <ElButton
+                text
+                class="debug-prefix-button"
+                @click="handleCopyBaseUrl"
               >
-                {{ pathParams.length + queryParams.length }}
-              </span>
-            </template>
-            <div v-if="pathParams.length > 0">
-              <h3 class="text-sm">Path 参数</h3>
-              <div class="params-table">
-                <ElTable
-                  border
-                  class="params-table"
-                  :data="pathParams"
-                  header-cell-class-name="p-2"
-                >
-                  <ElTableColumn prop="name" label="参数名">
-                    <template #default="{ row }">
-                      <ElInput v-model="row.name" />
-                    </template>
-                  </ElTableColumn>
-                  <ElTableColumn prop="value" label="参数值">
-                    <template #default="{ row }">
-                      <ElInput v-model="row.value" />
-                    </template>
-                  </ElTableColumn>
-                </ElTable>
-              </div>
-            </div>
-
-            <div>
-              <h3 class="text-sm">Query 参数</h3>
-              <params-table :table-data="queryParams" />
-            </div>
-          </ElTabPane>
-
-          <body-params
-            ref="bodyTabRef"
-            :request-body="requestBody"
-            :form-data-params="formDataParams"
-            :url-encoded-params="urlEncodedParams"
-            :request-body-type="requestBodyType"
-            @body-change="schedulePersistCache"
-          />
-
-          <ElTabPane name="Headers" label="Headers">
-            <template #label>
-              <span class="px-2 font-normal">Headers </span>
-              <span class="highlight" v-if="headers.length > 0">
-                {{ headers.length }}
-              </span>
-            </template>
-            <params-table :table-data="headers" />
-          </ElTabPane>
-          <ElTabPane name="Cookies" label="Cookies">
-            <template #label>
-              <span class="px-2 font-normal">Cookies </span>
-            </template>
-            <params-table :table-data="cookies" />
-          </ElTabPane>
-        </ElTabs>
-      </div>
-    </Pane>
-    <Pane :size="30" :min-size="10" :max-size="60">
-      <div class="flex h-full w-full flex-col">
-        <div class="mb-4 flex justify-between px-4 pt-2">
-          <span class="font-medium">返回结果</span>
-          <ElSpace
-            v-if="responseStatus.type !== 'default' && !responseLoading"
-            class="text-xs text-[--el-color-success]"
+                <SvgApiPrefixIcon class="debug-prefix-button__icon" />
+              </ElButton>
+            </ElTooltip>
+          </template>
+        </ElInput>
+        <div class="debug-console__request-actions">
+          <ElButton
+            type="primary"
+            class="debug-send-button"
+            :loading="loading"
+            @click="sendRequest"
           >
-            <!-- 正常状态 -->
-            <ElTooltip
-              :content="`HTTP 状态码: ${responseStatus.type}`"
-              placement="top"
+            发送
+          </ElButton>
+          <ElTooltip content="恢复默认" placement="top">
+            <ElButton
+              text
+              class="debug-icon-button"
+              @click="handleRestoreDefault"
             >
-              <span>{{ responseStatus.text }}</span>
-            </ElTooltip>
-            <ElTooltip content="耗时" placement="top">
-              <span>{{ responseTime }}ms</span>
-            </ElTooltip>
-            <ElTooltip content="大小" placement="top">
-              <span>{{ responseSize }}</span>
-            </ElTooltip>
-            <ElTooltip content="响应类型" placement="top">
-              <span>{{ responseMimeType }}</span>
-            </ElTooltip>
-          </ElSpace>
-          <!-- responseLoading 时右上角不显示任何内容，由中间区域的大Loading覆盖 -->
+              <SvgDocumentResetIcon class="size-4" />
+            </ElButton>
+          </ElTooltip>
+          <ElTooltip :content="layoutTooltipText" placement="top">
+            <ElButton
+              text
+              class="debug-icon-button"
+              :class="{ 'debug-icon-button--active': !isStackedLayout }"
+              @click="togglePaneLayout"
+            >
+              <SvgDocumentLayoutIcon
+                class="size-4 transition-transform"
+                :class="{ 'rotate-90': !isStackedLayout }"
+              />
+            </ElButton>
+          </ElTooltip>
         </div>
-        <div class="w-full flex-1 overflow-hidden">
-          <!-- 请求Loading状态 -->
-          <div
-            v-if="responseLoading"
-            class="flex h-full items-center justify-center"
-          >
-            <div class="flex flex-col items-center gap-3">
-              <div class="loading-spinner">
-                <svg
-                  class="animate-spin"
-                  width="40"
-                  height="40"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    fill="#409EFF"
-                    d="M12,4V2A10,10 0 0,0 2,12H4A8,8 0 0,1 12,4Z"
-                  />
-                </svg>
+      </div>
+      <div
+        v-if="activeGlobalQueryCount > 0 || activeGlobalHeaderCount > 0"
+        class="debug-console__hint"
+      >
+        已注入全局参数：Query {{ activeGlobalQueryCount }} 项，Header
+        {{ activeGlobalHeaderCount }} 项
+      </div>
+    </div>
+
+    <div class="debug-console__body">
+      <div
+        ref="debugLayoutRef"
+        class="debug-layout"
+        :class="{
+          'debug-layout--horizontal': !isStackedLayout,
+          'debug-layout--resizing': isPaneResizing,
+        }"
+        :style="layoutGridStyle"
+      >
+        <section class="debug-pane debug-pane--request">
+          <div class="debug-pane-shell">
+            <div class="debug-pane__header debug-pane__header--inline-tabs">
+              <div class="debug-pane__header-main">
+                <span class="debug-pane__title">请求参数</span>
+                <div ref="requestTabsHostRef" class="debug-inline-tabs">
+                  <button
+                    v-for="tabItem in requestVisibleTabs"
+                    :key="tabItem.key"
+                    type="button"
+                    class="debug-inline-tab"
+                    :class="{
+                      'debug-inline-tab--active': activeTab === tabItem.key,
+                    }"
+                    @click="activeTab = tabItem.key"
+                  >
+                    <span class="debug-inline-tab__label">{{
+                      tabItem.label
+                    }}</span>
+                    <span v-if="tabItem.count" class="debug-inline-tab__count">
+                      {{ tabItem.count }}
+                    </span>
+                  </button>
+                  <ElDropdown
+                    v-if="requestHiddenTabs.length > 0"
+                    trigger="click"
+                    placement="bottom-end"
+                    popper-class="debug-tab-overflow-menu"
+                    @command="handleRequestHiddenTabCommand"
+                  >
+                    <button
+                      type="button"
+                      class="debug-inline-tab debug-inline-tab--more"
+                      aria-label="更多标签"
+                    >
+                      <SvgDocumentOmittedIcon
+                        class="debug-inline-tab__more-icon"
+                      />
+                    </button>
+                    <template #dropdown>
+                      <ElDropdownMenu>
+                        <ElDropdownItem
+                          v-for="tabItem in requestHiddenTabs"
+                          :key="tabItem.key"
+                          :command="tabItem.key"
+                          :class="{
+                            'debug-hidden-tab--active':
+                              activeTab === tabItem.key,
+                          }"
+                        >
+                          <span class="debug-hidden-tab__label">
+                            {{ tabItem.label }}
+                          </span>
+                          <span
+                            v-if="tabItem.count"
+                            class="debug-hidden-tab__count"
+                          >
+                            {{ tabItem.count }}
+                          </span>
+                        </ElDropdownItem>
+                      </ElDropdownMenu>
+                    </template>
+                  </ElDropdown>
+                </div>
               </div>
-              <div class="loading-text">
-                <span class="text-base text-gray-600">正在获取响应数据</span>
-                <span class="loading-dots">
-                  <span class="dot">.</span>
-                  <span class="dot">.</span>
-                  <span class="dot">.</span>
-                </span>
-              </div>
+            </div>
+            <div class="debug-tabs-wrap">
+              <ElTabs v-model="activeTab" class="debug-tabs debug-tabs--inline">
+                <ElTabPane name="Params" label="Params">
+                  <div class="params-tab-sections">
+                    <div v-if="pathParams.length > 0">
+                      <div class="actual-request__block params-table-block">
+                        <div class="params-table-block__header">
+                          <h3 class="actual-request__title">Path 参数</h3>
+                        </div>
+                        <div class="params-table-block__body">
+                          <params-table
+                            :table-data="pathParams"
+                            :allow-delete="false"
+                            :show-add-button="false"
+                            :show-selection-column="false"
+                            show-description-column
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <div class="actual-request__block params-table-block">
+                        <div class="params-table-block__header">
+                          <h3 class="actual-request__title">Query 参数</h3>
+                        </div>
+                        <div class="params-table-block__body">
+                          <params-table
+                            :table-data="queryParams"
+                            show-description-column
+                            show-delete-in-description
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </ElTabPane>
+
+                <body-params
+                  ref="bodyTabRef"
+                  :request-body="requestBody"
+                  :form-data-params="formDataParams"
+                  :url-encoded-params="urlEncodedParams"
+                  :request-body-type="props.requestBodyType"
+                  :request-body-variant-state="
+                    props.requestBodyVariantState || {}
+                  "
+                  @body-change="schedulePersistCache"
+                />
+
+                <ElTabPane name="Headers" label="Headers">
+                  <div class="actual-request__block params-table-block">
+                    <div class="params-table-block__header">
+                      <h3 class="actual-request__title">Headers</h3>
+                    </div>
+                    <div class="params-table-block__body">
+                      <params-table
+                        :table-data="headers"
+                        show-description-column
+                        show-delete-in-description
+                      />
+                    </div>
+                  </div>
+                </ElTabPane>
+                <ElTabPane name="Cookies" label="Cookies">
+                  <div class="actual-request__block params-table-block">
+                    <div class="params-table-block__header">
+                      <h3 class="actual-request__title">Cookies</h3>
+                    </div>
+                    <div class="params-table-block__body">
+                      <params-table :table-data="cookies" />
+                    </div>
+                  </div>
+                </ElTabPane>
+              </ElTabs>
             </div>
           </div>
+        </section>
 
-          <!-- 响应结果 -->
-          <template v-else>
-            <ElTabs
-              v-model="responseTab"
-              v-if="responseStatus.type !== 'default'"
-            >
-              <ElTabPane name="Body" label="Body">
-                <template #label>
-                  <span class="px-2 font-normal">Body </span>
-                </template>
-                <JsonView
-                  :data="responseData"
-                  :descriptions="responseDescriptions"
-                  :image-render="true"
-                  :language="responseLanguage"
-                  class="response-body"
-                  :loading="responseLoading"
-                />
-              </ElTabPane>
-              <ElTabPane name="Headers" label="Headers">
-                <template #label>
-                  <span class="px-2 font-normal">Headers </span>
-                  <span v-if="responseHeaders.length > 0" class="highlight">
-                    {{ responseHeaders.length }}
-                  </span>
-                </template>
-                <div class="response-headers">
-                  <ElTable border :data="responseHeaders">
-                    <ElTableColumn label="参数名" prop="name" />
-                    <ElTableColumn label="参数值" prop="value" />
-                  </ElTable>
+        <div
+          class="debug-resizer"
+          :class="{ 'debug-resizer--horizontal': !isStackedLayout }"
+          @pointerdown="startPaneResize"
+        >
+          <span class="debug-resizer__thumb"></span>
+        </div>
+
+        <section class="debug-pane debug-pane--response">
+          <div class="debug-pane-shell">
+            <div class="debug-pane__header debug-pane__header--inline-tabs">
+              <div class="debug-pane__header-main">
+                <span class="debug-pane__title">响应结果</span>
+                <div ref="responseTabsHostRef" class="debug-inline-tabs">
+                  <button
+                    v-for="tabItem in responseVisibleTabs"
+                    :key="tabItem.key"
+                    type="button"
+                    class="debug-inline-tab"
+                    :class="{
+                      'debug-inline-tab--active': responseTab === tabItem.key,
+                    }"
+                    @click="responseTab = tabItem.key"
+                  >
+                    <span class="debug-inline-tab__label">{{
+                      tabItem.label
+                    }}</span>
+                    <span v-if="tabItem.count" class="debug-inline-tab__count">
+                      {{ tabItem.count }}
+                    </span>
+                  </button>
+                  <ElDropdown
+                    v-if="responseHiddenTabs.length > 0"
+                    trigger="click"
+                    placement="bottom-end"
+                    popper-class="debug-tab-overflow-menu"
+                    @command="handleResponseHiddenTabCommand"
+                  >
+                    <button
+                      type="button"
+                      class="debug-inline-tab debug-inline-tab--more"
+                      aria-label="更多标签"
+                    >
+                      <SvgDocumentOmittedIcon
+                        class="debug-inline-tab__more-icon"
+                      />
+                    </button>
+                    <template #dropdown>
+                      <ElDropdownMenu>
+                        <ElDropdownItem
+                          v-for="tabItem in responseHiddenTabs"
+                          :key="tabItem.key"
+                          :command="tabItem.key"
+                          :class="{
+                            'debug-hidden-tab--active':
+                              responseTab === tabItem.key,
+                          }"
+                        >
+                          <span class="debug-hidden-tab__label">
+                            {{ tabItem.label }}
+                          </span>
+                          <span
+                            v-if="tabItem.count"
+                            class="debug-hidden-tab__count"
+                          >
+                            {{ tabItem.count }}
+                          </span>
+                        </ElDropdownItem>
+                      </ElDropdownMenu>
+                    </template>
+                  </ElDropdown>
                 </div>
-              </ElTabPane>
-            </ElTabs>
-            <ElEmpty v-else :image-size="80">
-              <template #description>
-                <span class="text-sm">点击"发送"按钮获取返回结果</span>
+                <ElTooltip
+                  v-if="hasRealtimeBase64Images"
+                  :content="`已识别 ${realtimeDetectedBase64Images.length} 张图片`"
+                  placement="top"
+                >
+                  <button
+                    type="button"
+                    class="debug-inline-tab debug-inline-tab--image"
+                    :class="{
+                      'debug-inline-tab--active': base64ImageDrawerVisible,
+                    }"
+                    @click="openBase64ImageDrawer"
+                  >
+                    <span class="debug-inline-tab__label">图片</span>
+                    <span class="debug-inline-tab__count">
+                      {{ realtimeDetectedBase64Images.length }}
+                    </span>
+                  </button>
+                </ElTooltip>
+              </div>
+              <div
+                v-if="responseStatus.type !== 'default' && !responseLoading"
+                class="debug-status-list"
+              >
+                <ElTooltip
+                  :content="`HTTP 状态: ${responseStatus.type}`"
+                  placement="top"
+                >
+                  <span
+                    class="debug-status-chip"
+                    :class="`debug-status-chip--${responseStatusTone}`"
+                  >
+                    {{ responseStatus.text }}
+                  </span>
+                </ElTooltip>
+                <ElTooltip content="耗时" placement="top">
+                  <span class="debug-status-chip debug-status-chip--metric">
+                    {{ responseTime }} ms
+                  </span>
+                </ElTooltip>
+                <ElTooltip content="大小" placement="top">
+                  <span class="debug-status-chip debug-status-chip--metric">
+                    {{ responseSize }}
+                  </span>
+                </ElTooltip>
+                <ElTooltip content="响应类型" placement="top">
+                  <span class="debug-status-chip debug-status-chip--metric">
+                    {{ responseMimeType }}
+                  </span>
+                </ElTooltip>
+              </div>
+              <span v-else-if="!responseLoading" class="debug-pane__meta">
+                等待发送请求
+              </span>
+            </div>
+
+            <div class="debug-response-wrap">
+              <div
+                v-if="responseLoading"
+                class="flex h-full items-center justify-center"
+              >
+                <div class="flex flex-col items-center gap-3">
+                  <div class="loading-spinner">
+                    <svg
+                      class="animate-spin"
+                      width="40"
+                      height="40"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        fill="#409EFF"
+                        d="M12,4V2A10,10 0 0,0 2,12H4A8,8 0 0,1 12,4Z"
+                      />
+                    </svg>
+                  </div>
+                  <div class="loading-text">
+                    <span>正在获取响应数据</span>
+                    <span class="loading-dots">
+                      <span class="dot">.</span>
+                      <span class="dot">.</span>
+                      <span class="dot">.</span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <template v-else>
+                <ElTabs
+                  v-if="
+                    responseStatus.type !== 'default' || actualRequestSnapshot
+                  "
+                  v-model="responseTab"
+                  class="debug-response-tabs debug-response-tabs--inline"
+                >
+                  <ElTabPane name="RealtimeResponse" label="实时响应" lazy>
+                    <template v-if="responseStatus.type !== 'default'">
+                      <JsonViewer
+                        ref="realtimeResponseJsonRef"
+                        :value="responseData"
+                        :schema="responseSchemaForViewer"
+                        :default-expanded="true"
+                        :enable-chunked-render="true"
+                        :initial-render-count="60"
+                        :render-chunk-size="60"
+                        class="response-body app-json-schema-viewer"
+                      />
+                    </template>
+                    <ElEmpty v-else :image-size="68">
+                      <template #description>
+                        <span class="text-sm">发送请求后展示实时响应结果</span>
+                      </template>
+                    </ElEmpty>
+                  </ElTabPane>
+                  <ElTabPane name="ResponseHeaders" label="响应头" lazy>
+                    <div
+                      v-if="responseHeaders.length > 0"
+                      class="response-headers"
+                    >
+                      <ElTable border :data="responseHeaders">
+                        <ElTableColumn label="参数名" prop="name" />
+                        <ElTableColumn label="参数值" prop="value" />
+                      </ElTable>
+                    </div>
+                    <ElEmpty v-else :image-size="68">
+                      <template #description>
+                        <span class="text-sm">暂无响应头信息</span>
+                      </template>
+                    </ElEmpty>
+                  </ElTabPane>
+                  <ElTabPane name="ActualRequest" label="实际请求" lazy>
+                    <div v-if="actualRequestSnapshot" class="actual-request">
+                      <div class="actual-request__block">
+                        <div class="actual-request__title">请求 URL</div>
+                        <pre
+                          class="actual-request__code"
+                          v-text="
+                            `${actualRequestSnapshot.method} ${actualRequestSnapshot.url}`
+                          "
+                        ></pre>
+                      </div>
+
+                      <div
+                        v-if="actualRequestSnapshot.headers.length > 0"
+                        class="actual-request__block"
+                      >
+                        <div class="actual-request__title">请求头</div>
+                        <ElTable border :data="actualRequestSnapshot.headers">
+                          <ElTableColumn label="参数名" prop="name" />
+                          <ElTableColumn label="参数值" prop="value" />
+                        </ElTable>
+                      </div>
+
+                      <div
+                        v-if="actualRequestSnapshot.queryParams.length > 0"
+                        class="actual-request__block"
+                      >
+                        <div class="actual-request__title">Query 参数</div>
+                        <ElTable
+                          border
+                          :data="actualRequestSnapshot.queryParams"
+                        >
+                          <ElTableColumn label="参数名" prop="name" />
+                          <ElTableColumn label="参数值" prop="value" />
+                        </ElTable>
+                      </div>
+
+                      <div
+                        v-if="actualRequestSnapshot.pathParams.length > 0"
+                        class="actual-request__block"
+                      >
+                        <div class="actual-request__title">Path 参数</div>
+                        <ElTable
+                          border
+                          :data="actualRequestSnapshot.pathParams"
+                        >
+                          <ElTableColumn label="参数名" prop="name" />
+                          <ElTableColumn label="参数值" prop="value" />
+                        </ElTable>
+                      </div>
+
+                      <div
+                        v-if="actualRequestSnapshot.bodyText"
+                        class="actual-request__block"
+                      >
+                        <div class="actual-request__title">
+                          请求体 ({{ actualRequestSnapshot.bodyType }})
+                        </div>
+                        <pre class="actual-request__code">{{
+                          actualRequestSnapshot.bodyText
+                        }}</pre>
+                      </div>
+                    </div>
+                    <ElEmpty v-else :image-size="68">
+                      <template #description>
+                        <span class="text-sm">发送请求后展示实际请求内容</span>
+                      </template>
+                    </ElEmpty>
+                  </ElTabPane>
+                </ElTabs>
+                <ElEmpty v-else :image-size="80">
+                  <template #description>
+                    <span class="text-sm">点击“发送”按钮获取返回结果</span>
+                  </template>
+                </ElEmpty>
               </template>
-            </ElEmpty>
-          </template>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <ElDrawer
+      v-model="base64ImageDrawerVisible"
+      direction="rtl"
+      size="min(560px, 92vw)"
+      :with-header="false"
+      append-to-body
+      class="debug-base64-drawer"
+    >
+      <div class="debug-base64-drawer__shell">
+        <div class="debug-base64-drawer__header">
+          <div class="debug-base64-drawer__heading">
+            <div class="debug-base64-drawer__title-row">
+              <span class="debug-base64-drawer__title">Base64 响应图片</span>
+              <span
+                v-if="hasRealtimeBase64Images"
+                class="debug-base64-drawer__title-count"
+              >
+                {{ realtimeDetectedBase64Images.length }}
+              </span>
+            </div>
+          </div>
+          <ElButton
+            text
+            class="debug-base64-drawer__collapse"
+            @click="closeBase64ImageDrawer"
+          >
+            收起
+          </ElButton>
+        </div>
+
+        <div class="debug-base64-drawer__body">
+          <div
+            v-if="hasRealtimeBase64Images"
+            class="debug-base64-drawer__summary"
+          >
+            <span class="debug-status-chip debug-status-chip--metric">
+              共 {{ realtimeDetectedBase64Images.length }} 张图片
+            </span>
+            <span class="debug-status-chip debug-status-chip--metric">
+              总计 {{ formatDetectedImageSize(base64ImageTotalSize) }}
+            </span>
+          </div>
+
+          <ElEmpty
+            v-if="!hasRealtimeBase64Images"
+            :image-size="80"
+            class="debug-base64-empty"
+          >
+            <template #description>
+              <span class="text-secondary text-sm">
+                未检测到可预览的 Base64 图片数据
+              </span>
+            </template>
+          </ElEmpty>
+
+          <div v-else class="debug-base64-drawer__list">
+            <article
+              v-for="(item, index) in realtimeDetectedBase64Images"
+              :key="`${item.path}-${index}`"
+              class="debug-base64-card"
+            >
+              <div class="debug-base64-card__header">
+                <div class="debug-base64-card__info">
+                  <span class="debug-base64-card__index">#{{ index + 1 }}</span>
+                  <span class="debug-base64-card__path" :title="item.path">{{
+                    item.path
+                  }}</span>
+                </div>
+                <ElButton
+                  size="small"
+                  type="primary"
+                  plain
+                  @click="downloadDetectedBase64Image(item, index)"
+                >
+                  下载
+                </ElButton>
+              </div>
+
+              <div class="debug-base64-card__preview">
+                <div class="debug-base64-card__preview-stage">
+                  <img
+                    :src="item.dataUrl"
+                    :alt="`image-${index}`"
+                    loading="lazy"
+                  />
+                </div>
+              </div>
+
+              <div class="debug-base64-card__footer">
+                <span class="debug-base64-card__chip">{{ item.mimeType }}</span>
+                <span class="debug-base64-card__chip">{{
+                  formatDetectedImageSize(item.sizeBytes)
+                }}</span>
+              </div>
+            </article>
+          </div>
         </div>
       </div>
-    </Pane>
-  </Splitpanes>
+    </ElDrawer>
+
+    <div class="debug-tab-measure" aria-hidden="true">
+      <div class="debug-inline-tabs">
+        <button
+          v-for="tabItem in requestInlineTabs"
+          :key="`measure-request-${tabItem.key}`"
+          type="button"
+          class="debug-inline-tab"
+          :ref="(el) => setRequestTabMeasureRef(tabItem.key, el)"
+        >
+          <span class="debug-inline-tab__label">{{ tabItem.label }}</span>
+          <span v-if="tabItem.count" class="debug-inline-tab__count">
+            {{ tabItem.count }}
+          </span>
+        </button>
+        <button
+          ref="requestMoreMeasureRef"
+          type="button"
+          class="debug-inline-tab debug-inline-tab--more"
+        >
+          <SvgDocumentOmittedIcon class="debug-inline-tab__more-icon" />
+        </button>
+      </div>
+      <div class="debug-inline-tabs">
+        <button
+          v-for="tabItem in responseInlineTabs"
+          :key="`measure-response-${tabItem.key}`"
+          type="button"
+          class="debug-inline-tab"
+          :ref="(el) => setResponseTabMeasureRef(tabItem.key, el)"
+        >
+          <span class="debug-inline-tab__label">{{ tabItem.label }}</span>
+          <span v-if="tabItem.count" class="debug-inline-tab__count">
+            {{ tabItem.count }}
+          </span>
+        </button>
+        <button
+          ref="responseMoreMeasureRef"
+          type="button"
+          class="debug-inline-tab debug-inline-tab--more"
+        >
+          <SvgDocumentOmittedIcon class="debug-inline-tab__more-icon" />
+        </button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <style lang="scss" scoped>
@@ -1353,85 +2740,911 @@ onBeforeUnmount(() => {
   }
 }
 
-.api-tester {
+@media (max-width: 1024px) {
+  .debug-console__request-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .debug-console__request-actions {
+    justify-content: flex-end;
+    padding-left: 0;
+  }
+
+  .debug-console__request-actions::before {
+    display: none;
+  }
+
+  .debug-send-button {
+    min-width: 92px;
+  }
+
+  .debug-status-list {
+    justify-content: flex-start;
+  }
+}
+
+.debug-console {
+  --debug-chip-radius: var(--radius);
+  --debug-radius-xs: var(--radius);
+  --debug-radius-sm: calc(var(--radius) * 1.08);
+  --debug-radius-md: calc(var(--radius) * 1.16);
+  --debug-radius-lg: calc(var(--radius) * 1.24);
+  --debug-count-radius: var(--radius);
+  --debug-menu-radius: calc(var(--radius) * 1.12);
+  --el-border-radius-base: var(--radius);
+  --el-border-radius-small: var(--radius);
+  --debug-surface: var(--el-bg-color);
+  --debug-soft-bg: color-mix(
+    in srgb,
+    var(--el-bg-color) 92%,
+    var(--el-fill-color-light) 8%
+  );
+  --debug-soft-bg-strong: color-mix(
+    in srgb,
+    var(--el-bg-color) 86%,
+    var(--el-fill-color-light) 14%
+  );
+  --debug-border: color-mix(
+    in srgb,
+    var(--el-text-color-primary) 12%,
+    transparent
+  );
+  --debug-border-strong: color-mix(
+    in srgb,
+    var(--el-text-color-primary) 22%,
+    transparent
+  );
+  --debug-request-shell-bg: color-mix(
+    in srgb,
+    var(--debug-surface) 88%,
+    var(--el-fill-color-light) 12%
+  );
+  --debug-request-shell-top-line: color-mix(in srgb, #8d97a7 34%, transparent);
+  --debug-request-shell-bottom-line: color-mix(
+    in srgb,
+    #8d97a7 20%,
+    transparent
+  );
+  --debug-request-shell-shadow:
+    inset 0 1px 0 var(--debug-request-shell-top-line),
+    inset 0 -1px 0 var(--debug-request-shell-bottom-line),
+    0 0 0 1px color-mix(in srgb, #9aa3b2 20%, transparent),
+    0 9px 18px -15px color-mix(in srgb, #7f8899 42%, transparent),
+    0 -9px 18px -15px color-mix(in srgb, #8e97a6 44%, transparent);
+  --debug-request-shell-shadow-hover:
+    inset 0 1px 0 color-mix(in srgb, #8692a5 42%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, #8692a5 24%, transparent),
+    0 0 0 1px color-mix(in srgb, #8d97a7 24%, transparent),
+    0 11px 22px -15px color-mix(in srgb, #738093 48%, transparent),
+    0 -11px 22px -15px color-mix(in srgb, #8d97a7 50%, transparent);
+  --debug-shadow: 0 6px 14px
+    color-mix(in srgb, var(--el-text-color-primary) 3%, transparent);
+
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: #fff;
+  min-height: 0;
 }
 
-.response-header {
-  .response-status,
-  .response-time,
-  .response-size {
-    @apply mb-2;
-
-    .label {
-      @apply inline-block w-[80px] text-sm;
-    }
-  }
+/* --- Base64 图片抽屉增强样式 --- */
+:deep(.debug-base64-drawer .el-drawer) {
+  background: var(--debug-surface);
+  border-left: 1px solid var(--debug-border);
+  box-shadow: -4px 0 16px color-mix(in srgb, #000 10%, transparent);
 }
 
-:deep(.params-table.el-table) {
-  @apply mb-4 mt-2;
-
-  .el-table__cell {
-    padding: 0;
-  }
-
-  .cell {
-    padding: 0;
-
-    .el-input__wrapper {
-      background-color: transparent;
-      border: none;
-      border-radius: 0;
-      box-shadow: none;
-    }
-  }
-
-  .el-table__header {
-    .cell {
-      padding: 4px 8px;
-    }
-  }
-}
-
-:deep(.el-tabs) {
-  width: 100%;
+.debug-base64-drawer__shell {
+  display: flex;
+  flex-direction: column;
   height: 100%;
+  background: var(--debug-soft-bg); /* 与左侧面板背景统一 */
+}
+
+.debug-base64-drawer__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  background: var(--debug-surface);
+  border-bottom: 1px solid var(--debug-border);
+}
+
+.debug-base64-drawer__title {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--el-text-color-primary);
+}
+
+.debug-base64-drawer__title-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--el-color-primary);
+  border-radius: var(--radius);
+}
+
+.debug-base64-drawer__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.debug-base64-drawer__summary {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.debug-base64-drawer__list {
+  display: flex;
+  flex-direction: column;
+  gap: 20px; /* 图片卡片之间的明显界限 */
+}
+
+.debug-base64-card {
+  overflow: hidden;
+  background: var(--el-bg-color);
+  border: 1px solid var(--debug-border-strong);
+  border-radius: var(--debug-radius-md);
+  box-shadow: 0 4px 12px
+    color-mix(in srgb, var(--el-text-color-primary) 6%, transparent);
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+
+  &:hover {
+    box-shadow: 0 8px 24px
+      color-mix(in srgb, var(--el-text-color-primary) 10%, transparent);
+    transform: translateY(-2px);
+  }
+}
+
+.debug-base64-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--debug-soft-bg-strong);
+  border-bottom: 1px solid var(--debug-border);
+}
+
+.debug-base64-card__info {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.debug-base64-card__index {
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--el-color-primary);
+  background: color-mix(in srgb, var(--el-color-primary) 10%, transparent);
+  border-radius: 4px;
+}
+
+.debug-base64-card__path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+}
+
+.debug-base64-card__preview {
+  padding: 12px;
+  background: var(--debug-surface);
+}
+
+.debug-base64-card__preview-stage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+  max-height: 400px;
   overflow: hidden;
 
-  .el-tabs__nav-wrap {
-    padding: 0 10px;
-  }
+  /* 棋盘格背景：适配透明图片 */
+  background-color: var(--el-fill-color-lighter);
+  background-image:
+    linear-gradient(45deg, var(--el-fill-color-darker) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--el-fill-color-darker) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--el-fill-color-darker) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--el-fill-color-darker) 75%);
+  background-position:
+    0 0,
+    0 10px,
+    10px -10px,
+    -10px 0;
+  background-size: 20px 20px;
+  border: 1px solid var(--debug-border);
+  border-radius: var(--debug-radius-sm);
+  box-shadow: inset 0 2px 8px color-mix(in srgb, #000 5%, transparent);
 
-  .el-tabs__item {
-    padding: 0 4px;
-
-    .highlight {
-      @apply h-4 w-4 rounded-full text-center text-white;
-
-      background-color: var(--el-color-primary);
-    }
-  }
-
-  .el-tabs__content {
-    .el-tab-pane {
-      @apply px-4 pb-4;
-
-      width: 100%;
-      height: 100%;
-      overflow-y: auto;
-    }
+  img {
+    max-width: 100%;
+    max-height: 380px;
+    object-fit: contain;
+    background: transparent;
+    filter: drop-shadow(0 4px 12px color-mix(in srgb, #000 15%, transparent));
   }
 }
 
-/* Loading 动画样式 */
+.debug-base64-card__footer {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 14px;
+  background: var(--debug-surface);
+  border-top: 1px solid var(--debug-border);
+
+  .debug-base64-card__chip {
+    padding: 2px 6px;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--el-text-color-regular);
+    background: var(--debug-soft-bg-strong);
+    border: 1px solid var(--debug-border);
+    border-radius: 4px;
+  }
+}
+
+.debug-base64-empty {
+  margin-top: 40px;
+  opacity: 0.8;
+}
+
+/* --- 基础布局与原有样式 --- */
+
+.debug-console__top {
+  display: grid;
+  flex: none;
+  gap: 9px;
+  padding: 0;
+  margin-bottom: 10px;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.debug-console__request-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 10px;
+  margin: 0 2px;
+  background: var(--debug-request-shell-bg);
+  border-radius: var(--debug-radius-md);
+  box-shadow: var(--debug-request-shell-shadow);
+  transition: box-shadow 0.16s ease;
+}
+
+.debug-console__request-row:hover,
+.debug-console__request-row:focus-within {
+  box-shadow: var(--debug-request-shell-shadow-hover);
+}
+
+.debug-console__hint {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 10px;
+  margin: 0 2px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--el-text-color-secondary);
+  background: var(--debug-soft-bg-strong);
+  border: 1px solid var(--debug-border);
+  border-radius: var(--debug-chip-radius);
+}
+
+.debug-console__request-actions {
+  display: inline-flex;
+  flex: none;
+  gap: 8px;
+  align-items: center;
+  padding-left: 8px;
+}
+
+.debug-console__request-actions::before {
+  width: 1px;
+  height: 18px;
+  content: '';
+  background: var(--debug-border);
+}
+
+.debug-console__body {
+  flex: 1;
+  min-height: 0;
+}
+
+.debug-layout {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) 10px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+}
+
+.debug-layout--horizontal {
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 10px minmax(0, 1fr);
+}
+
+.debug-layout--resizing {
+  user-select: none;
+}
+
+.debug-pane {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.debug-resizer {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+  cursor: row-resize;
+}
+
+.debug-resizer__thumb {
+  width: 42px;
+  height: 4px;
+  background: color-mix(in srgb, var(--el-text-color-primary) 20%, transparent);
+  border-radius: var(--debug-chip-radius);
+  transition: background-color 0.16s ease;
+}
+
+.debug-resizer:hover .debug-resizer__thumb {
+  background: color-mix(in srgb, var(--el-color-primary) 42%, transparent);
+}
+
+.debug-resizer--horizontal {
+  cursor: col-resize;
+}
+
+.debug-resizer--horizontal .debug-resizer__thumb {
+  width: 4px;
+  height: 42px;
+}
+
+.debug-pane-shell {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--debug-surface);
+  border: 1px solid var(--debug-border);
+  border-radius: var(--debug-radius-lg);
+  box-shadow: var(--debug-shadow);
+}
+
+.debug-pane__header {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 42px;
+  padding: 0 14px;
+  background: var(--debug-soft-bg);
+  border-bottom: 1px solid var(--debug-border);
+}
+
+.debug-pane__header--inline-tabs {
+  flex-wrap: nowrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.debug-pane__header-main {
+  display: inline-flex;
+  flex: 1;
+  flex-wrap: nowrap;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.debug-pane__title {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--el-text-color-primary);
+}
+
+.debug-pane__meta {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--el-text-color-secondary);
+}
+
+.debug-inline-tabs {
+  display: inline-flex;
+  flex: 1;
+  flex-wrap: nowrap;
+  gap: 4px;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.debug-inline-tab {
+  display: inline-flex;
+  flex: none;
+  gap: 3px;
+  align-items: center;
+  justify-content: center;
+  max-width: 146px;
+  min-height: 23px;
+  padding: 0 7px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--debug-radius-xs);
+  transition: all 0.14s ease;
+}
+
+.debug-inline-tab__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.debug-inline-tab:hover {
+  color: var(--el-text-color-primary);
+  background: var(--debug-soft-bg-strong);
+  border-color: var(--debug-border);
+}
+
+.debug-inline-tab--active {
+  color: var(--el-color-primary);
+  background: color-mix(
+    in srgb,
+    var(--el-color-primary-light-9) 70%,
+    var(--debug-surface) 30%
+  );
+  border-color: color-mix(in srgb, var(--el-color-primary) 28%, transparent);
+}
+
+.debug-inline-tab__count {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  font-size: 9.5px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--el-color-primary);
+  border-radius: var(--radius);
+}
+
+.debug-inline-tab--image {
+  flex: none;
+  max-width: none;
+  margin-left: 4px;
+  border-color: var(--debug-border);
+  border-radius: var(--radius);
+}
+
+.debug-inline-tab--image:disabled {
+  color: var(--el-text-color-placeholder);
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.debug-inline-tab--image:disabled:hover {
+  color: var(--el-text-color-placeholder);
+  background: var(--debug-soft-bg);
+  border-color: var(--debug-border);
+}
+
+.debug-inline-tab--more {
+  width: 22px;
+  min-width: 22px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.debug-inline-tab__more-icon {
+  width: 16px;
+  height: 16px;
+  line-height: 1;
+  color: currentcolor;
+  transition: transform 0.18s ease;
+}
+
+.debug-inline-tab--more:hover,
+.debug-inline-tab--more:focus-visible {
+  color: var(--el-color-primary);
+  background: transparent;
+  border-color: transparent;
+}
+
+.debug-inline-tab--more:hover .debug-inline-tab__more-icon,
+.debug-inline-tab--more:focus-visible .debug-inline-tab__more-icon {
+  transform: scale(1.15);
+}
+
+.debug-tab-measure {
+  position: fixed;
+  top: -9999px;
+  left: -9999px;
+  z-index: -1;
+  display: grid;
+  visibility: hidden;
+  gap: 6px;
+  pointer-events: none;
+}
+
+:global(.debug-tab-overflow-menu) {
+  padding: 4px;
+  border-radius: var(--debug-menu-radius);
+}
+
+:global(.debug-tab-overflow-menu .el-dropdown-menu__item) {
+  border-radius: var(--debug-radius-xs);
+}
+
+:global(
+  .debug-tab-overflow-menu .el-dropdown-menu__item.debug-hidden-tab--active
+) {
+  color: var(--el-color-primary);
+  background: color-mix(
+    in srgb,
+    var(--el-color-primary-light-9) 65%,
+    var(--el-bg-color) 35%
+  );
+}
+
+:global(
+  .debug-tab-overflow-menu .el-dropdown-menu__item .debug-hidden-tab__label
+) {
+  margin-right: 6px;
+}
+
+:global(
+  .debug-tab-overflow-menu .el-dropdown-menu__item .debug-hidden-tab__count
+) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--el-color-primary);
+  border-radius: var(--debug-count-radius);
+}
+
+.debug-icon-button {
+  --el-button-bg-color: transparent;
+  --el-button-border-color: transparent;
+  --el-button-hover-bg-color: transparent;
+  --el-button-hover-border-color: transparent;
+  --el-button-active-bg-color: transparent;
+  --el-button-active-border-color: transparent;
+  --el-button-text-color: var(--el-text-color-secondary);
+  --el-button-hover-text-color: var(--el-color-primary);
+
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0;
+  color: var(--el-text-color-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  transition:
+    color 0.18s ease,
+    transform 0.18s ease;
+}
+
+.debug-icon-button:hover {
+  color: var(--el-color-primary);
+  background: transparent;
+  transform: scale(1.15);
+}
+
+.debug-icon-button:focus-visible {
+  color: var(--el-color-primary);
+  background: transparent;
+  transform: scale(1.15);
+}
+
+.debug-icon-button--active {
+  color: var(--el-color-primary);
+  background: transparent;
+  border: none;
+}
+
+.debug-icon-button :deep(svg) {
+  width: 16px;
+  height: 16px;
+}
+
+.debug-request-input {
+  --el-input-border-color: transparent;
+  --el-input-focus-border-color: transparent;
+  --el-input-hover-border-color: transparent;
+
+  flex: 1;
+}
+
+:deep(.debug-request-input .el-input__wrapper) {
+  min-height: 38px;
+  outline: none;
+  background: transparent;
+  border: none !important;
+  border-radius: var(--debug-radius-sm);
+  box-shadow: none !important;
+}
+
+:deep(.debug-request-input .el-input__wrapper::before),
+:deep(.debug-request-input .el-input__wrapper::after) {
+  display: none !important;
+}
+
+:deep(.debug-request-input .el-input__wrapper:hover) {
+  box-shadow: none !important;
+}
+
+:deep(.debug-request-input .el-input__wrapper.is-focus) {
+  box-shadow: none !important;
+}
+
+:deep(.debug-request-input .el-input__prefix) {
+  margin-right: 10px;
+}
+
+:deep(.debug-request-input .el-input__prefix-inner) {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.method-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 72px;
+  height: 32px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 800;
+  border-radius: var(--debug-chip-radius);
+}
+
+.debug-prefix-button {
+  width: 30px;
+  height: 30px;
+  color: var(--el-text-color-secondary);
+  border-radius: var(--debug-chip-radius);
+  transition: all 0.16s ease;
+}
+
+.debug-prefix-button__icon {
+  width: 18px;
+  height: 18px;
+}
+
+.debug-prefix-button:hover {
+  color: var(--el-color-primary);
+  background: color-mix(
+    in srgb,
+    var(--el-color-primary-light-9) 65%,
+    transparent
+  );
+}
+
+.debug-send-button {
+  min-width: 78px;
+  height: 32px;
+  padding: 0 14px;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: var(--debug-chip-radius);
+  box-shadow: 0 4px 10px
+    color-mix(in srgb, var(--el-color-primary) 20%, transparent);
+  transition: transform 0.16s ease;
+}
+
+.debug-send-button:hover {
+  transform: translateY(-1px);
+}
+
+.debug-tabs-wrap,
+.debug-response-wrap {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--debug-soft-bg);
+}
+
+.debug-section-title {
+  margin-top: 2px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--el-text-color-secondary);
+}
+
+.params-table-block {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.params-tab-sections {
+  display: grid;
+  gap: 12px;
+}
+
+.params-table-block__header {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 8px 12px;
+  background: var(--debug-soft-bg-strong);
+  border-bottom: 1px solid var(--debug-border);
+}
+
+.params-table-block__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 12px 10px;
+  overflow: hidden;
+}
+
+.params-table-block__header .actual-request__title {
+  margin-bottom: 0;
+}
+
+.response-body {
+  height: 100%;
+  min-height: 0;
+}
+
+:deep(.response-body.theme-light),
+:deep(.response-body.theme-dark) {
+  height: 100%;
+  min-height: 0;
+}
+
+.debug-status-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.debug-status-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+  background: var(--debug-soft-bg-strong);
+  border: 1px solid var(--debug-border);
+  border-radius: var(--debug-chip-radius);
+}
+
+.debug-status-chip--success {
+  color: var(--el-color-success-dark-2);
+  background: var(--el-color-success-light-9);
+  border-color: var(--el-color-success-light-7);
+}
+
+.debug-status-chip--error {
+  color: var(--el-color-danger-dark-2);
+  background: var(--el-color-danger-light-9);
+  border-color: var(--el-color-danger-light-7);
+}
+
+.debug-status-chip--default {
+  color: var(--el-text-color-secondary);
+}
+
+.debug-status-chip--metric {
+  color: var(--el-text-color-primary);
+}
+
+.response-headers {
+  padding: 0 2px 10px 1px;
+}
+
+.actual-request {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.actual-request__block {
+  min-width: 0;
+  padding: 10px;
+  overflow-x: auto;
+  background: var(--debug-surface);
+  border: 1px solid var(--debug-border);
+  border-radius: var(--debug-radius-xs);
+}
+
+.actual-request__block.params-table-block {
+  padding: 0;
+  overflow: hidden;
+}
+
+.actual-request__title {
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+}
+
+.actual-request__code {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--el-text-color-regular);
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+:deep(.actual-request__block .el-table) {
+  width: 100% !important;
+  min-width: 0;
+}
+
+:deep(.actual-request__block .el-table .cell) {
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}
+
 .loading-text {
   display: flex;
   gap: 2px;
   align-items: center;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
 }
 
 .loading-dots {
@@ -1455,5 +3668,97 @@ onBeforeUnmount(() => {
 
 .loading-dots .dot:nth-child(3) {
   animation-delay: 0.4s;
+}
+
+:deep(.debug-tabs.el-tabs),
+:deep(.debug-response-tabs.el-tabs) {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+
+  .el-tabs__header {
+    margin: 0;
+    background: var(--debug-surface);
+    border-bottom: 1px solid var(--debug-border);
+  }
+
+  .el-tabs__nav-wrap::after {
+    display: none;
+  }
+
+  .el-tabs__nav-wrap {
+    padding: 0 10px;
+  }
+
+  .el-tabs__item {
+    height: 36px;
+    padding: 0 6px;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 36px;
+  }
+
+  .el-tabs__item.is-active {
+    font-weight: 700;
+    color: var(--el-color-primary);
+  }
+
+  .el-tabs__active-bar {
+    height: 2px;
+    border-radius: var(--debug-radius-xs) var(--debug-radius-xs) 0 0;
+  }
+
+  .el-tabs__content {
+    height: calc(100% - 37px);
+  }
+
+  .el-tab-pane {
+    width: 100%;
+    height: 100%;
+    padding: 10px 12px 12px;
+    overflow: hidden auto;
+  }
+}
+
+:deep(.debug-tabs--inline.el-tabs .el-tabs__header),
+:deep(.debug-response-tabs--inline.el-tabs .el-tabs__header) {
+  display: none;
+}
+
+:deep(.debug-tabs--inline.el-tabs .el-tabs__content),
+:deep(.debug-response-tabs--inline.el-tabs .el-tabs__content) {
+  height: 100%;
+}
+
+:deep(.debug-response-wrap .el-empty) {
+  height: 100%;
+}
+
+:deep(.debug-response-wrap .el-empty__description p) {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+:deep(.document-page--dark .debug-console),
+:deep(html.dark .debug-console) {
+  --debug-surface: #1c1e23;
+  --debug-soft-bg: #1c1e23;
+  --debug-soft-bg-strong: #23272e;
+  --debug-border: color-mix(in srgb, #fff 6%, transparent);
+  --debug-border-strong: color-mix(in srgb, #fff 9%, transparent);
+  --debug-request-shell-bg: #20242b;
+  --debug-request-shell-top-line: color-mix(in srgb, #fff 18%, transparent);
+  --debug-request-shell-bottom-line: color-mix(in srgb, #fff 10%, transparent);
+  --debug-request-shell-shadow:
+    inset 0 1px 0 var(--debug-request-shell-top-line),
+    inset 0 -1px 0 var(--debug-request-shell-bottom-line),
+    0 8px 18px -14px color-mix(in srgb, #000 58%, transparent),
+    0 -8px 18px -14px color-mix(in srgb, #fff 12%, transparent);
+  --debug-request-shell-shadow-hover:
+    inset 0 1px 0 color-mix(in srgb, #fff 24%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, #fff 14%, transparent),
+    0 10px 22px -14px color-mix(in srgb, #000 62%, transparent),
+    0 -10px 22px -14px color-mix(in srgb, #fff 16%, transparent);
+  --debug-shadow: 0 8px 20px color-mix(in srgb, #000 45%, transparent);
 }
 </style>

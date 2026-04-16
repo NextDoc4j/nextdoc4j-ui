@@ -4,7 +4,7 @@ import type { Parameter } from '#/typings/openApi';
 import { computed } from 'vue';
 
 import { getEnumItems } from '#/utils/enumexpand';
-import { resolveSchema } from '#/utils/schema';
+import { getSchemaTypeLabel, resolveSchema } from '#/utils/schema';
 
 defineOptions({
   name: 'ParameterView',
@@ -18,9 +18,7 @@ const schema = computed(() => {
   return props.parameter.schema ? resolveSchema(props.parameter.schema) : null;
 });
 
-const isPathParam = computed(() => props.parameter.in === 'path');
-
-const constraints = computed(() => {
+const constraintTokens = computed(() => {
   const source = schema.value || props.parameter;
   const parts: string[] = [];
 
@@ -41,7 +39,7 @@ const constraints = computed(() => {
     parts.push(`<=${source.maximum}`);
   }
 
-  return parts.join(' 或 ');
+  return parts;
 });
 
 const hasHtmlDescription = computed(() => {
@@ -59,7 +57,6 @@ const htmlDescription = computed(() => {
   return hasHtmlDescription.value ? desc : null;
 });
 
-// 获取枚举项用于展示
 const enumItems = computed(() => {
   const schemaSource = schema.value || props.parameter.schema;
   if (!schemaSource) return [];
@@ -67,226 +64,292 @@ const enumItems = computed(() => {
   return getEnumItems(schemaSource);
 });
 
-// 检查是否有扩展枚举描述
-const hasExtendedEnum = computed(() => {
-  return enumItems.value.some((item) => item.description);
+const typeLabel = computed(() => {
+  return getSchemaTypeLabel(schema.value);
 });
+
+const exampleValue = computed(() => {
+  return props.parameter.example ?? schema.value?.example;
+});
+
+const patternValue = computed(() => {
+  return schema.value?.pattern || '';
+});
+
+const formatValue = (value: unknown) => {
+  if (value === undefined || value === null || value === '') return '';
+  if (typeof value === 'object') {
+    return JSON.stringify(value);
+  }
+  return String(value);
+};
 </script>
 
 <template>
-  <div
-    class="border-b border-gray-100 py-6 last:border-b-0 last:pb-0 dark:border-gray-800"
-  >
-    <!-- Path 参数样式 -->
-    <template v-if="isPathParam">
-      <div class="mb-2 flex items-center gap-2">
-        <span class="text-primary font-mono text-base font-bold">
+  <div class="parameter-item">
+    <div class="parameter-item__headline">
+      <div class="parameter-item__title-line">
+        <div
+          class="parameter-item__name"
+          :class="{ 'parameter-item__name--required': parameter.required }"
+        >
           {{ parameter.name }}
-        </span>
-        <div
-          v-if="schema"
-          class="flex rounded-md bg-gray-100/50 px-1.5 font-mono text-xs font-bold text-gray-600 dark:bg-white/5 dark:text-gray-200"
-        >
-          <span>{{ schema.type }}</span>
-          <span v-if="schema.format">{{ `<${schema.format}>` }}</span>
+          <sup v-if="parameter.required" class="parameter-item__required-star">
+            *
+          </sup>
         </div>
-
-        <div
-          v-if="parameter.example"
-          class="flex items-center rounded-md bg-gray-100/50 px-1.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-200"
-        >
-          <span class="mr-0.5 text-gray-400 dark:text-gray-500">示例值:</span>
-          <span class="font-mono">{{ parameter.example }}</span>
-        </div>
-
-        <div
-          v-if="parameter.default"
-          class="flex items-center rounded-md bg-gray-100/50 px-1.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-200"
-        >
-          <span class="mr-0.5 text-gray-400 dark:text-gray-500">默认值:</span>
-          <span class="font-mono">{{ parameter.default }}</span>
-        </div>
-
-        <div
-          v-if="constraints"
-          class="flex items-center rounded-md bg-gray-100/50 px-1.5 py-0.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-200"
-        >
-          <span class="mr-0.5 text-gray-400 dark:text-gray-500">
-            取值范围:
-          </span>
-          <span class="font-mono">
-            {{ constraints }}
-          </span>
-        </div>
-
-        <div
-          class="rounded-md bg-red-100/50 px-1.5 text-xs font-bold text-red-600 dark:bg-red-400/10 dark:text-red-300"
-        >
-          必须
+        <div class="parameter-item__type">{{ typeLabel }}</div>
+        <div v-if="plainDescription" class="parameter-item__summary">
+          {{ plainDescription }}
         </div>
       </div>
+    </div>
 
-      <div v-if="plainDescription" class="text-gray-600 dark:text-gray-400">
-        {{ plainDescription }}
-      </div>
+    <div
+      v-if="htmlDescription"
+      class="parameter-item__description prose prose-sm max-w-none"
+      v-html="htmlDescription"
+    ></div>
+
+    <div
+      v-if="
+        constraintTokens.length > 0 ||
+        enumItems.length > 0 ||
+        (exampleValue !== undefined && exampleValue !== null) ||
+        patternValue
+      "
+      class="parameter-item__details"
+    >
       <div
-        v-if="htmlDescription"
-        class="mt-2 text-gray-600 dark:text-gray-400"
-        v-html="htmlDescription"
-      ></div>
-
-      <!-- 扩展枚举值展示 -->
-      <div v-if="hasExtendedEnum" class="mt-4">
-        <div class="mb-2 text-xs font-medium text-gray-600 dark:text-gray-400">
-          可用值:
-        </div>
-        <div class="flex flex-wrap gap-2">
-          <div
-            v-for="item in enumItems"
-            :key="item.value"
-            class="bg-primary/5 inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs"
+        v-if="constraintTokens.length > 0"
+        class="parameter-item__detail-row"
+      >
+        <span class="parameter-item__detail-label">约束:</span>
+        <div class="parameter-item__detail-content">
+          <span
+            v-for="item in constraintTokens"
+            :key="item"
+            class="meta-chip meta-chip--constraint"
           >
-            <span class="text-primary font-mono font-semibold">
-              {{ item.value }}
-            </span>
-            <span
-              v-if="item.description"
-              class="text-gray-600 dark:text-gray-400"
-            >
+            {{ item }}
+          </span>
+        </div>
+      </div>
+
+      <div v-if="enumItems.length > 0" class="parameter-item__detail-row">
+        <span class="parameter-item__detail-label">枚举值:</span>
+        <div class="parameter-item__detail-content">
+          <span v-for="item in enumItems" :key="item.value" class="enum-entry">
+            <span class="meta-chip meta-chip--mono">{{ item.value }}</span>
+            <span v-if="item.description" class="enum-entry__description">
               - {{ item.description }}
             </span>
-          </div>
-        </div>
-      </div>
-
-      <!-- 如果没有扩展枚举,显示原有的简单枚举值 -->
-      <div
-        v-else-if="schema?.enum || schema?.items?.enum"
-        class="mt-6 flex items-center"
-      >
-        <span class="text-xs font-medium text-gray-600 dark:text-gray-400">
-          可用值:
-        </span>
-        <div
-          v-for="value in (schema?.enum || schema?.items?.enum).filter(Boolean)"
-          :key="value"
-          class="mr-2 rounded-md bg-gray-100/50 px-1.5 py-0.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-200"
-        >
-          <span class="font-mono">{{ value }}</span>
-        </div>
-      </div>
-    </template>
-
-    <!-- Query 参数样式 -->
-    <template v-else>
-      <div class="mb-2 flex items-center gap-2">
-        <div class="flex items-center gap-2">
-          <span class="font-mono text-base font-bold text-red-600">
-            {{ parameter.name }}
           </span>
-          <div
-            v-if="schema"
-            class="flex rounded-md bg-gray-100/50 px-1.5 py-0.5 font-mono text-xs font-bold text-gray-600 dark:bg-white/5 dark:text-gray-200"
-          >
-            <span>{{ schema.type }}</span>
-            <span v-if="schema.format">{{ `<${schema.format}>` }}</span>
-          </div>
-
-          <div
-            v-if="parameter.example"
-            class="flex items-center rounded-md bg-gray-100/50 px-1.5 py-0.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-200"
-          >
-            <span class="mr-0.5 text-gray-400 dark:text-gray-500">
-              示例值:
-            </span>
-            <span class="font-mono">{{ parameter.example }}</span>
-          </div>
-
-          <div
-            v-if="parameter.default"
-            class="flex items-center rounded-md bg-gray-100/50 px-1.5 py-0.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-200"
-          >
-            <span class="mr-0.5 text-gray-400 dark:text-gray-500">
-              默认值:
-            </span>
-            <span class="font-mono">{{ parameter.default }}</span>
-          </div>
-
-          <div
-            v-if="constraints"
-            class="flex items-center rounded-md bg-gray-100/50 px-1.5 py-0.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-200"
-          >
-            <span class="mr-0.5 text-gray-400 dark:text-gray-500">
-              取值范围:
-            </span>
-            <span class="font-mono">
-              {{ constraints }}
-            </span>
-          </div>
-
-          <div
-            v-if="parameter.required"
-            class="rounded-md bg-red-100/50 px-1.5 py-0.5 text-xs font-bold text-red-600 dark:bg-red-400/10 dark:text-red-300"
-          >
-            必须
-          </div>
-          <div
-            v-else
-            class="rounded-md bg-green-100/50 px-1.5 py-0.5 text-xs font-bold text-green-600 dark:bg-green-400/10 dark:text-green-300"
-          >
-            可选
-          </div>
         </div>
       </div>
-      <div class="mt-4 text-gray-600 dark:text-gray-400">
-        {{ plainDescription }}
-      </div>
+
       <div
-        v-if="htmlDescription"
-        class="mt-2 text-sm text-gray-600 dark:text-gray-400"
-        v-html="htmlDescription"
-      ></div>
-
-      <!-- 扩展枚举值展示 -->
-      <div v-if="hasExtendedEnum" class="mt-4">
-        <div class="mb-2 text-xs font-medium text-gray-600 dark:text-gray-400">
-          可用值:
-        </div>
-        <div class="flex flex-wrap gap-2">
-          <div
-            v-for="item in enumItems"
-            :key="item.value"
-            class="bg-primary/5 inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs"
-          >
-            <span class="text-primary font-mono font-semibold">
-              {{ item.value }}
-            </span>
-            <span
-              v-if="item.description"
-              class="text-gray-600 dark:text-gray-400"
-            >
-              - {{ item.description }}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <!-- 如果没有扩展枚举,显示原有的简单枚举值 -->
-      <div
-        v-else-if="schema?.enum || schema?.items?.enum"
-        class="mt-6 flex items-center"
+        v-if="exampleValue !== undefined && exampleValue !== null"
+        class="parameter-item__detail-row"
       >
-        <span class="text-xs font-medium text-gray-600 dark:text-gray-400">
-          可用值:
-        </span>
-        <div
-          v-for="value in (schema?.enum || schema?.items?.enum).filter(Boolean)"
-          :key="value"
-          class="mr-2 rounded-md bg-gray-100/50 px-1.5 py-0.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-200"
-        >
-          <span class="font-mono">{{ value }}</span>
+        <span class="parameter-item__detail-label">示例:</span>
+        <div class="parameter-item__detail-content">
+          <span class="meta-chip meta-chip--mono">
+            {{ formatValue(exampleValue) }}
+          </span>
         </div>
       </div>
-    </template>
+
+      <div v-if="patternValue" class="parameter-item__detail-row">
+        <span class="parameter-item__detail-label">正则匹配:</span>
+        <div class="parameter-item__detail-content">
+          <span class="meta-chip meta-chip--mono">{{ patternValue }}</span>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
+
+<style scoped>
+.parameter-item {
+  --field-chip-radius: calc(var(--radius, 12px) * 0.82);
+  --field-chip-bg: var(--el-fill-color-light);
+  --field-chip-border: var(--el-border-color);
+  --field-chip-text: var(--el-text-color-primary);
+  --field-chip-value-weight: 600;
+  --field-required: var(--el-color-danger);
+  --field-leading-gutter: 26px;
+
+  padding: 10px 0;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.parameter-item:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.parameter-item__headline {
+  min-width: 0;
+  padding-left: var(--field-leading-gutter);
+}
+
+.parameter-item__title-line {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 4px 10px;
+  align-items: center;
+  min-width: 0;
+}
+
+.parameter-item__name {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+  overflow-wrap: anywhere;
+}
+
+.parameter-item__name--required {
+  color: var(--field-required);
+}
+
+.parameter-item__required-star {
+  position: absolute;
+  top: 0;
+  left: -10px;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--field-required);
+  transform: translate(0, -32%);
+}
+
+.parameter-item__type {
+  font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+}
+
+.parameter-item__summary,
+.parameter-item__description {
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--el-text-color-secondary);
+}
+
+.parameter-item__summary {
+  min-width: 0;
+}
+
+.parameter-item__description {
+  padding-left: var(--field-leading-gutter);
+  margin-top: 6px;
+}
+
+.parameter-item__details {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 8px;
+  padding-left: var(--field-leading-gutter);
+  margin-top: 8px;
+}
+
+.parameter-item__detail-row {
+  display: contents;
+}
+
+.parameter-item__detail-label {
+  align-self: center;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+}
+
+.parameter-item__detail-content {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.meta-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  max-width: 100%;
+  min-height: 22px;
+  padding: 1px 6px;
+  font-size: 11.5px;
+  font-weight: var(--field-chip-value-weight);
+  line-height: 1.35;
+  color: var(--field-chip-text);
+  overflow-wrap: anywhere;
+  white-space: normal;
+  background: var(--field-chip-bg);
+  border: 1px solid var(--field-chip-border);
+  border-radius: var(--field-chip-radius);
+}
+
+.meta-chip--mono {
+  font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
+  font-weight: inherit;
+}
+
+.meta-chip--constraint {
+  font-weight: 500;
+  color: var(--el-text-color-secondary);
+}
+
+.enum-entry {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 3px 5px;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.enum-entry__description {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--el-text-color-secondary);
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+@media (max-width: 768px) {
+  .parameter-item__details {
+    grid-template-columns: 1fr;
+    row-gap: 4px;
+  }
+
+  .parameter-item__detail-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
+  .parameter-item__title-line {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .parameter-item__summary {
+    grid-column: 1 / -1;
+  }
+
+  .parameter-item__detail-label {
+    min-width: 0;
+  }
+}
+</style>

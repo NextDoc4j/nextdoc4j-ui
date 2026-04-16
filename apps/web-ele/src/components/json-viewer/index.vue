@@ -5,21 +5,35 @@ import { preferences } from '@vben/preferences';
 
 import { usePreferredDark } from '@vueuse/core';
 
-import { generateExample } from '#/utils/schema';
+import { generateExample, type SchemaViewMode } from '#/utils/schema';
 
 import JsonNode from './json-node.vue';
 
 const props = withDefaults(
   defineProps<{
+    autoExpandDepth?: number;
     defaultExpanded?: boolean;
-    schema: any;
+    enableChunkedRender?: boolean;
+    initialRenderCount?: number;
+    mode?: SchemaViewMode;
+    renderChunkSize?: number;
+    schema?: any;
+    value?: unknown;
   }>(),
   {
+    autoExpandDepth: Number.POSITIVE_INFINITY,
     defaultExpanded: true,
+    enableChunkedRender: false,
+    initialRenderCount: 120,
+    mode: 'entity',
+    renderChunkSize: 120,
+    schema: undefined,
+    value: undefined,
   },
 );
 
 const rootNode = ref<InstanceType<typeof JsonNode> | null>(null);
+const scrollHostRef = ref<HTMLElement | null>(null);
 const preferredDark = usePreferredDark();
 
 const resolvedThemeMode = computed(() => {
@@ -29,23 +43,39 @@ const resolvedThemeMode = computed(() => {
   return preferences.theme.mode;
 });
 
-const parsedData = computed(() => {
-  if (!props.schema) {
-    return null;
+const parsedResult = computed<{ data: unknown; error: null | string }>(() => {
+  if (props.value !== undefined) {
+    return {
+      data: props.value,
+      error: null,
+    };
   }
+
+  if (!props.schema) {
+    return {
+      data: null,
+      error: null,
+    };
+  }
+
   try {
-    return generateExample(props.schema);
+    return {
+      data: generateExample(props.schema, { mode: props.mode }),
+      error: null,
+    };
   } catch (error) {
     console.error('Failed to generate example from schema:', error);
-    return null;
+    return {
+      data: null,
+      error: 'Invalid schema format',
+    };
   }
 });
 
-const parseError = computed(() => {
-  if (parsedData.value === null && props.schema) {
-    return 'Invalid schema format';
-  }
-  return null;
+const parsedData = computed(() => parsedResult.value.data);
+const parseError = computed(() => parsedResult.value.error);
+const isEmptyData = computed(() => {
+  return parsedData.value === null || parsedData.value === undefined;
 });
 
 function expandAll() {
@@ -56,22 +86,36 @@ function collapseAll() {
   rootNode.value?.collapseAll();
 }
 
+function getScrollTop() {
+  return scrollHostRef.value?.scrollTop ?? 0;
+}
+
+function setScrollTop(value: number) {
+  if (!scrollHostRef.value) {
+    return;
+  }
+  scrollHostRef.value.scrollTop = Math.max(0, value);
+}
+
 defineExpose({
   expandAll,
   collapseAll,
+  getScrollTop,
+  setScrollTop,
 });
 </script>
 
 <template>
   <div
-    class="overflow-auto rounded p-4 font-mono text-sm"
+    ref="scrollHostRef"
+    class="json-viewer-scroll-host overflow-auto rounded p-4 font-mono text-sm"
     :class="`theme-${resolvedThemeMode}`"
   >
     <div v-if="parseError" class="json-error">
       <span class="text-sm">⚠️</span>
       <span>{{ parseError }}</span>
     </div>
-    <div v-else-if="!parsedData" class="json-empty">
+    <div v-else-if="isEmptyData" class="json-empty">
       <span>暂无数据</span>
     </div>
     <JsonNode
@@ -81,6 +125,10 @@ defineExpose({
       :key-name="null"
       :depth="0"
       :default-expanded="defaultExpanded"
+      :auto-expand-depth="autoExpandDepth"
+      :enable-chunked-render="enableChunkedRender"
+      :initial-render-count="initialRenderCount"
+      :render-chunk-size="renderChunkSize"
       :schema="schema"
       :parent-schema="null"
     />
@@ -89,6 +137,7 @@ defineExpose({
 
 <style scoped>
 .theme-dark {
+  contain: layout paint style;
   border: 1px solid #36363a;
 }
 
@@ -102,6 +151,7 @@ defineExpose({
 }
 
 .theme-light {
+  contain: layout paint style;
   border: 1px solid #e4e4e7;
 }
 
@@ -122,4 +172,10 @@ defineExpose({
   font-weight: 700;
   border-radius: 6px;
 }
+
+.json-viewer-scroll-host :deep(*) {
+  transition: none !important;
+  animation: none !important;
+}
 </style>
+

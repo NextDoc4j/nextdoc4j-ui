@@ -62,10 +62,29 @@ interface SearchItem {
   operationId?: string;
   path: string;
   searchText?: string;
+  searchIndex?: SearchItemIndex;
   serviceName?: string;
   serviceUrl?: string;
   source: SearchSource;
   title: string;
+}
+
+interface SearchItemIndex {
+  compactApiPath: string;
+  compactSearchText: string;
+  compactTitle: string;
+  lowerApiPath: string;
+  lowerBreadcrumb: string;
+  lowerDescription: string;
+  lowerMethod: string;
+  lowerOperationId: string;
+  lowerPath: string;
+  lowerSearchText: string;
+  lowerTitle: string;
+  normalizedApiPath: string;
+  normalizedRequestLine: string;
+  normalizedRoutePath: string;
+  normalizedSearchText: string;
 }
 
 interface SearchHistoryItem {
@@ -97,6 +116,28 @@ const activeIndex = ref(-1);
 const selectedFilter = ref<SearchFilter>('all');
 const searchItems = shallowRef<SearchItem[]>([]);
 const searchResults = ref<SearchItem[]>([]);
+const aggregationIndexAttempts = shallowRef<Record<string, boolean>>({});
+let aggregationIndexWarmToken = 0;
+const servicesSignature = computed(() => {
+  return services.value
+    .map(
+      (service) => `${service.url}:${service.name}:${service.disabled ? 1 : 0}`,
+    )
+    .join('|');
+});
+const serviceCacheSignature = computed(() => {
+  return services.value
+    .map((service) => {
+      const cache = serviceCache.value.get(service.url);
+      return [
+        service.url,
+        cache?.openApi ? 1 : 0,
+        cache?.config ? 1 : 0,
+        cache?.groupDocs?.size ?? 0,
+      ].join(':');
+    })
+    .join('|');
+});
 
 const filterOptions = computed<Array<{ label: string; value: SearchFilter }>>(
   () => [
@@ -112,8 +153,6 @@ const handleSearch = useThrottleFn(search, 200);
 
 // 搜索函数，用于根据搜索关键词查找匹配的菜单项
 function search(searchKey: string) {
-  rebuildSearchItems();
-
   // 去除搜索关键词的前后空格
   searchKey = searchKey.trim();
 
@@ -128,36 +167,25 @@ function search(searchKey: string) {
   const currentServiceUrl = currentService.value?.url;
 
   const lowerKey = searchKey.toLowerCase();
+  const compactKey = normalizeLooseText(lowerKey);
   const normalizedPathKey = normalizePathLike(lowerKey);
   const isPathQuery = isPathLikeKeyword(lowerKey);
   const scored = searchItems.value
     .map((item) => {
-      const title = item.title.toLowerCase();
-      const breadcrumb = item.breadcrumb.toLowerCase();
-      const path = item.path.toLowerCase();
-      const apiPath = (item.apiPath || '').toLowerCase();
-      const description = (item.description || '').toLowerCase();
-      const searchText = (item.searchText || '').toLowerCase();
+      const index = item.searchIndex || createSearchItemIndex(item);
       let score = 0;
 
       if (isPathQuery) {
-        const requestLine = normalizePathLike(
-          `${(item.method || '').toLowerCase()} ${apiPath}`,
-        );
-        const normalizedApiPath = normalizePathLike(apiPath);
-        const normalizedRoutePath = normalizePathLike(path);
-        const normalizedSearchText = normalizePathLike(searchText);
-
-        if (requestLine.includes(normalizedPathKey)) {
+        if (index.normalizedRequestLine.includes(normalizedPathKey)) {
           score += 240;
         }
-        if (normalizedApiPath.includes(normalizedPathKey)) {
+        if (index.normalizedApiPath.includes(normalizedPathKey)) {
           score += 200;
         }
-        if (normalizedRoutePath.includes(normalizedPathKey)) {
+        if (index.normalizedRoutePath.includes(normalizedPathKey)) {
           score += 120;
         }
-        if (normalizedSearchText.includes(normalizedPathKey)) {
+        if (index.normalizedSearchText.includes(normalizedPathKey)) {
           score += 80;
         }
 
@@ -166,39 +194,57 @@ function search(searchKey: string) {
           score = 0;
         }
       } else {
-        if (title === lowerKey) {
-          score += 140;
-        }
-        if (title.startsWith(lowerKey)) {
-          score += 120;
-        }
-        if (title.includes(lowerKey)) {
-          score += 90;
-        }
-        if (reg.test(title)) {
-          score += 60;
-        }
-        if (breadcrumb.includes(lowerKey)) {
-          score += 30;
-        }
-        if (path.includes(lowerKey)) {
-          score += 20;
-        }
-        if (apiPath.includes(lowerKey)) {
-          score += 80;
-        }
-        if (description.includes(lowerKey)) {
-          score += 45;
-        }
-        if (searchText.includes(lowerKey)) {
-          score += 55;
-        }
-        if ((item.method || '').toLowerCase().includes(lowerKey)) {
-          score += 25;
-        }
-        if ((item.operationId || '').toLowerCase().includes(lowerKey)) {
-          score += 35;
-        }
+        score += getTextMatchScore(index.lowerTitle, lowerKey, reg, {
+          equal: 140,
+          fuzzy: 60,
+          includes: 90,
+          prefix: 120,
+        });
+        score += getTextMatchScore(index.lowerBreadcrumb, lowerKey, reg, {
+          fuzzy: 18,
+          includes: 30,
+        });
+        score += getTextMatchScore(index.lowerPath, lowerKey, reg, {
+          fuzzy: 12,
+          includes: 20,
+        });
+        score += getTextMatchScore(index.lowerApiPath, lowerKey, reg, {
+          fuzzy: 40,
+          includes: 80,
+        });
+        score += getTextMatchScore(index.lowerDescription, lowerKey, reg, {
+          fuzzy: 28,
+          includes: 45,
+        });
+        score += getTextMatchScore(index.lowerSearchText, lowerKey, reg, {
+          fuzzy: 38,
+          includes: 55,
+        });
+        score += getTextMatchScore(index.lowerMethod, lowerKey, reg, {
+          includes: 25,
+        });
+        score += getTextMatchScore(index.lowerOperationId, lowerKey, reg, {
+          fuzzy: 20,
+          includes: 35,
+        });
+        score += getCompactMatchScore(
+          index.compactTitle,
+          compactKey,
+          lowerKey,
+          45,
+        );
+        score += getCompactMatchScore(
+          index.compactApiPath,
+          compactKey,
+          lowerKey,
+          35,
+        );
+        score += getCompactMatchScore(
+          index.compactSearchText,
+          compactKey,
+          lowerKey,
+          28,
+        );
       }
 
       // 聚合模式下优先展示当前服务命中项，减少跨服务同名干扰
@@ -403,6 +449,95 @@ function createSearchReg(key: string) {
   return new RegExp(`.*${keys}.*`);
 }
 
+function getTextMatchScore(
+  value: string,
+  lowerKey: string,
+  reg: RegExp,
+  weights: {
+    equal?: number;
+    fuzzy?: number;
+    includes?: number;
+    prefix?: number;
+  },
+) {
+  if (!value) {
+    return 0;
+  }
+
+  let score = 0;
+  if (weights.equal && value === lowerKey) {
+    score += weights.equal;
+  }
+  if (weights.prefix && value.startsWith(lowerKey)) {
+    score += weights.prefix;
+  }
+
+  const contains = value.includes(lowerKey);
+  if (weights.includes && contains) {
+    score += weights.includes;
+  } else if (weights.fuzzy && reg.test(value)) {
+    score += weights.fuzzy;
+  }
+
+  return score;
+}
+
+function normalizeLooseText(value: string) {
+  return value.replaceAll(/[\s/_.:-]+/g, '');
+}
+
+function createSearchItemIndex(item: SearchItem): SearchItemIndex {
+  const lowerTitle = item.title.toLowerCase();
+  const lowerBreadcrumb = item.breadcrumb.toLowerCase();
+  const lowerPath = item.path.toLowerCase();
+  const lowerApiPath = (item.apiPath || '').toLowerCase();
+  const lowerDescription = (item.description || '').toLowerCase();
+  const lowerSearchText = (item.searchText || '').toLowerCase();
+  const lowerMethod = (item.method || '').toLowerCase();
+  const lowerOperationId = (item.operationId || '').toLowerCase();
+
+  return {
+    compactApiPath: normalizeLooseText(lowerApiPath),
+    compactSearchText: normalizeLooseText(lowerSearchText),
+    compactTitle: normalizeLooseText(lowerTitle),
+    lowerApiPath,
+    lowerBreadcrumb,
+    lowerDescription,
+    lowerMethod,
+    lowerOperationId,
+    lowerPath,
+    lowerSearchText,
+    lowerTitle,
+    normalizedApiPath: normalizePathLike(lowerApiPath),
+    normalizedRequestLine: normalizePathLike(`${lowerMethod} ${lowerApiPath}`),
+    normalizedRoutePath: normalizePathLike(lowerPath),
+    normalizedSearchText: normalizePathLike(lowerSearchText),
+  };
+}
+
+function prepareSearchItem(item: SearchItem): SearchItem {
+  return {
+    ...item,
+    searchIndex: createSearchItemIndex(item),
+  };
+}
+
+function prepareSearchItems(items: SearchItem[]) {
+  return items.map((item) => prepareSearchItem(item));
+}
+
+function getCompactMatchScore(
+  value: string,
+  compactKey: string,
+  lowerKey: string,
+  score: number,
+) {
+  if (!value || !compactKey || compactKey === lowerKey) {
+    return 0;
+  }
+  return normalizeLooseText(value).includes(compactKey) ? score : 0;
+}
+
 function getPathSegments(path: string) {
   return path.split('/').filter(Boolean);
 }
@@ -419,6 +554,11 @@ function resolveSearchSource(path: string): {
   source: SearchSource;
 } {
   const segments = getPathSegments(path);
+  if (segments[0] === 'entity' && segments.length >= 3) {
+    return {
+      source: segments[1] === 'all' ? 'all' : 'group',
+    };
+  }
   if (segments[0] !== 'document' || segments.length < 4) {
     return { source: 'none' };
   }
@@ -475,6 +615,122 @@ function buildSearchIndex(
   return items;
 }
 
+function parseGroupCode(url: string) {
+  const segments = url.split('/').filter(Boolean);
+  return segments[segments.length - 1] || 'all';
+}
+
+function buildServiceGroupDocUrl(serviceUrl: string, groupUrl: string) {
+  const servicePrefix = serviceUrl.replace('/v3/api-docs', '');
+  return `${servicePrefix}${groupUrl}`;
+}
+
+function resolveServiceGroupName(
+  serviceUrl: string,
+  groupCode: string,
+): string {
+  const cache = serviceCache.value.get(serviceUrl);
+  const configUrls = cache?.config?.urls || [];
+  return (
+    configUrls
+      .find((item) => parseGroupCode(item.url) === groupCode)
+      ?.name?.trim() || groupCode
+  );
+}
+
+function buildSearchText(...parts: Array<null | string | undefined>) {
+  return parts.filter(Boolean).join(' ');
+}
+
+function buildOpenApiSearchIndex(
+  service: { name: string; url: string },
+  openApi: Record<string, any>,
+  source: SearchSource,
+  groupCode = 'all',
+): SearchItem[] {
+  const items: SearchItem[] = [];
+  const groupLabel =
+    source === 'all'
+      ? '所有接口'
+      : resolveServiceGroupName(service.url, groupCode);
+  const entityLabel = source === 'all' ? '所有实体' : groupLabel;
+
+  Object.entries(openApi.paths ?? {}).forEach(([apiPath, methods]) => {
+    Object.entries((methods || {}) as Record<string, any>).forEach(
+      ([method, operation]) => {
+        const methodName = method.toLowerCase();
+        if (!HTTP_METHODS.has(methodName)) return;
+
+        const operationId = operation?.operationId;
+        if (!operationId) return;
+
+        const tags =
+          Array.isArray(operation?.tags) && operation.tags.length > 0
+            ? operation.tags
+            : ['default'];
+        const title = operation?.summary || operationId || apiPath;
+        const description = operation?.description || '';
+        const searchText = buildSearchText(
+          service.name,
+          groupLabel,
+          title,
+          description,
+          operationId,
+          apiPath,
+          ...tags,
+        );
+
+        tags.forEach((tag: string) => {
+          items.push({
+            apiPath,
+            breadcrumb: `${service.name} / 接口文档 / ${groupLabel} / ${tag}`,
+            category: 'api',
+            description,
+            method: methodName,
+            operationId,
+            path:
+              source === 'all'
+                ? `/document/all/${tag}/${operationId}`
+                : `/document/${groupCode}/${tag}/${operationId}`,
+            searchText,
+            serviceName: service.name,
+            serviceUrl: service.url,
+            source,
+            title,
+          });
+        });
+      },
+    );
+  });
+
+  Object.entries(openApi.components?.schemas ?? {}).forEach(
+    ([schemaName, schema]) => {
+      const schemaDescription = (schema as any)?.description || '';
+      items.push({
+        breadcrumb: `${service.name} / 实体模型 / ${entityLabel}`,
+        category: 'entity',
+        description: schemaDescription,
+        path:
+          source === 'all'
+            ? `/entity/all/${schemaName}`
+            : `/entity/${groupCode}/${schemaName}`,
+        searchText: buildSearchText(
+          service.name,
+          entityLabel,
+          schemaName,
+          schemaDescription,
+        ),
+        serviceName: service.name,
+        serviceUrl: service.url,
+        source,
+        title: schemaName,
+      });
+    },
+  );
+
+  return items;
+}
+
 function buildAggregationSearchIndex(): SearchItem[] {
   const items: SearchItem[] = [];
 
@@ -483,70 +739,17 @@ function buildAggregationSearchIndex(): SearchItem[] {
     const openApi = cache?.openApi;
     if (!openApi) return;
 
-    Object.entries(openApi.paths ?? {}).forEach(([apiPath, methods]) => {
-      Object.entries((methods || {}) as Record<string, any>).forEach(
-        ([method, operation]) => {
-          const methodName = method.toLowerCase();
-          if (!HTTP_METHODS.has(methodName)) return;
+    items.push(...buildOpenApiSearchIndex(service, openApi, 'all'));
 
-          const operationId = operation?.operationId;
-          if (!operationId) return;
-
-          const tags =
-            Array.isArray(operation?.tags) && operation.tags.length > 0
-              ? operation.tags
-              : ['default'];
-          const title = operation?.summary || operationId || apiPath;
-          const description = operation?.description || '';
-          const searchText = [
-            service.name,
-            title,
-            description,
-            operationId,
-            apiPath,
-            ...tags,
-          ]
-            .filter(Boolean)
-            .join(' ');
-
-          tags.forEach((tag: string) => {
-            items.push({
-              apiPath,
-              breadcrumb: `${service.name} / 接口文档 / 所有接口 / ${tag}`,
-              category: 'api',
-              description,
-              method: methodName,
-              operationId,
-              path: `/document/all/${tag}/${operationId}`,
-              searchText,
-              serviceName: service.name,
-              serviceUrl: service.url,
-              source: 'all',
-              title,
-            });
-          });
-        },
+    cache?.groupDocs?.forEach((groupOpenApi, groupUrl) => {
+      const groupCode = parseGroupCode(groupUrl);
+      if (!groupCode || groupCode === 'all') {
+        return;
+      }
+      items.push(
+        ...buildOpenApiSearchIndex(service, groupOpenApi, 'group', groupCode),
       );
     });
-
-    Object.entries(openApi.components?.schemas ?? {}).forEach(
-      ([schemaName, schema]) => {
-        const schemaDescription = schema?.description || '';
-        items.push({
-          breadcrumb: `${service.name} / 实体模型 / 所有实体`,
-          category: 'entity',
-          description: schemaDescription,
-          path: `/entity/all/${schemaName}`,
-          searchText: [service.name, schemaName, schemaDescription]
-            .filter(Boolean)
-            .join(' '),
-          serviceName: service.name,
-          serviceUrl: service.url,
-          source: 'all',
-          title: schemaName,
-        });
-      },
-    );
   });
 
   return items;
@@ -555,6 +758,7 @@ function buildAggregationSearchIndex(): SearchItem[] {
 function deduplicateApiResults(results: SearchItem[]) {
   const output: SearchItem[] = [];
   const apiSeen = new Map<string, SearchItem>();
+  const entitySeen = new Map<string, SearchItem>();
   const seenKey = new Set<string>();
 
   results.forEach((item) => {
@@ -564,7 +768,8 @@ function deduplicateApiResults(results: SearchItem[]) {
       const apiKey = [
         item.serviceUrl || '__single__',
         (item.method || '').toLowerCase(),
-        item.operationId,
+        item.apiPath || item.path,
+        item.operationId || item.path,
       ].join(':');
       const existing = apiSeen.get(apiKey);
 
@@ -582,6 +787,32 @@ function deduplicateApiResults(results: SearchItem[]) {
           output[index] = item;
         }
         apiSeen.set(apiKey, item);
+      }
+      return;
+    }
+
+    if (item.category === 'entity') {
+      const entityKey = [
+        item.serviceUrl || '__single__',
+        item.category,
+        item.title.toLowerCase(),
+      ].join(':');
+      const existing = entitySeen.get(entityKey);
+
+      if (!existing) {
+        entitySeen.set(entityKey, item);
+        output.push(item);
+        return;
+      }
+
+      if (existing.source === 'all' && item.source === 'group') {
+        const index = output.findIndex(
+          (entry) => getItemKey(entry) === getItemKey(existing),
+        );
+        if (index !== -1) {
+          output[index] = item;
+        }
+        entitySeen.set(entityKey, item);
       }
       return;
     }
@@ -816,19 +1047,76 @@ function rebuildSearchItems() {
   );
 
   if (!isAggregation.value) {
-    searchItems.value = currentMenuItems;
+    searchItems.value = prepareSearchItems(currentMenuItems);
     return;
   }
 
   const activeService = currentService.value;
   const serviceAwareMenus = currentMenuItems.map((item) => ({
     ...item,
+    searchText: buildSearchText(
+      activeService?.name,
+      item.title,
+      item.description,
+      item.apiPath,
+      item.searchText,
+      item.operationId,
+    ),
     serviceName: activeService?.name,
     serviceUrl: activeService?.url,
   }));
 
   const merged = [...buildAggregationSearchIndex(), ...serviceAwareMenus];
-  searchItems.value = deduplicateApiResults(merged);
+  searchItems.value = prepareSearchItems(deduplicateApiResults(merged));
+}
+
+async function warmAggregationSearchIndex() {
+  if (!isAggregation.value) {
+    return;
+  }
+
+  const candidateServices = services.value.filter(
+    (service) =>
+      !service.disabled && !aggregationIndexAttempts.value[service.url],
+  );
+  if (candidateServices.length <= 0) {
+    return;
+  }
+
+  aggregationIndexAttempts.value = {
+    ...aggregationIndexAttempts.value,
+    ...Object.fromEntries(
+      candidateServices.map((service) => [service.url, true]),
+    ),
+  };
+
+  const currentToken = ++aggregationIndexWarmToken;
+  await Promise.allSettled(
+    candidateServices.map(async (service) => {
+      const { config } = await aggregationStore.getServiceData(service);
+      const groupUrls = (config.urls || [])
+        .map((item) => item.url)
+        .filter((url) => parseGroupCode(url) !== 'all');
+
+      await Promise.allSettled(
+        groupUrls.map((url) =>
+          aggregationStore.getServiceGroupDoc(
+            service,
+            buildServiceGroupDocUrl(service.url, url),
+          ),
+        ),
+      );
+    }),
+  );
+
+  if (currentToken !== aggregationIndexWarmToken) {
+    return;
+  }
+
+  rebuildSearchItems();
+  if (props.keyword?.trim()) {
+    handleSearch(props.keyword);
+  }
 }
 
 const renderedItems = computed(() => {
@@ -839,6 +1127,7 @@ watch(
   () => props.keyword,
   (val) => {
     if (val?.trim()) {
+      void warmAggregationSearchIndex();
       handleSearch(val);
     } else {
       searchResults.value = [];
@@ -847,20 +1136,30 @@ watch(
 );
 
 watch(
+  () => [isAggregation.value, servicesSignature.value],
+  () => {
+    aggregationIndexAttempts.value = {};
+    aggregationIndexWarmToken += 1;
+  },
+  { immediate: true },
+);
+
+watch(
   () => [
     props.menus,
     isAggregation.value,
     currentService.value?.url,
-    services.value,
-    serviceCache.value,
+    servicesSignature.value,
+    serviceCacheSignature.value,
   ],
   () => {
     rebuildSearchItems();
     if (props.keyword?.trim()) {
+      void warmAggregationSearchIndex();
       handleSearch(props.keyword);
     }
   },
-  { deep: true, immediate: true },
+  { immediate: true },
 );
 
 watch(

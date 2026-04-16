@@ -1,156 +1,486 @@
 <script setup lang="ts">
-import { computed, onBeforeMount, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 
-import { ElCard, ElCol, ElRow } from 'element-plus';
+import { ElButton } from 'element-plus';
 
 import JsonViewer from '#/components/json-viewer/index.vue';
+import SchemaView from '#/components/schema-view.vue';
 import { useApiStore } from '#/store';
-import { processSchema, resolveSchema } from '#/utils/schema';
-
-import entityTr from './components/entity-tr.vue';
+import { adaptSchemaForView, hasRenderableSchema } from '#/utils/schema';
 
 const route = useRoute();
-const entityInfo = ref();
 const apiStore = useApiStore();
+const exampleOpen = ref(false);
+const entityVariantState = ref<Record<string, number>>({});
 
-const treeData = ref();
-const fold = ref(false);
-const defaultExpanded = ref(true);
-
-const schemaWithExamples = computed(() => {
-  if (!entityInfo.value) return null;
-  const resolved = resolveSchema(entityInfo.value);
-  return normalizeSchemaForExample(resolved);
+const entityName = computed(() => {
+  const routeName = route.name;
+  if (typeof routeName !== 'string') {
+    return '';
+  }
+  const [, name] = routeName.split('*') ?? [];
+  return name || '';
 });
 
-function normalizeSchemaForExample(schema: any): any {
-  if (!schema || typeof schema !== 'object') return schema;
-
-  if (Array.isArray(schema)) {
-    return schema.map((item) => normalizeSchemaForExample(item));
+const entityInfo = computed(() => {
+  const name = entityName.value;
+  if (!name) {
+    return null;
   }
 
-  if (schema.oneOf?.length) {
-    return normalizeSchemaForExample(schema.oneOf[0]);
+  const schema = apiStore.openApi?.components?.schemas?.[name];
+  if (!schema) {
+    return null;
   }
 
-  if (schema.allOf?.length) {
-    const merged: any = { type: 'object', properties: {} };
-    schema.allOf.forEach((item: any) => {
-      const normalized = normalizeSchemaForExample(item);
-      if (normalized?.properties) {
-        Object.assign(merged.properties, normalized.properties);
-      }
-    });
-    return merged;
+  return {
+    name,
+    ...schema,
+  };
+});
+
+const hasHtmlDescription = computed(() => {
+  return entityInfo.value?.description?.includes?.('<') ?? false;
+});
+
+const plainDescription = computed(() => {
+  if (!entityInfo.value?.description || hasHtmlDescription.value) {
+    return null;
+  }
+  return entityInfo.value.description;
+});
+
+const htmlDescription = computed(() => {
+  if (!entityInfo.value?.description || !hasHtmlDescription.value) {
+    return null;
+  }
+  return entityInfo.value.description;
+});
+
+const entitySchema = computed(() => {
+  if (!entityInfo.value) {
+    return null;
+  }
+  return adaptSchemaForView(entityInfo.value, { mode: 'entity' });
+});
+
+
+const mergeComposedSchema = (baseSchema: any, pickedSchema: any) => {
+  if (!pickedSchema || typeof pickedSchema !== 'object') {
+    return baseSchema;
   }
 
-  if (['error', 'ref', 'unknown'].includes(schema.type)) {
-    return { type: 'object', properties: {} };
-  }
+  const merged: any = {
+    ...baseSchema,
+    ...pickedSchema,
+  };
 
-  const cloned: any = { ...schema };
-
-  if (!cloned.type) {
-    if (cloned.properties) {
-      cloned.type = 'object';
-    } else if (cloned.items) {
-      cloned.type = 'array';
-    } else if (cloned.enum) {
-      cloned.type = 'string';
-    }
-  }
-
-  if (cloned.type === 'array' && cloned.items) {
-    cloned.items = normalizeSchemaForExample(cloned.items);
-  }
-
-  if (cloned.type === 'object' || cloned.properties) {
-    const properties = cloned.properties ?? {};
-    cloned.properties = Object.fromEntries(
-      Object.entries(properties).map(([key, value]) => [
-        key,
-        normalizeSchemaForExample(value),
-      ]),
-    );
-  }
-
-  if (
-    cloned.example === undefined &&
-    cloned.type &&
-    !['array', 'object'].includes(cloned.type)
-  ) {
-    cloned.example = '';
-  }
-
-  return cloned;
-}
-
-onBeforeMount(() => {
-  const [, entityName] = (route.name as string).split('*') ?? [];
-  if (entityName) {
-    entityInfo.value = {
-      name: entityName,
-      ...apiStore.openApi?.components.schemas[entityName],
+  if (baseSchema?.properties || pickedSchema?.properties) {
+    merged.properties = {
+      ...(baseSchema?.properties || {}),
+      ...(pickedSchema?.properties || {}),
     };
   }
-  const data = processSchema(entityInfo.value);
-  treeData.value = data;
+
+  const required = [
+    ...(Array.isArray(baseSchema?.required) ? baseSchema.required : []),
+    ...(Array.isArray(pickedSchema?.required) ? pickedSchema.required : []),
+  ];
+  if (required.length > 0) {
+    merged.required = [...new Set(required)];
+  }
+
+  if (!merged.type && merged.properties) {
+    merged.type = 'object';
+  }
+
+  return merged;
+};
+
+const applyEntityVariantState = (
+  schema: any,
+  state: Record<string, number>,
+) => {
+  const pickVariantIndex = (path: string, options: any[]) => {
+    const selected = state[path];
+    if (!Array.isArray(options) || options.length <= 0) {
+      return 0;
+    }
+    if (
+      typeof selected !== 'number' ||
+      !Number.isInteger(selected) ||
+      selected < 0 ||
+      selected >= options.length
+    ) {
+      return 0;
+    }
+    return selected;
+  };
+
+  const visit = (node: any, path: string): any => {
+    if (node === null || node === undefined) {
+      return null;
+    }
+    if (typeof node !== 'object') {
+      return node;
+    }
+    if (Array.isArray(node)) {
+      return node.map((item, index) => visit(item, `${path}.${index}`));
+    }
+
+    let current: any = { ...node };
+
+    if (Array.isArray(current.oneOf) && current.oneOf.length > 0) {
+      const index = pickVariantIndex(path, current.oneOf);
+      const base = { ...current };
+      delete base.oneOf;
+      delete base.anyOf;
+      delete base.allOf;
+      delete base['x-nextdoc4j-allOfMerged'];
+      const picked = current.oneOf[index] ?? current.oneOf[0];
+      current = mergeComposedSchema(base, picked);
+    } else if (Array.isArray(current.anyOf) && current.anyOf.length > 0) {
+      const index = pickVariantIndex(path, current.anyOf);
+      const base = { ...current };
+      delete base.oneOf;
+      delete base.anyOf;
+      delete base.allOf;
+      delete base['x-nextdoc4j-allOfMerged'];
+      const picked = current.anyOf[index] ?? current.anyOf[0];
+      current = mergeComposedSchema(base, picked);
+    } else if (Array.isArray(current.allOf) && current.allOf.length > 0) {
+      const mergedAllOf = current.allOf.reduce((acc: any, item: any) => {
+        return mergeComposedSchema(acc, visit(item, path));
+      }, {});
+      const base = { ...current };
+      delete base.allOf;
+      delete base['x-nextdoc4j-allOfMerged'];
+      current = mergeComposedSchema(base, mergedAllOf);
+    }
+
+    if (current.properties && typeof current.properties === 'object') {
+      const nextProperties: Record<string, any> = {};
+      Object.entries(current.properties).forEach(([key, value]) => {
+        nextProperties[key] = visit(value, `${path}.${key}`);
+      });
+      current.properties = nextProperties;
+    }
+
+    if (current.items) {
+      current.items = visit(current.items, path);
+    }
+
+    if (Array.isArray(current.prefixItems)) {
+      current.prefixItems = current.prefixItems.map((item: any, index: number) =>
+        visit(item, `${path}.${index}`),
+      );
+    }
+
+    return current;
+  };
+
+  if (!schema || typeof schema !== 'object') {
+    return schema;
+  }
+
+  return visit(schema, '$');
+};
+
+const propertyCount = computed(() => {
+  return Object.keys(entitySchema.value?.properties || {}).length;
+});
+
+watch(entityName, () => {
+  entityVariantState.value = {};
+});
+
+const handleEntitySchemaVariantChange = (payload: {
+  index: number;
+  path: string;
+}) => {
+  entityVariantState.value = {
+    ...entityVariantState.value,
+    [payload.path]: payload.index,
+  };
+};
+
+const schemaWithExamples = computed(() => {
+  if (!entitySchema.value || !hasRenderableSchema(entitySchema.value)) {
+    return null;
+  }
+  return applyEntityVariantState(entitySchema.value, entityVariantState.value);
 });
 </script>
+
 <template>
-  <div class="relative box-border h-full w-full overflow-y-auto p-5">
-    <h3 class="text-xl">{{ entityInfo?.name }}</h3>
-    <h4 class="mt-4 text-sm">{{ entityInfo?.description }}</h4>
-    <ElRow class="mt-6" :gutter="16">
-      <ElCol :span="16">
-        <ElCard shadow="never">
-          <template #header>
-            <span class="text-sm font-medium">字段定义</span>
-          </template>
-          <table class="entity-table">
-            <thead>
-              <tr>
-                <th width="20%">属性名</th>
-                <th width="25%">类型</th>
-                <th width="20%">示例</th>
-                <th width="35%">描述</th>
-              </tr>
-            </thead>
-            <tbody>
-              <entityTr v-if="!fold" :tree-data="treeData" />
-            </tbody>
-          </table>
-        </ElCard>
-      </ElCol>
-      <ElCol :span="8">
-        <ElCard shadow="never">
-          <template #header>
-            <span class="text-sm font-medium">JSON 示例</span>
-          </template>
-          <div v-if="schemaWithExamples" class="max-h-[70vh] overflow-auto">
-            <JsonViewer
-              :schema="schemaWithExamples"
-              :default-expanded="defaultExpanded"
-            />
-          </div>
-          <div v-else class="py-8 text-center text-sm text-gray-400">
-            暂无示例数据
-          </div>
-        </ElCard>
-      </ElCol>
-    </ElRow>
+  <div class="entity-detail">
+    <section class="entity-hero">
+      <div class="entity-hero__title">{{ entityInfo?.name || '实体模型' }}</div>
+      <div v-if="plainDescription" class="entity-hero__description">
+        {{ plainDescription }}
+      </div>
+      <div
+        v-else-if="htmlDescription"
+        class="entity-hero__description prose prose-sm max-w-none"
+        v-html="htmlDescription"
+      ></div>
+      <div v-else class="entity-hero__description">暂无描述</div>
+    </section>
+
+    <section class="entity-panel">
+      <div class="entity-panel__header">
+        <div class="entity-panel__title-wrap">
+          <div class="entity-panel__title">字段定义</div>
+          <span class="entity-panel__count">
+            {{ propertyCount > 0 ? `${propertyCount} 字段` : '结构定义' }}
+          </span>
+        </div>
+        <ElButton
+          v-if="schemaWithExamples"
+          size="small"
+          class="example-toggle-button"
+          :class="{ 'example-toggle-button--active': exampleOpen }"
+          @click="exampleOpen = !exampleOpen"
+        >
+          {{ exampleOpen ? '收起示例' : 'JSON 示例' }}
+        </ElButton>
+      </div>
+
+      <div
+        v-if="hasRenderableSchema(entitySchema)"
+        class="schema-layout"
+        :class="{ 'schema-layout--open': exampleOpen && schemaWithExamples }"
+      >
+        <div class="schema-layout__main">
+          <SchemaView :data="entitySchema" mode="entity" @variant-change="handleEntitySchemaVariantChange" />
+        </div>
+
+        <div
+          v-if="exampleOpen && schemaWithExamples"
+          class="schema-layout__aside"
+        >
+          <JsonViewer
+            class="json-panel app-json-schema-viewer"
+            :schema="schemaWithExamples" mode="entity"
+          />
+        </div>
+      </div>
+
+      <div v-else class="empty-hint">暂无可展示的实体结构</div>
+    </section>
   </div>
 </template>
-<style lang="scss">
-.entity-table {
-  thead {
-    @apply border-b text-start;
 
-    th {
-      @apply px-6 py-3 text-sm;
-    }
+<style scoped lang="scss">
+.entity-detail {
+  --doc-chip-radius: calc(var(--radius) * 0.62);
+  --doc-radius-xs: calc(var(--radius) * 0.56);
+  --doc-radius-sm: calc(var(--radius) * 0.72);
+  --doc-radius-md: calc(var(--radius) * 0.94);
+  --doc-panel-bg: var(--el-bg-color);
+  --doc-soft-bg: color-mix(
+    in srgb,
+    var(--el-bg-color) 86%,
+    var(--el-fill-color-light) 14%
+  );
+  --doc-soft-bg-alt: color-mix(
+    in srgb,
+    var(--el-bg-color) 82%,
+    var(--el-fill-color-light) 18%
+  );
+  --doc-panel-border: color-mix(
+    in srgb,
+    var(--el-text-color-primary) 12%,
+    transparent
+  );
+  --doc-page-bg: var(--el-bg-color);
+  --el-border-radius-base: calc(var(--radius) * 0.75);
+  --el-border-radius-small: calc(var(--radius) * 0.62);
+
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  padding: 20px;
+  overflow-y: auto;
+  background: var(--doc-page-bg);
+
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+}
+
+.entity-hero,
+.entity-panel {
+  padding: 14px 16px;
+  background: var(--doc-panel-bg);
+  border: 1px solid var(--doc-panel-border);
+  border-radius: var(--doc-radius-md);
+}
+
+.entity-hero {
+  background: var(--doc-soft-bg);
+}
+
+.entity-hero__title {
+  font-family:
+    'HarmonyOS Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--el-text-color-primary);
+}
+
+.entity-hero__description {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.75;
+  color: var(--el-text-color-secondary);
+}
+
+.entity-panel__header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.entity-panel__title-wrap {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.entity-panel__title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+}
+
+.entity-panel__count {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 10px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--doc-chip-radius);
+}
+
+.example-toggle-button {
+  min-width: 88px;
+  height: 30px;
+  padding: 0 12px;
+  color: var(--el-color-primary);
+  background: color-mix(
+    in srgb,
+    var(--doc-panel-bg) 88%,
+    var(--el-color-primary-light-9) 12%
+  );
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 28%, transparent);
+  border-radius: var(--doc-chip-radius);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--el-color-primary) 8%, transparent);
+}
+
+.example-toggle-button:hover {
+  color: var(--el-color-primary);
+  background: color-mix(
+    in srgb,
+    var(--doc-panel-bg) 74%,
+    var(--el-color-primary-light-9) 26%
+  );
+  border-color: color-mix(in srgb, var(--el-color-primary) 42%, transparent);
+}
+
+.example-toggle-button--active {
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary-light-7);
+}
+
+.schema-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+.schema-layout--open {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.schema-layout__main {
+  min-width: 0;
+}
+
+.schema-layout__aside {
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
+.json-panel {
+  background: var(--doc-soft-bg-alt);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--doc-radius-xs);
+}
+
+.json-panel :deep(.theme-light),
+.json-panel :deep(.theme-dark) {
+  padding: 10px;
+  background: transparent;
+  border: none;
+}
+
+.json-panel :deep(.json-node) {
+  margin: 0;
+}
+
+.json-panel :deep(.node-header),
+.json-panel :deep(.node-primitive) {
+  min-height: 20px;
+  font-size: 12px;
+}
+
+.empty-hint {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 12px;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--doc-radius-xs);
+}
+
+@media (max-width: 992px) {
+  .schema-layout--open {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 767px) {
+  .entity-detail {
+    padding: 12px;
+  }
+
+  .entity-hero,
+  .entity-panel {
+    padding: 12px;
+  }
+
+  .entity-hero__title {
+    font-size: 20px;
   }
 }
 </style>
+

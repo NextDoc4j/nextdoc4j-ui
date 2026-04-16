@@ -37,7 +37,6 @@
   "language": "Language",
   "dynamicTitle": "Dynamic Title",
   "watermark": "Watermark",
-  "checkUpdates": "Periodic update check",
   "position": {
     "title": "Preferences Postion",
     "header": "Header",

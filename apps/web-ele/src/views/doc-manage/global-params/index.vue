@@ -226,7 +226,7 @@ const clearAllDebugRequestCache = () => {
         </template>
       </ElAlert>
 
-      <ElForm label-width="90px" class="mb-4">
+      <ElForm label-width="90px" class="mb-4 mt-2">
         <ElFormItem label="作用域">
           <ElSelect v-model="activeScope" style="width: 360px">
             <ElOption

@@ -81,8 +81,6 @@
     "notifications": "Notifications",
     "markAllAsRead": "Make All as Read",
     "clearNotifications": "Clear",
-    "checkUpdatesTitle": "New Version Available",
-    "checkUpdatesDescription": "Click to refresh and get the latest version",
     "search": {
       "title": "Search",
       "searchNavigate": "Search Navigation",

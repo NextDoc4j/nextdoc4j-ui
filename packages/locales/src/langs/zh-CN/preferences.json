@@ -37,7 +37,6 @@
   "language": "语言",
   "dynamicTitle": "动态标题",
   "watermark": "水印",
-  "checkUpdates": "定时检查更新",
   "position": {
     "title": "偏好设置位置",
     "header": "顶栏",

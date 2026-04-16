@@ -20,3 +20,26 @@ export const methodType: Record<string, any> = {
     color: '#ee46bc',
   },
 };
+
+const darkMethodType: Record<string, any> = {
+  PUT: {
+    backgroundColor: 'rgba(37, 99, 235, 0.3)',
+    border: '1px solid rgba(96, 165, 250, 0.42)',
+    boxShadow: 'inset 0 0 0 1px rgba(147, 197, 253, 0.06)',
+    color: '#60a5fa',
+  },
+};
+
+export const getMethodStyle = (method?: string, isDark = false) => {
+  const normalizedMethod = method?.toUpperCase?.() || 'GET';
+  const baseStyle = methodType[normalizedMethod] || methodType.GET;
+
+  if (!isDark) {
+    return baseStyle;
+  }
+
+  return {
+    ...baseStyle,
+    ...darkMethodType[normalizedMethod],
+  };
+};
