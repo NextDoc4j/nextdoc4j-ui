@@ -871,7 +871,7 @@ const showSchemaStack = computed(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 10px;
-  align-items: flex-start;
+  align-items: baseline;
   min-width: 0;
 }
 
@@ -909,12 +909,13 @@ const showSchemaStack = computed(() => {
   position: relative;
   display: inline-flex;
   flex: 0 1 auto;
-  align-items: flex-start;
+  align-items: baseline;
   min-width: 0;
   max-width: 100%;
   font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
   font-size: 14px;
   font-weight: 700;
+  line-height: 1.5;
   color: var(--el-text-color-primary);
   word-break: normal;
   overflow-wrap: break-word;
@@ -939,12 +940,13 @@ const showSchemaStack = computed(() => {
 .schema-item__type {
   display: inline-flex;
   flex: 0 1 auto;
-  align-items: center;
+  align-items: baseline;
   min-width: 0;
   max-width: 100%;
   font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
   font-size: 12px;
   font-weight: 600;
+  line-height: 1.5;
   color: var(--el-text-color-secondary);
   overflow-wrap: anywhere;
   white-space: normal;
@@ -954,7 +956,7 @@ const showSchemaStack = computed(() => {
 .schema-item__description {
   min-width: 0;
   font-size: 12px;
-  line-height: 1.65;
+  line-height: 1.5;
   color: var(--el-text-color-secondary);
 }
 
