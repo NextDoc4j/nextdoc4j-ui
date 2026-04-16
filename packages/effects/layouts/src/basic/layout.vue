@@ -122,20 +122,63 @@ const {
   sidebarExtraVisible,
 } = useExtraMenu(mixHeaderMenus);
 
+const EMPTY_MENUS: MenuRecordRaw[] = [];
+const wrappedMenuCache = new Map<
+  string,
+  {
+    deep: WeakMap<MenuRecordRaw[], MenuRecordRaw[]>;
+    shallow: WeakMap<MenuRecordRaw[], MenuRecordRaw[]>;
+  }
+>();
+
 /**
  * 包装菜单，翻译菜单名称
  * @param menus 原始菜单数据
  * @param deep 是否深度包装。对于双列布局，只需要包装第一层，因为更深层的数据会在扩展菜单中重新包装
  */
 function wrapperMenus(menus: MenuRecordRaw[], deep: boolean = true) {
-  return deep
+  if (menus.length === 0) {
+    return EMPTY_MENUS;
+  }
+
+  const locale = i18n.global.locale.value;
+  const currentLocaleCache =
+    wrappedMenuCache.get(locale) ??
+    (() => {
+      const cache = {
+        deep: new WeakMap<MenuRecordRaw[], MenuRecordRaw[]>(),
+        shallow: new WeakMap<MenuRecordRaw[], MenuRecordRaw[]>(),
+      };
+      wrappedMenuCache.set(locale, cache);
+      return cache;
+    })();
+
+  const cache = deep ? currentLocaleCache.deep : currentLocaleCache.shallow;
+  const cachedMenus = cache.get(menus);
+
+  if (cachedMenus) {
+    return cachedMenus;
+  }
+
+  const wrappedMenus = deep
     ? mapTree(menus, (item) => {
         return { ...cloneDeep(item), name: $t(item.name) };
       })
     : menus.map((item) => {
         return { ...cloneDeep(item), name: $t(item.name) };
       });
+
+  cache.set(menus, wrappedMenus);
+
+  return wrappedMenus;
 }
+
+const wrappedHeaderMenus = computed(() => wrapperMenus(headerMenus.value));
+const wrappedSidebarMenus = computed(() => wrapperMenus(sidebarMenus.value));
+const wrappedMixHeaderMenus = computed(() =>
+  wrapperMenus(mixHeaderMenus.value, false),
+);
+const wrappedExtraMenus = computed(() => wrapperMenus(extraMenus.value));
 
 function toggleSidebar() {
   updatePreferences({
@@ -267,7 +310,7 @@ const headerSlots = computed(() => {
         <template v-if="showHeaderNav" #menu>
           <LayoutMenu
             :default-active="headerActive"
-            :menus="wrapperMenus(headerMenus)"
+            :menus="wrappedHeaderMenus"
             :rounded="isMenuRounded"
             :theme="headerTheme"
             class="w-full"
@@ -296,7 +339,7 @@ const headerSlots = computed(() => {
         :collapse="preferences.sidebar.collapsed"
         :collapse-show-title="preferences.sidebar.collapsedShowTitle"
         :default-active="sidebarActive"
-        :menus="wrapperMenus(sidebarMenus)"
+        :menus="wrappedSidebarMenus"
         :rounded="isMenuRounded"
         :theme="sidebarTheme"
         mode="vertical"
@@ -307,7 +350,7 @@ const headerSlots = computed(() => {
     <template #mixed-menu>
       <LayoutMixedMenu
         :active-path="extraActiveMenu"
-        :menus="wrapperMenus(mixHeaderMenus, false)"
+        :menus="wrappedMixHeaderMenus"
         :rounded="isMenuRounded"
         :theme="sidebarTheme"
         @default-select="handleDefaultSelect"
@@ -320,7 +363,7 @@ const headerSlots = computed(() => {
       <LayoutExtraMenu
         :accordion="preferences.navigation.accordion"
         :collapse="preferences.sidebar.extraCollapse"
-        :menus="wrapperMenus(extraMenus)"
+        :menus="wrappedExtraMenus"
         :rounded="isMenuRounded"
         :theme="sidebarTheme"
       />

@@ -1,7 +1,5 @@
 import type { Ref } from 'vue';
 
-import { watch } from 'vue';
-
 import { useDebounceFn } from '@vueuse/core';
 
 interface UseMenuScrollOptions {
@@ -9,13 +7,10 @@ interface UseMenuScrollOptions {
   enable?: boolean | Ref<boolean>;
 }
 
-export function useMenuScroll(
-  activePath: Ref<string | undefined>,
-  options: UseMenuScrollOptions = {},
-) {
-  const { enable = true, delay = 320 } = options;
+export function useMenuScroll(options: UseMenuScrollOptions = {}) {
+  const { enable = true, delay = 120 } = options;
 
-  function scrollToActiveItem() {
+  const scrollToActiveItem = useDebounceFn(() => {
     const isEnabled = typeof enable === 'boolean' ? enable : enable.value;
     if (!isEnabled) return;
 
@@ -29,16 +24,7 @@ export function useMenuScroll(
         inline: 'center',
       });
     }
-  }
-
-  const debouncedScroll = useDebounceFn(scrollToActiveItem, delay);
-
-  watch(activePath, () => {
-    const isEnabled = typeof enable === 'boolean' ? enable : enable.value;
-    if (!isEnabled) return;
-
-    debouncedScroll();
-  });
+  }, delay);
 
   return {
     scrollToActiveItem,
