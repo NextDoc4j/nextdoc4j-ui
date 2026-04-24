@@ -151,8 +151,8 @@ const formatJsonWithComments = (data: any) => {
 };
 
 const resolveEditorValue = (data: any, language: string) => {
-  if (language === 'json') return formatJsonWithComments(data);
   if (typeof data === 'string') return data;
+  if (language === 'json') return formatJsonWithComments(data);
   try {
     return JSON.stringify(data, null, 2) ?? '';
   } catch {
@@ -433,6 +433,7 @@ watch(
   () => props.data,
   (newData) => {
     if (!editor) return;
+    if (!props.readOnly) return;
     const nextValue = resolveEditorValue(newData, props.language);
     if (editor.getValue() !== nextValue) {
       editor.setValue(nextValue);
@@ -448,6 +449,7 @@ watch(
     if (model) {
       monaco.editor.setModelLanguage(model, newLanguage || 'plaintext');
     }
+    if (!props.readOnly) return;
     const nextValue = resolveEditorValue(
       props.data,
       newLanguage || 'plaintext',

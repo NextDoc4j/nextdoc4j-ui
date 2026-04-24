@@ -121,10 +121,16 @@ const syncDebugState = (
   security.value = currentInfo.security;
   requestBodyType.value =
     selectedRequestBodyType ?? detailPayload?.requestBodyType ?? '';
-  requestBodyVariantState.value = {
+  const nextRequestBodyVariantState = {
     ...(selectedRequestBodyVariantState ??
       detailPayload?.requestBodyVariantState),
   };
+  if (
+    JSON.stringify(requestBodyVariantState.value) !==
+    JSON.stringify(nextRequestBodyVariantState)
+  ) {
+    requestBodyVariantState.value = nextRequestBodyVariantState;
+  }
   return true;
 };
 

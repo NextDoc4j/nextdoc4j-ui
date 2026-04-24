@@ -53,6 +53,7 @@ type BodyType =
   | 'raw'
   | 'x-www-form-urlencoded'
   | 'xml';
+type TextBodyType = 'json' | 'raw' | 'xml';
 export interface ParamsType {
   enabled: boolean;
   name: string;
@@ -97,6 +98,22 @@ const bodyType = ref<BodyType>();
 const editorRef = ref();
 const uploadRef = ref<UploadInstance>();
 const fileList = ref([]);
+const textBodyDrafts = ref<Partial<Record<TextBodyType, string>>>({});
+
+const isTextBodyType = (type?: BodyType): type is TextBodyType => {
+  return type === 'json' || type === 'raw' || type === 'xml';
+};
+
+const hasTextBodyDraft = (type: TextBodyType) => {
+  return Object.prototype.hasOwnProperty.call(textBodyDrafts.value, type);
+};
+
+const setTextBodyDraft = (type: TextBodyType, value: string) => {
+  textBodyDrafts.value = {
+    ...textBodyDrafts.value,
+    [type]: value,
+  };
+};
 
 const pickRequestBodySchema = () => {
   const content = props.requestBody?.content;
@@ -328,7 +345,111 @@ const setEditorValue = async (value: string) => {
   editorRef.value?.setEditorValue?.(value ?? '');
 };
 
+const captureCurrentTextDraft = (type = bodyType.value) => {
+  if (!isTextBodyType(type)) {
+    return;
+  }
+  setTextBodyDraft(type, editorRef.value?.getEditorValue?.() ?? '');
+};
+
+const normalizeStructuredValue = (value: unknown): string => {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  if (typeof value === 'string') {
+    return value;
+  }
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+};
+
+const parseStructuredText = (type: TextBodyType, value: string) => {
+  const text = `${value || ''}`.trim();
+  if (!text) {
+    return null;
+  }
+
+  if (type === 'xml') {
+    try {
+      const parsed = x2js.xml2js(text);
+      if (parsed && typeof parsed === 'object' && 'root' in parsed) {
+        return (parsed as any).root;
+      }
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+};
+
+const buildStructuredDataFromParams = (params: ParamsType[]) => {
+  const result: Record<string, unknown> = {};
+  let hasValue = false;
+
+  params.forEach((item) => {
+    if (!item.name || item.value === '' || item.value === undefined) {
+      return;
+    }
+    hasValue = true;
+    const value = `${item.value}`.trim();
+    if (!value) {
+      result[item.name] = '';
+      return;
+    }
+    try {
+      result[item.name] = JSON.parse(value);
+    } catch {
+      result[item.name] = item.value;
+    }
+  });
+
+  return hasValue ? result : null;
+};
+
+const fillParamsFromStructuredData = (params: ParamsType[], data: unknown) => {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return;
+  }
+
+  params.forEach((item) => {
+    if (!item.name || !Object.hasOwn(data, item.name)) {
+      return;
+    }
+    item.value = normalizeStructuredValue(
+      (data as Record<string, unknown>)[item.name],
+    );
+  });
+};
+
+const resolveStructuredDataFromBody = (type = bodyType.value) => {
+  if (isTextBodyType(type)) {
+    const currentText =
+      editorRef.value?.getEditorValue?.() ?? textBodyDrafts.value[type] ?? '';
+    return parseStructuredText(type, currentText);
+  }
+
+  if (type === 'form-data') {
+    return buildStructuredDataFromParams(props.formDataParams);
+  }
+
+  if (type === 'x-www-form-urlencoded') {
+    return buildStructuredDataFromParams(props.urlEncodedParams);
+  }
+
+  return null;
+};
+
 const handleBodyChange = () => {
+  captureCurrentTextDraft();
   emit('bodyChange');
 };
 
@@ -485,6 +606,66 @@ const resolveEditorValueByBodyType = (type: BodyType) => {
   }
 };
 
+const resolveCurrentTextValue = (type?: BodyType) => {
+  if (!isTextBodyType(type)) {
+    return '';
+  }
+  return (
+    editorRef.value?.getEditorValue?.() ?? textBodyDrafts.value[type] ?? ''
+  );
+};
+
+const resolveTextEditorData = (type: TextBodyType) => {
+  if (hasTextBodyDraft(type)) {
+    return textBodyDrafts.value[type] ?? '';
+  }
+  return resolveEditorValueByBodyType(type);
+};
+
+const resolveNextTextValue = (
+  type: TextBodyType,
+  structuredData: unknown,
+  sourceText: string,
+  previousType?: BodyType,
+) => {
+  if (hasTextBodyDraft(type)) {
+    return textBodyDrafts.value[type] ?? '';
+  }
+
+  if (type === 'xml') {
+    if (structuredData !== null && structuredData !== undefined) {
+      try {
+        const xml = x2js.js2xml(structuredData);
+        return `<?xml version="1.0" encoding="UTF-8"?><root>${xml}</root>`;
+      } catch {
+        return resolveEditorValueByBodyType(type);
+      }
+    }
+    if (sourceText) {
+      return sourceText;
+    }
+    return resolveEditorValueByBodyType(type);
+  }
+
+  if (structuredData !== null && structuredData !== undefined) {
+    return normalizeStructuredValue(structuredData);
+  }
+
+  if (sourceText) {
+    return sourceText;
+  }
+
+  if (isTextBodyType(previousType) && hasTextBodyDraft(previousType)) {
+    return textBodyDrafts.value[previousType] ?? '';
+  }
+
+  if (hasTextBodyDraft(type)) {
+    return textBodyDrafts.value[type] ?? '';
+  }
+
+  return resolveEditorValueByBodyType(type);
+};
+
 const syncByRequestBodyType = async (
   options: { forceBodyType?: boolean; preserveValue?: boolean } = {},
 ) => {
@@ -509,14 +690,77 @@ const syncByRequestBodyType = async (
     picked.contentType,
     currentSchema,
   );
-  if (options.forceBodyType || !bodyType.value || bodyType.value === 'none') {
+  if (
+    !bodyType.value ||
+    bodyType.value === 'none' ||
+    (options.forceBodyType && !options.preserveValue)
+  ) {
     bodyType.value = preferredBodyType;
   }
 
-  if (bodyType.value && ['json', 'raw', 'xml'].includes(bodyType.value)) {
-    await setEditorValue(resolveEditorValueByBodyType(bodyType.value));
+  if (
+    !options.preserveValue &&
+    bodyType.value &&
+    ['json', 'raw', 'xml'].includes(bodyType.value)
+  ) {
+    const nextValue = resolveEditorValueByBodyType(bodyType.value);
+    setTextBodyDraft(bodyType.value as TextBodyType, nextValue);
+    await setEditorValue(nextValue);
   }
 };
+
+watch(
+  bodyType,
+  async (nextType, previousType) => {
+    if (!nextType || nextType === previousType) {
+      return;
+    }
+
+    captureCurrentTextDraft(previousType);
+    const structuredData = resolveStructuredDataFromBody(previousType);
+    const sourceText = resolveCurrentTextValue(previousType);
+
+    if (nextType === 'form-data') {
+      if (
+        structuredData &&
+        typeof structuredData === 'object' &&
+        !Array.isArray(structuredData)
+      ) {
+        fillParamsFromStructuredData(props.formDataParams, structuredData);
+      }
+      emit('bodyChange');
+      return;
+    }
+
+    if (nextType === 'x-www-form-urlencoded') {
+      if (
+        structuredData &&
+        typeof structuredData === 'object' &&
+        !Array.isArray(structuredData)
+      ) {
+        fillParamsFromStructuredData(props.urlEncodedParams, structuredData);
+      }
+      emit('bodyChange');
+      return;
+    }
+
+    if (!isTextBodyType(nextType)) {
+      emit('bodyChange');
+      return;
+    }
+
+    const nextValue = resolveNextTextValue(
+      nextType,
+      structuredData,
+      sourceText,
+      previousType,
+    );
+    setTextBodyDraft(nextType, nextValue);
+    await setEditorValue(nextValue);
+    emit('bodyChange');
+  },
+  { flush: 'sync' },
+);
 
 onMounted(async () => {
   await syncByRequestBodyType({
@@ -536,7 +780,7 @@ watch(
 );
 
 watch(
-  () => props.requestBodyVariantState,
+  () => JSON.stringify(props.requestBodyVariantState || {}),
   async () => {
     await syncByRequestBodyType({
       forceBodyType: true,
@@ -558,8 +802,12 @@ watch(
 
 defineExpose({
   bodyType,
+  getTextBodyDrafts: () => ({ ...textBodyDrafts.value }),
   getExample,
   setEditorValue,
+  setTextBodyDrafts: (drafts: Partial<Record<TextBodyType, string>>) => {
+    textBodyDrafts.value = { ...drafts };
+  },
   fileList,
   syncByRequestBodyType,
 });
@@ -631,7 +879,7 @@ defineExpose({
             ref="editorRef"
             class="body-editor__json"
             :one-of="true"
-            :data="requestBodyExample"
+            :data="resolveTextEditorData('json')"
             :descriptions="{}"
             :read-only="false"
             @change="handleBodyChange"
@@ -642,7 +890,7 @@ defineExpose({
           <JsonView
             ref="editorRef"
             class="body-editor__json"
-            :data="requestBodyExample"
+            :data="resolveTextEditorData('raw')"
             :descriptions="{}"
             :read-only="false"
             language="null"
@@ -654,7 +902,7 @@ defineExpose({
           <JsonView
             ref="editorRef"
             class="body-editor__json"
-            :data="requestBodyXMLExample"
+            :data="resolveTextEditorData('xml')"
             :descriptions="{}"
             :read-only="false"
             language="xml"
