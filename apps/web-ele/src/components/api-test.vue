@@ -93,6 +93,7 @@ type DebugBodyType =
 interface DebugRequestStateSnapshot {
   activeTab: string;
   bodyContent?: string;
+  bodyDrafts?: Partial<Record<'json' | 'raw' | 'xml', string>>;
   bodyType?: string;
   cookies: TableParamsObject[];
   formDataParams: TableParamsObject[];
@@ -123,7 +124,11 @@ interface DebugBodyTabExpose {
   bodyType?: string;
   fileList?: any[];
   getExample?: () => string;
+  getTextBodyDrafts?: () => Partial<Record<'json' | 'raw' | 'xml', string>>;
   setEditorValue?: (value: string) => Promise<void> | void;
+  setTextBodyDrafts?: (
+    drafts: Partial<Record<'json' | 'raw' | 'xml', string>>,
+  ) => void;
   syncByRequestBodyType?: (options?: {
     forceBodyType?: boolean;
     preserveValue?: boolean;
@@ -326,6 +331,7 @@ const buildCurrentSnapshot = (): DebugRequestStateSnapshot => {
   return {
     activeTab: activeTab.value,
     bodyContent: resolveBodyContent(),
+    bodyDrafts: bodyTabRef.value?.getTextBodyDrafts?.() ?? {},
     bodyType: bodyTabRef.value?.bodyType,
     cookies: cloneTableParams(cookies.value),
     formDataParams: cloneTableParams(formDataParams.value),
@@ -354,11 +360,12 @@ const applySnapshot = async (
   urlEncodedParams.value = cloneTableParams(snapshot.urlEncodedParams);
 
   const snapshotBodyType = toDebugBodyType(snapshot.bodyType);
+  bodyTabRef.value?.setTextBodyDrafts?.(snapshot.bodyDrafts ?? {});
   if (bodyTabRef.value && snapshotBodyType) {
     bodyTabRef.value.bodyType = snapshotBodyType;
     await nextTick();
     if (
-      snapshot.bodyContent &&
+      snapshot.bodyContent !== undefined &&
       ['json', 'raw', 'xml'].includes(snapshotBodyType)
     ) {
       await bodyTabRef.value.setEditorValue?.(snapshot.bodyContent);
@@ -373,6 +380,17 @@ const applySnapshot = async (
   isRestoringCache.value = false;
 };
 
+const flushPersistCache = () => {
+  if (!apiTestCacheStore.debugCacheEnabled || isRestoringCache.value) {
+    return;
+  }
+  if (persistTimer) {
+    window.clearTimeout(persistTimer);
+    persistTimer = null;
+  }
+  apiTestCacheStore.saveRequestCache(cacheKey.value, buildCurrentSnapshot());
+};
+
 const schedulePersistCache = () => {
   if (!apiTestCacheStore.debugCacheEnabled || isRestoringCache.value) {
     return;
@@ -381,8 +399,7 @@ const schedulePersistCache = () => {
     window.clearTimeout(persistTimer);
   }
   persistTimer = window.setTimeout(() => {
-    persistTimer = null;
-    apiTestCacheStore.saveRequestCache(cacheKey.value, buildCurrentSnapshot());
+    flushPersistCache();
   }, 150);
 };
 
@@ -400,6 +417,10 @@ const restoreDefaultRequestState = async () => {
   });
   apiTestCacheStore.removeRequestCache(cacheKey.value);
   resetResponseState();
+};
+
+const handlePageHide = () => {
+  flushPersistCache();
 };
 
 const syncSelectedRequestBodyType = async (
@@ -2025,6 +2046,7 @@ const urlEncodedParams = ref<Array<ParamsType>>([]);
 onMounted(async () => {
   const openApi = apiStore.openApi;
   baseUrl.value = openApi?.servers?.[0]?.url;
+  window.addEventListener('pagehide', handlePageHide);
   syncSecurityParamsToDebugTable();
   syncGlobalParamsToDebugTable();
   await captureDefaultRequestState();
@@ -2076,17 +2098,13 @@ watch(
 );
 
 watch(
-  () => props.requestBodyVariantState,
-  async (nextState, prevState) => {
-    if (nextState === prevState) {
-      return;
-    }
+  () => JSON.stringify(props.requestBodyVariantState || {}),
+  async () => {
     await syncSelectedRequestBodyType({
       forceBodyType: true,
       preserveValue: false,
     });
   },
-  { deep: true },
 );
 watch(
   () => apiTestCacheStore.debugCacheEnabled,
@@ -2123,11 +2141,9 @@ watch(
 );
 
 onBeforeUnmount(() => {
+  window.removeEventListener('pagehide', handlePageHide);
+  flushPersistCache();
   clearPaneResizeListeners();
-  if (persistTimer) {
-    window.clearTimeout(persistTimer);
-    persistTimer = null;
-  }
   tabOverflowObserver?.disconnect();
   tabOverflowObserver = null;
   if (overflowRaf) {
