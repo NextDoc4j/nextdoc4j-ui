@@ -1,11 +1,13 @@
 <script setup lang="ts">
+import type { SchemaViewMode } from '#/utils/schema';
+
 import { computed, ref } from 'vue';
 
 import { preferences } from '@vben/preferences';
 
 import { usePreferredDark } from '@vueuse/core';
 
-import { generateExample, type SchemaViewMode } from '#/utils/schema';
+import { generateExample } from '#/utils/schema';
 
 import JsonNode from './json-node.vue';
 
@@ -111,33 +113,34 @@ defineExpose({
     class="json-viewer-scroll-host overflow-auto rounded p-4 font-mono text-sm"
     :class="`theme-${resolvedThemeMode}`"
   >
-    <div v-if="parseError" class="json-error">
-      <span class="text-sm">⚠️</span>
-      <span>{{ parseError }}</span>
+    <div class="json-viewer-content">
+      <div v-if="parseError" class="json-error">
+        <span class="text-sm">⚠️</span>
+        <span>{{ parseError }}</span>
+      </div>
+      <div v-else-if="isEmptyData" class="json-empty">
+        <span>暂无数据</span>
+      </div>
+      <JsonNode
+        v-else
+        ref="rootNode"
+        :value="parsedData"
+        :key-name="null"
+        :depth="0"
+        :default-expanded="defaultExpanded"
+        :auto-expand-depth="autoExpandDepth"
+        :enable-chunked-render="enableChunkedRender"
+        :initial-render-count="initialRenderCount"
+        :render-chunk-size="renderChunkSize"
+        :schema="schema"
+        :parent-schema="null"
+      />
     </div>
-    <div v-else-if="isEmptyData" class="json-empty">
-      <span>暂无数据</span>
-    </div>
-    <JsonNode
-      v-else
-      ref="rootNode"
-      :value="parsedData"
-      :key-name="null"
-      :depth="0"
-      :default-expanded="defaultExpanded"
-      :auto-expand-depth="autoExpandDepth"
-      :enable-chunked-render="enableChunkedRender"
-      :initial-render-count="initialRenderCount"
-      :render-chunk-size="renderChunkSize"
-      :schema="schema"
-      :parent-schema="null"
-    />
   </div>
 </template>
 
 <style scoped>
 .theme-dark {
-  contain: layout paint style;
   border: 1px solid #36363a;
 }
 
@@ -151,7 +154,6 @@ defineExpose({
 }
 
 .theme-light {
-  contain: layout paint style;
   border: 1px solid #e4e4e7;
 }
 
@@ -173,9 +175,13 @@ defineExpose({
   border-radius: 6px;
 }
 
+.json-viewer-content {
+  width: max-content;
+  min-width: 100%;
+}
+
 .json-viewer-scroll-host :deep(*) {
   transition: none !important;
   animation: none !important;
 }
 </style>
-
