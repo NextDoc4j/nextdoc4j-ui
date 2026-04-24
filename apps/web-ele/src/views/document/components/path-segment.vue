@@ -10,7 +10,7 @@ interface Segment {
 
 const props = defineProps<{
   paramStyle?: CSSProperties | string;
-  path: string;
+  path?: string;
 }>();
 
 const pathSegments = computed(() => {

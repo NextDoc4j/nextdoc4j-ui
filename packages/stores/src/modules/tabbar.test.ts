@@ -12,6 +12,25 @@ describe('useAccessStore', () => {
   });
   router.push = vi.fn();
   router.replace = vi.fn();
+  router.resolve = vi.fn((to: any) => {
+    const path = typeof to === 'string' ? to : to?.path;
+    let matched: Array<{ path: string }>;
+    if (path === '/missing') {
+      matched = [{ path: '/:path(.*)*' }];
+    } else if (path) {
+      matched = [{ path }];
+    } else {
+      matched = [];
+    }
+    return {
+      fullPath: path,
+      matched,
+      meta: {},
+      name: path === '/home' ? 'Home' : path,
+      path,
+      query: {},
+    };
+  }) as any;
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
@@ -64,16 +83,55 @@ describe('useAccessStore', () => {
   it('closes all tabs', async () => {
     const store = useTabbarStore();
     store.addTab({
-      fullPath: '/home',
+      fullPath: '/about',
       meta: {},
-      name: 'Home',
-      path: '/home',
+      name: 'About',
+      path: '/about',
     } as any);
     router.replace = vi.fn();
 
     await store.closeAllTabs(router);
 
-    expect(store.tabs.length).toBe(1);
+    expect(store.tabs).toHaveLength(1);
+    expect(store.tabs[0]?.path).toBe('/home');
+    expect(router.replace).toHaveBeenCalledWith({
+      params: {},
+      path: '/home',
+      query: {},
+    });
+  });
+
+  it('keeps the existing home tab and closes other tabs', async () => {
+    const store = useTabbarStore();
+    store.addTab({
+      fullPath: '/about',
+      meta: {},
+      name: 'About',
+      path: '/about',
+    } as any);
+    store.addTab({
+      fullPath: '/home',
+      meta: {},
+      name: 'Home',
+      path: '/home',
+    } as any);
+    store.addTab({
+      fullPath: '/contact',
+      meta: {},
+      name: 'Contact',
+      path: '/contact',
+    } as any);
+    router.replace = vi.fn();
+
+    await store.closeAllTabs(router);
+
+    expect(store.tabs).toHaveLength(1);
+    expect(store.tabs[0]?.path).toBe('/home');
+    expect(router.replace).toHaveBeenCalledWith({
+      params: {},
+      path: '/home',
+      query: {},
+    });
   });
 
   it('closes a non-affix tab', () => {
@@ -140,6 +198,17 @@ describe('useAccessStore', () => {
       path: '/dashboard',
       query: {},
     });
+  });
+
+  it('falls back to home when the target tab route no longer exists', async () => {
+    const store = useTabbarStore();
+    const tab: any = { meta: {}, name: 'Missing', path: '/missing' };
+    store.addTab(tab);
+
+    await store._goToTab(tab, router);
+
+    expect(router.replace).toHaveBeenCalledWith('/home');
+    expect(store.tabs).toHaveLength(0);
   });
 
   it('closes multiple tabs by paths', async () => {
