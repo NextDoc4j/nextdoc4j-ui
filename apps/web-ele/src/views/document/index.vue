@@ -11,12 +11,14 @@ import {
   shallowRef,
   watch,
 } from 'vue';
+import { useRoute } from 'vue-router';
 
 import { usePreferences } from '@vben/preferences';
 
 import { ElEmpty, ElTabPane, ElTabs } from 'element-plus';
 
 import Loading from '#/components/loading.vue';
+import { useApiStore } from '#/store';
 
 const loadApiTestPanel = () => import('#/components/api-test.vue');
 const ApiTestPanel = defineAsyncComponent(loadApiTestPanel);
@@ -38,7 +40,15 @@ interface DebugTriggerPayload {
   requestBodyVariantState?: Record<string, number>;
 }
 
-const activeView = ref<'debug' | 'detail'>('detail');
+const { isDark } = usePreferences();
+const route = useRoute();
+const apiStore = useApiStore();
+
+const getViewStorageKey = () => `doc:activeView:${route.fullPath}`;
+const activeView = ref<'debug' | 'detail'>(
+  sessionStorage.getItem(getViewStorageKey()) === 'debug' ? 'debug' : 'detail',
+);
+
 const method = ref('');
 const path = ref('');
 const parameters = ref<any[]>([]);
@@ -50,7 +60,6 @@ const security = ref();
 const info = ref<ApiInfo | null>(null);
 
 const documentRef = shallowRef<DocumentExpose | null>(null);
-const { isDark } = usePreferences();
 let apiTestPanelPreloadPromise: null | Promise<unknown> = null;
 let debugPreloadTimer: null | number = null;
 let debugPreloadIdleHandle: null | number = null;
@@ -134,6 +143,18 @@ const syncDebugState = (
   return true;
 };
 
+const syncDebugFromStore = () => {
+  const routeName = route.name;
+  if (typeof routeName !== 'string') return false;
+  const [group = '', tag = '', operationId = ''] = routeName.split('*');
+  const apiInfo = apiStore.searchPathData(group, tag, operationId);
+  if (apiInfo) {
+    syncDebugState(apiInfo);
+    return true;
+  }
+  return false;
+};
+
 const handleTest = (payload: DebugTriggerPayload) => {
   syncDebugState(
     payload.info,
@@ -143,17 +164,19 @@ const handleTest = (payload: DebugTriggerPayload) => {
   void preloadApiTestPanel();
   activeView.value = 'debug';
 };
+
 const handleClose = () => {
   activeView.value = 'detail';
 };
 
 watch(activeView, async (view) => {
-  if (view === 'detail') {
-    return;
-  }
+  sessionStorage.setItem(getViewStorageKey(), view);
+  if (view === 'detail') return;
 
   await nextTick();
-  syncDebugState();
+  if (!syncDebugState()) {
+    syncDebugFromStore();
+  }
 });
 
 const debugReady = computed(() =>
@@ -162,6 +185,17 @@ const debugReady = computed(() =>
 
 onMounted(() => {
   scheduleDebugPanelPreload();
+  if (activeView.value === 'debug' && !syncDebugFromStore()) {
+    // store 数据未就绪，等待 apiStore.isInitConfig 变为 true 后再同步
+    const stop = watch(
+      () => apiStore.isInitConfig,
+      (ready) => {
+        if (!ready) return;
+        syncDebugFromStore();
+        stop();
+      },
+    );
+  }
 });
 
 onBeforeUnmount(() => {
@@ -218,10 +252,13 @@ onBeforeUnmount(() => {
               @cancel="handleClose"
             />
             <div
-              v-else
+              v-else-if="apiStore.isInitConfig"
               class="document-empty flex h-full items-center justify-center"
             >
               <ElEmpty description="未获取到当前接口信息，请先进入详情页" />
+            </div>
+            <div v-else class="h-full">
+              <Loading />
             </div>
           </template>
           <template #fallback>
