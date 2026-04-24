@@ -75,9 +75,12 @@ export function useTabbar() {
   };
 
   // 点击tab,跳转路由
-  const handleClick = (key: string) => {
-    const { fullPath, path } = tabbarStore.getTabByKey(key);
-    router.push(fullPath || path);
+  const handleClick = async (key: string) => {
+    const tab = tabbarStore.getTabByKey(key);
+    if (!tab) {
+      return;
+    }
+    await tabbarStore._goToTab(tab, router);
   };
 
   // 关闭tab

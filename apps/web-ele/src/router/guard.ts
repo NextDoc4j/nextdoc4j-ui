@@ -7,6 +7,8 @@ import { startProgress, stopProgress } from '@vben/utils';
 import { accessRoutes } from '#/router/routes';
 
 import { generateAccess } from './access';
+
+const FALLBACK_NOT_FOUND_ROUTE_NAME = 'FallbackNotFound';
 /**
  * 通用守卫配置
  * @param router
@@ -71,6 +73,29 @@ function setupAccessGuard(router: Router) {
   });
 }
 
+function setupFallbackGuard(router: Router) {
+  router.beforeEach((to) => {
+    const accessStore = useAccessStore();
+    if (!accessStore.isAccessChecked) {
+      return true;
+    }
+
+    if (to.name !== FALLBACK_NOT_FOUND_ROUTE_NAME) {
+      return true;
+    }
+
+    const homePath = preferences.app.defaultHomePath;
+    if (to.path === homePath) {
+      return true;
+    }
+
+    return {
+      path: homePath,
+      replace: true,
+    };
+  });
+}
+
 /**
  * 项目守卫配置
  * @param router
@@ -80,6 +105,8 @@ function createRouterGuard(router: Router) {
   setupCommonGuard(router);
   /** 权限访问 */
   setupAccessGuard(router);
+  /** 无效路由兜底 */
+  setupFallbackGuard(router);
 }
 
 export { createRouterGuard };

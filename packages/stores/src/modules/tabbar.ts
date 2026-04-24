@@ -49,6 +49,8 @@ interface TabbarState {
   updateTime?: number;
 }
 
+const CATCH_ALL_ROUTE_PATTERN = /^\/:.*\(\.\*\)\*$/u;
+
 /**
  * @zh_CN 访问权限相关
  */
@@ -100,7 +102,25 @@ export const useTabbarStore = defineStore('core-tabbar', {
         path,
         query: query || {},
       };
+      const resolved = router.resolve(toParams);
+      if (!isReachableRoute(resolved)) {
+        this._close(tab);
+        await this.updateCacheTabs();
+        const navigated = await this._goToHome(router);
+        if (navigated) {
+          return;
+        }
+      }
       await router.replace(toParams);
+    },
+    async _goToHome(router: Router) {
+      const homePath = preferences.app.defaultHomePath;
+      const resolved = router.resolve(homePath);
+      if (!isReachableRoute(resolved)) {
+        return false;
+      }
+      await router.replace(homePath);
+      return true;
     },
     /**
      * @zh_CN 添加标签页
@@ -172,9 +192,30 @@ export const useTabbarStore = defineStore('core-tabbar', {
      * @zh_CN 关闭所有标签页
      */
     async closeAllTabs(router: Router) {
-      const newTabs = this.tabs.filter((tab) => isAffixTab(tab));
-      this.tabs = newTabs.length > 0 ? newTabs : [...this.tabs].splice(0, 1);
-      await this._goToDefaultTab(router);
+      const homePath = preferences.app.defaultHomePath;
+      const existingHomeTab =
+        this.tabs.find((tab) => isHomeTab(tab, homePath)) ?? null;
+      const resolvedHomeRoute = router.resolve(homePath);
+      const homeTab =
+        existingHomeTab ||
+        (isReachableRoute(resolvedHomeRoute)
+          ? ({
+              ...cloneTab(resolvedHomeRoute as unknown as TabDefinition),
+              key: getTabKey(
+                resolvedHomeRoute as unknown as RouteLocationNormalized,
+              ),
+            } as TabDefinition)
+          : null);
+
+      const affixTabs = this.tabs.filter(
+        (tab) => isAffixTab(tab) && (!homeTab || !equalTab(tab, homeTab)),
+      );
+
+      this.tabs = homeTab ? [homeTab, ...affixTabs] : affixTabs;
+
+      await (homeTab
+        ? this._goToTab(homeTab, router)
+        : this._goToDefaultTab(router));
       this.updateCacheTabs();
     },
     /**
@@ -653,6 +694,29 @@ function routeToTab(route: RouteRecordNormalized) {
     path: route.path,
     key: getTabKey(route),
   } as TabDefinition;
+}
+
+function isCatchAllRoute(path?: string) {
+  if (!path) {
+    return false;
+  }
+  return CATCH_ALL_ROUTE_PATTERN.test(path);
+}
+
+function isHomeTab(tab: TabDefinition, homePath: string) {
+  return tab.path === homePath || tab.fullPath === homePath;
+}
+
+function isReachableRoute(route: {
+  matched?: Array<{
+    path?: string;
+  }>;
+}) {
+  const matched = route.matched ?? [];
+  if (matched.length <= 0) {
+    return false;
+  }
+  return !(matched.length === 1 && isCatchAllRoute(matched[0]?.path));
 }
 
 export { getTabKey };
