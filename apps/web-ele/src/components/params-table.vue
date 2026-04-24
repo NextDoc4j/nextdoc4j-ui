@@ -23,6 +23,7 @@ import {
 } from 'element-plus';
 
 interface ParamItem {
+  __rowKey?: string;
   enabled: boolean;
   name: string;
   value: any;
@@ -79,6 +80,16 @@ const showInlineDelete = computed(() => {
 const showDescriptionDelete = computed(() => {
   return props.allowDelete && props.showDeleteInDescription;
 });
+let paramRowKeySeed = 0;
+
+const createParamRowKey = () => `params-row-${paramRowKeySeed++}`;
+
+function getRowKey(row: ParamItem, index: number) {
+  if (!row.__rowKey) {
+    row.__rowKey = `${createParamRowKey()}-${index}`;
+  }
+  return row.__rowKey;
+}
 
 const gridTemplateColumns = computed(() => {
   const columns: string[] = [];
@@ -193,6 +204,7 @@ function remove(index: number) {
 function add() {
   // eslint-disable-next-line vue/no-mutating-props
   props.tableData.push({
+    __rowKey: createParamRowKey(),
     name: '',
     value: '',
     enabled: true,
@@ -299,7 +311,7 @@ watch(
 
         <div
           v-for="(row, index) in tableData"
-          :key="`${row.name || 'row'}-${index}`"
+          :key="getRowKey(row, index)"
           class="params-grid-table__row"
           :style="rowStyle"
         >
