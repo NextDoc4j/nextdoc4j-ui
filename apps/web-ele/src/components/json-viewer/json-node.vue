@@ -888,14 +888,6 @@ onBeforeUnmount(() => {
   margin: 2px 0;
 }
 
-@supports (content-visibility: auto) {
-  .json-node {
-    contain-intrinsic-size: auto 28px;
-    contain: content;
-    content-visibility: auto;
-  }
-}
-
 .json-node:not(.has-collapse-btn) .node-header:hover {
   background-color: rgb(187 187 187 / 25%);
 }
@@ -955,9 +947,6 @@ onBeforeUnmount(() => {
 .node-virtual-block {
   position: relative;
   min-width: 0;
-  contain-intrinsic-size: auto 560px;
-  contain: layout paint;
-  content-visibility: auto;
 }
 
 .node-virtual-placeholder {
@@ -1204,9 +1193,9 @@ onBeforeUnmount(() => {
 
 .field-description {
   display: inline-flex;
+  flex: none;
   gap: 8px;
   align-items: center;
-  max-width: 500px;
   margin-left: 12px;
   font-size: 12px;
   white-space: nowrap;
@@ -1218,7 +1207,6 @@ onBeforeUnmount(() => {
 }
 
 .comment-content {
-  overflow-x: auto;
   white-space: nowrap;
 }
 

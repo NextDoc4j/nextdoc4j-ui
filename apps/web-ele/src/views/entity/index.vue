@@ -65,7 +65,6 @@ const entitySchema = computed(() => {
   return adaptSchemaForView(entityInfo.value, { mode: 'entity' });
 });
 
-
 const mergeComposedSchema = (baseSchema: any, pickedSchema: any) => {
   if (!pickedSchema || typeof pickedSchema !== 'object') {
     return baseSchema;
@@ -78,8 +77,8 @@ const mergeComposedSchema = (baseSchema: any, pickedSchema: any) => {
 
   if (baseSchema?.properties || pickedSchema?.properties) {
     merged.properties = {
-      ...(baseSchema?.properties || {}),
-      ...(pickedSchema?.properties || {}),
+      ...baseSchema?.properties,
+      ...pickedSchema?.properties,
     };
   }
 
@@ -150,9 +149,10 @@ const applyEntityVariantState = (
       const picked = current.anyOf[index] ?? current.anyOf[0];
       current = mergeComposedSchema(base, picked);
     } else if (Array.isArray(current.allOf) && current.allOf.length > 0) {
-      const mergedAllOf = current.allOf.reduce((acc: any, item: any) => {
-        return mergeComposedSchema(acc, visit(item, path));
-      }, {});
+      let mergedAllOf: any = {};
+      for (const item of current.allOf) {
+        mergedAllOf = mergeComposedSchema(mergedAllOf, visit(item, path));
+      }
       const base = { ...current };
       delete base.allOf;
       delete base['x-nextdoc4j-allOfMerged'];
@@ -172,8 +172,8 @@ const applyEntityVariantState = (
     }
 
     if (Array.isArray(current.prefixItems)) {
-      current.prefixItems = current.prefixItems.map((item: any, index: number) =>
-        visit(item, `${path}.${index}`),
+      current.prefixItems = current.prefixItems.map(
+        (item: any, index: number) => visit(item, `${path}.${index}`),
       );
     }
 
@@ -253,7 +253,11 @@ const schemaWithExamples = computed(() => {
         :class="{ 'schema-layout--open': exampleOpen && schemaWithExamples }"
       >
         <div class="schema-layout__main">
-          <SchemaView :data="entitySchema" mode="entity" @variant-change="handleEntitySchemaVariantChange" />
+          <SchemaView
+            :data="entitySchema"
+            mode="entity"
+            @variant-change="handleEntitySchemaVariantChange"
+          />
         </div>
 
         <div
@@ -262,7 +266,8 @@ const schemaWithExamples = computed(() => {
         >
           <JsonViewer
             class="json-panel app-json-schema-viewer"
-            :schema="schemaWithExamples" mode="entity"
+            :schema="schemaWithExamples"
+            mode="entity"
           />
         </div>
       </div>
@@ -483,4 +488,3 @@ const schemaWithExamples = computed(() => {
   }
 }
 </style>
-

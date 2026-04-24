@@ -2093,11 +2093,11 @@ defineExpose({
 
 .body-type-switch {
   display: inline-flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
-  justify-content: flex-end;
+  align-items: center;
   min-width: 0;
-  max-width: 100%;
+  overflow: hidden;
 }
 
 .body-type-switch__button {
@@ -2197,9 +2197,9 @@ defineExpose({
 
 .schema-layout__floating-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
-  align-items: flex-start;
+  align-items: center;
   justify-content: flex-end;
   min-width: 0;
 }
@@ -2212,14 +2212,15 @@ defineExpose({
   max-width: min(100%, 720px);
 }
 
-.schema-layout--body:not(.schema-layout--open)
-  .schema-layout__floating-actions--body,
+.schema-layout--body:not(.schema-layout--open),
+.schema-layout__floating-actions--body,
 .schema-layout--body:not(.schema-layout--open) .body-type-switch {
   flex-wrap: nowrap;
 }
 
 .schema-layout--with-actions:not(.schema-layout--open) .schema-layout__main {
   grid-column: 1 / -1;
+  padding-right: 100px;
 }
 
 .schema-layout--with-actions:not(.schema-layout--open)
@@ -2240,7 +2241,7 @@ defineExpose({
 }
 
 .schema-layout__floating-actions--body {
-  align-items: flex-start;
+  align-items: center;
 }
 
 .schema-layout__floating-actions--response {
