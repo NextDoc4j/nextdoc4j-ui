@@ -200,8 +200,7 @@ const createTableRowKey = () => `api-test-row-${tableRowKeySeed++}`;
 const withTableRowKey = <T extends object>(item: T) => {
   return {
     ...item,
-    __rowKey:
-      (item as { __rowKey?: string }).__rowKey || createTableRowKey(),
+    __rowKey: (item as { __rowKey?: string }).__rowKey || createTableRowKey(),
   };
 };
 
@@ -1322,14 +1321,16 @@ function syncSecurityParamsToDebugTable() {
           return;
         }
         localCookieNames.add(item.name);
-        securityCookieRows.push(withTableRowKey({
-          name: item.name,
-          enabled: true,
-          fromSecurity: true,
-          value: item.tokenValue,
-          description: item.description,
-          type: item.type,
-        }));
+        securityCookieRows.push(
+          withTableRowKey({
+            name: item.name,
+            enabled: true,
+            fromSecurity: true,
+            value: item.tokenValue,
+            description: item.description,
+            type: item.type,
+          }),
+        );
         return;
       }
       case 'header': {
@@ -1338,14 +1339,16 @@ function syncSecurityParamsToDebugTable() {
           return;
         }
         localHeaderNames.add(normalizedName);
-        securityHeaderRows.push(withTableRowKey({
-          enabled: true,
-          fromSecurity: true,
-          name: item.name,
-          value: item.tokenValue,
-          description: item.description,
-          type: item.type,
-        }));
+        securityHeaderRows.push(
+          withTableRowKey({
+            enabled: true,
+            fromSecurity: true,
+            name: item.name,
+            value: item.tokenValue,
+            description: item.description,
+            type: item.type,
+          }),
+        );
         return;
       }
       case 'query': {
@@ -1353,14 +1356,16 @@ function syncSecurityParamsToDebugTable() {
           return;
         }
         localQueryNames.add(item.name);
-        securityQueryRows.push(withTableRowKey({
-          name: item.name,
-          enabled: true,
-          fromSecurity: true,
-          value: item.tokenValue,
-          description: item.description,
-          type: item.type,
-        }));
+        securityQueryRows.push(
+          withTableRowKey({
+            name: item.name,
+            enabled: true,
+            fromSecurity: true,
+            value: item.tokenValue,
+            description: item.description,
+            type: item.type,
+          }),
+        );
       }
       // No default
     }
@@ -1382,14 +1387,16 @@ function syncGlobalParamsToDebugTable() {
     .getMergedQueryParams(aggregationStore.currentService?.url)
     .filter((item) => item.enabled && normalizeParamName(item.name || ''))
     .filter((item) => !localQueryNames.has(normalizeParamName(item.name || '')))
-    .map((item) => withTableRowKey({
-      description: item.description || '全局参数',
-      enabled: true,
-      fromGlobal: true,
-      name: normalizeParamName(item.name || ''),
-      type: 'string',
-      value: item.value,
-    }));
+    .map((item) =>
+      withTableRowKey({
+        description: item.description || '全局参数',
+        enabled: true,
+        fromGlobal: true,
+        name: normalizeParamName(item.name || ''),
+        type: 'string',
+        value: item.value,
+      }),
+    );
   queryParams.value = [...localQueryRows, ...globalQueryRows];
 
   const localHeaderRows = headers.value.filter((item) => !item.fromGlobal);
@@ -1404,14 +1411,16 @@ function syncGlobalParamsToDebugTable() {
     .filter(
       (item) => !localHeaderNames.has(normalizeHeaderName(item.name || '')),
     )
-    .map((item) => withTableRowKey({
-      description: item.description || '全局参数',
-      enabled: true,
-      fromGlobal: true,
-      name: normalizeParamName(item.name || ''),
-      type: 'string',
-      value: item.value,
-    }));
+    .map((item) =>
+      withTableRowKey({
+        description: item.description || '全局参数',
+        enabled: true,
+        fromGlobal: true,
+        name: normalizeParamName(item.name || ''),
+        type: 'string',
+        value: item.value,
+      }),
+    );
   headers.value = [...localHeaderRows, ...globalHeaderRows];
 }
 

@@ -412,7 +412,10 @@ const resolveMergedStructuredData = (structuredData: unknown) => {
   if (structuredData === null || structuredData === undefined) {
     return structuredData;
   }
-  return mergeStructuredDataWithExample(requestBodyExample.value, structuredData);
+  return mergeStructuredDataWithExample(
+    requestBodyExample.value,
+    structuredData,
+  );
 };
 
 const parseStructuredText = (type: TextBodyType, value: string) => {
