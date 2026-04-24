@@ -55,6 +55,7 @@ type BodyType =
   | 'xml';
 type TextBodyType = 'json' | 'raw' | 'xml';
 export interface ParamsType {
+  __rowKey?: string;
   enabled: boolean;
   name: string;
   value: string;
@@ -99,6 +100,13 @@ const editorRef = ref();
 const uploadRef = ref<UploadInstance>();
 const fileList = ref([]);
 const textBodyDrafts = ref<Partial<Record<TextBodyType, string>>>({});
+let bodyParamRowKeySeed = 0;
+
+const createBodyParamRowKey = () => `body-param-row-${bodyParamRowKeySeed++}`;
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> => {
+  return Object.prototype.toString.call(value) === '[object Object]';
+};
 
 const isTextBodyType = (type?: BodyType): type is TextBodyType => {
   return type === 'json' || type === 'raw' || type === 'xml';
@@ -366,6 +374,47 @@ const normalizeStructuredValue = (value: unknown): string => {
   }
 };
 
+const mergeStructuredDataWithExample = (
+  exampleData: unknown,
+  currentData: unknown,
+): unknown => {
+  if (currentData === null || currentData === undefined) {
+    return exampleData;
+  }
+
+  if (exampleData === null || exampleData === undefined) {
+    return currentData;
+  }
+
+  if (Array.isArray(exampleData)) {
+    return Array.isArray(currentData) ? currentData : exampleData;
+  }
+
+  if (isPlainObject(exampleData)) {
+    if (!isPlainObject(currentData)) {
+      return currentData;
+    }
+
+    const merged: Record<string, unknown> = {};
+    Object.keys(exampleData).forEach((key) => {
+      merged[key] = mergeStructuredDataWithExample(
+        exampleData[key],
+        currentData[key],
+      );
+    });
+    return merged;
+  }
+
+  return currentData;
+};
+
+const resolveMergedStructuredData = (structuredData: unknown) => {
+  if (structuredData === null || structuredData === undefined) {
+    return structuredData;
+  }
+  return mergeStructuredDataWithExample(requestBodyExample.value, structuredData);
+};
+
 const parseStructuredText = (type: TextBodyType, value: string) => {
   const text = `${value || ''}`.trim();
   if (!text) {
@@ -548,6 +597,7 @@ const rebuildBodyParamsBySchema = (
         property.type === 'array' ? property?.items?.format : property?.format;
 
       return {
+        __rowKey: previous?.__rowKey || createBodyParamRowKey(),
         contentType: inferContentType(property.type, fieldFormat),
         description: property.description,
         enabled: previous?.enabled ?? required,
@@ -628,14 +678,12 @@ const resolveNextTextValue = (
   sourceText: string,
   previousType?: BodyType,
 ) => {
-  if (hasTextBodyDraft(type)) {
-    return textBodyDrafts.value[type] ?? '';
-  }
+  const mergedStructuredData = resolveMergedStructuredData(structuredData);
 
   if (type === 'xml') {
-    if (structuredData !== null && structuredData !== undefined) {
+    if (mergedStructuredData !== null && mergedStructuredData !== undefined) {
       try {
-        const xml = x2js.js2xml(structuredData);
+        const xml = x2js.js2xml(mergedStructuredData);
         return `<?xml version="1.0" encoding="UTF-8"?><root>${xml}</root>`;
       } catch {
         return resolveEditorValueByBodyType(type);
@@ -647,8 +695,8 @@ const resolveNextTextValue = (
     return resolveEditorValueByBodyType(type);
   }
 
-  if (structuredData !== null && structuredData !== undefined) {
-    return normalizeStructuredValue(structuredData);
+  if (mergedStructuredData !== null && mergedStructuredData !== undefined) {
+    return normalizeStructuredValue(mergedStructuredData);
   }
 
   if (sourceText) {
@@ -706,6 +754,23 @@ const syncByRequestBodyType = async (
     const nextValue = resolveEditorValueByBodyType(bodyType.value);
     setTextBodyDraft(bodyType.value as TextBodyType, nextValue);
     await setEditorValue(nextValue);
+    return;
+  }
+
+  if (options.preserveValue && isTextBodyType(bodyType.value)) {
+    const currentType = bodyType.value;
+    const structuredData = resolveStructuredDataFromBody(currentType);
+
+    if (structuredData !== null && structuredData !== undefined) {
+      const nextValue = resolveNextTextValue(
+        currentType,
+        structuredData,
+        resolveCurrentTextValue(currentType),
+        currentType,
+      );
+      setTextBodyDraft(currentType, nextValue);
+      await setEditorValue(nextValue);
+    }
   }
 };
 

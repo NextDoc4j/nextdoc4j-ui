@@ -69,9 +69,11 @@ import bodyParams from './body-params.vue';
 import paramsTable from './params-table.vue';
 
 interface TableParamsObject {
+  __rowKey?: string;
   contentType?: string;
   description?: string;
   enabled: boolean;
+  fileList?: any[];
   format?: string;
   fromGlobal?: boolean;
   fromSecurity?: boolean;
@@ -191,6 +193,17 @@ const methodPillStyle = computed(() => {
 const normalizeParamName = (name: string) => name.trim();
 const normalizeHeaderName = (name: string) => name.trim().toLowerCase();
 const PATH_PLACEHOLDER_SEGMENT_RE = /^\{[^/{}]+\}$/;
+let tableRowKeySeed = 0;
+
+const createTableRowKey = () => `api-test-row-${tableRowKeySeed++}`;
+
+const withTableRowKey = <T extends object>(item: T) => {
+  return {
+    ...item,
+    __rowKey:
+      (item as { __rowKey?: string }).__rowKey || createTableRowKey(),
+  };
+};
 
 const splitRequestUrlParts = (url: string) => {
   const [pathAndSearch = '', hashFragment = ''] = `${url || ''}`.split('#', 2);
@@ -274,23 +287,89 @@ const cloneTableParams = (
     Partial<TableParamsObject> & { name?: string; value?: any }
   > = [],
 ) => {
-  return items.map((item) => ({
-    contentType: item.contentType,
-    description: item.description || '',
-    enabled: item.enabled ?? true,
-    format: item.format,
-    fromGlobal: item.fromGlobal,
-    fromSecurity: item.fromSecurity,
-    name: item.name || '',
-    required: item.required,
-    type: item.type,
-    value:
-      typeof item.value === 'string' ||
-      typeof item.value === 'number' ||
-      typeof item.value === 'boolean'
-        ? `${item.value}`
-        : '',
-  }));
+  return items.map((item) =>
+    withTableRowKey({
+      ...item,
+      contentType: item.contentType,
+      description: item.description || '',
+      enabled: item.enabled ?? true,
+      format: item.format,
+      fromGlobal: item.fromGlobal,
+      fromSecurity: item.fromSecurity,
+      name: item.name || '',
+      required: item.required,
+      type: item.type,
+      value:
+        typeof item.value === 'string' ||
+        typeof item.value === 'number' ||
+        typeof item.value === 'boolean'
+          ? `${item.value}`
+          : '',
+    }),
+  );
+};
+
+const mergeCachedTableParamsWithLatest = (
+  latestItems: TableParamsObject[],
+  cachedItems: TableParamsObject[],
+  normalizeName = normalizeParamName,
+) => {
+  const cachedMap = new Map<string, TableParamsObject>();
+
+  cachedItems.forEach((item) => {
+    const key = normalizeName(item.name || '');
+    if (!key || cachedMap.has(key)) {
+      return;
+    }
+    cachedMap.set(key, item);
+  });
+
+  return latestItems.map((item) => {
+    const key = normalizeName(item.name || '');
+    const cached = key ? cachedMap.get(key) : undefined;
+
+    if (!cached) {
+      return withTableRowKey({ ...item });
+    }
+
+    return withTableRowKey({
+      ...item,
+      contentType: cached.contentType ?? item.contentType,
+      enabled: cached.enabled ?? item.enabled,
+      fileList: cached.fileList ?? item.fileList,
+      value:
+        Object.prototype.hasOwnProperty.call(cached, 'value') &&
+        cached.value !== undefined
+          ? cached.value
+          : item.value,
+    });
+  });
+};
+
+const mergeCachedRequestState = (cachedState: DebugRequestStateSnapshot) => {
+  const latestState = defaultRequestState.value ?? buildCurrentSnapshot();
+  const latestLocalQueryParams = latestState.queryParams.filter(
+    (item) => !item.fromGlobal && !item.fromSecurity,
+  );
+  const cachedLocalQueryParams = cachedState.queryParams.filter(
+    (item) => !item.fromGlobal && !item.fromSecurity,
+  );
+
+  return {
+    ...cachedState,
+    formDataParams: mergeCachedTableParamsWithLatest(
+      latestState.formDataParams,
+      cachedState.formDataParams,
+    ),
+    queryParams: mergeCachedTableParamsWithLatest(
+      latestLocalQueryParams,
+      cachedLocalQueryParams,
+    ),
+    urlEncodedParams: mergeCachedTableParamsWithLatest(
+      latestState.urlEncodedParams,
+      cachedState.urlEncodedParams,
+    ),
+  };
 };
 
 const DEBUG_BODY_TYPES = new Set<DebugBodyType>([
@@ -475,7 +554,7 @@ watch(
         value = enumValues[0];
       }
 
-      const paramItem = {
+      const paramItem = withTableRowKey({
         name: param.name,
         value,
         enabled: param.required ?? true,
@@ -497,7 +576,7 @@ watch(
                 : undefined,
             }
           : undefined,
-      };
+      });
 
       const targetArray = paramMap[param.in];
       if (targetArray) {
@@ -1243,14 +1322,14 @@ function syncSecurityParamsToDebugTable() {
           return;
         }
         localCookieNames.add(item.name);
-        securityCookieRows.push({
+        securityCookieRows.push(withTableRowKey({
           name: item.name,
           enabled: true,
           fromSecurity: true,
           value: item.tokenValue,
           description: item.description,
           type: item.type,
-        });
+        }));
         return;
       }
       case 'header': {
@@ -1259,14 +1338,14 @@ function syncSecurityParamsToDebugTable() {
           return;
         }
         localHeaderNames.add(normalizedName);
-        securityHeaderRows.push({
+        securityHeaderRows.push(withTableRowKey({
           enabled: true,
           fromSecurity: true,
           name: item.name,
           value: item.tokenValue,
           description: item.description,
           type: item.type,
-        });
+        }));
         return;
       }
       case 'query': {
@@ -1274,14 +1353,14 @@ function syncSecurityParamsToDebugTable() {
           return;
         }
         localQueryNames.add(item.name);
-        securityQueryRows.push({
+        securityQueryRows.push(withTableRowKey({
           name: item.name,
           enabled: true,
           fromSecurity: true,
           value: item.tokenValue,
           description: item.description,
           type: item.type,
-        });
+        }));
       }
       // No default
     }
@@ -1303,7 +1382,7 @@ function syncGlobalParamsToDebugTable() {
     .getMergedQueryParams(aggregationStore.currentService?.url)
     .filter((item) => item.enabled && normalizeParamName(item.name || ''))
     .filter((item) => !localQueryNames.has(normalizeParamName(item.name || '')))
-    .map((item) => ({
+    .map((item) => withTableRowKey({
       description: item.description || '全局参数',
       enabled: true,
       fromGlobal: true,
@@ -1325,7 +1404,7 @@ function syncGlobalParamsToDebugTable() {
     .filter(
       (item) => !localHeaderNames.has(normalizeHeaderName(item.name || '')),
     )
-    .map((item) => ({
+    .map((item) => withTableRowKey({
       description: item.description || '全局参数',
       enabled: true,
       fromGlobal: true,
@@ -2054,7 +2133,7 @@ onMounted(async () => {
   if (apiTestCacheStore.debugCacheEnabled) {
     const cachedState = apiTestCacheStore.getRequestCache(cacheKey.value);
     if (cachedState) {
-      await applySnapshot(cachedState, {
+      await applySnapshot(mergeCachedRequestState(cachedState), {
         syncGlobal: true,
       });
     }
