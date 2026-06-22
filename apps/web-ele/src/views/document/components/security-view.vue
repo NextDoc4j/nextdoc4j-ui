@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 
-import { ElButton, ElTooltip } from 'element-plus';
+import { ElTooltip } from 'element-plus';
 
 interface AuthInfo {
   mode: string;
@@ -41,7 +41,7 @@ const props = withDefaults(
   },
 );
 
-const expanded = ref(false);
+const expanded = ref(true);
 
 const isIgnored = computed(() => props.metadata?.ignore || false);
 
@@ -90,7 +90,7 @@ const summaryMode = computed(() => {
   if (roleMode) {
     return normalizeMode(roleMode);
   }
-  return 'OR';
+  return normalizeMode();
 });
 
 const hasOrValues = computed(() => {
@@ -100,7 +100,7 @@ const hasOrValues = computed(() => {
 });
 
 const normalizeMode = (mode?: string) => {
-  const currentMode = `${mode || 'OR'}`.toUpperCase();
+  const currentMode = `${mode || 'AND'}`.toUpperCase();
   return currentMode === 'AND' ? 'AND' : 'OR';
 };
 
@@ -193,19 +193,17 @@ const formatOrTypeLabel = (orType?: string) => {
               跳过校验
             </span>
             <template v-else>
-              <span class="mode-chip">模式 {{ summaryMode }}</span>
+              <button
+                type="button"
+                class="mode-chip mode-chip--toggle"
+                :aria-expanded="expanded"
+                @click="expanded = !expanded"
+              >
+                模式 {{ summaryMode }}
+              </button>
               <span v-if="hasOrValues" class="or-prefix-chip">含备选</span>
             </template>
           </div>
-
-          <ElButton
-            v-if="!isIgnored && hasPermissionPayload"
-            text
-            size="small"
-            @click="expanded = !expanded"
-          >
-            {{ expanded ? '收起规则' : '展开规则' }}
-          </ElButton>
         </div>
 
         <template v-if="expanded && !isIgnored">
@@ -444,6 +442,11 @@ const formatOrTypeLabel = (orType?: string) => {
     var(--el-bg-color) 22%
   );
   border-color: var(--el-color-primary-light-6);
+}
+
+.mode-chip--toggle {
+  font-family: inherit;
+  cursor: pointer;
 }
 
 .or-prefix-chip {

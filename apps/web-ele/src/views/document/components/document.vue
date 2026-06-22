@@ -93,7 +93,7 @@ const activeResponseCode = ref('');
 const activeRequestSections = ref<string[]>([]);
 const requestBodyType = ref('');
 const requestBodyVariantState = ref<Record<string, number>>({});
-const requestExampleOpen = ref(false);
+const requestExampleOpen = ref(true);
 const responseExampleOpen = ref<Record<string, boolean>>({});
 const responseExampleSelection = ref<Record<string, string>>({});
 const responseVariantState = ref<Record<string, Record<string, number>>>({});
@@ -212,8 +212,9 @@ const loadCurrentDocument = () => {
   const data = apiStore.searchPathData(group, tag, operationId);
   apiInfo.value = data || ({} as ApiInfo);
 
+  requestExampleOpen.value = true;
   responseExampleOpen.value = Object.fromEntries(
-    responseCodes.value.map((code) => [code, false]),
+    responseCodes.value.map((code, index) => [code, index === 0]),
   );
   responseExampleSelection.value = {};
   responseVariantState.value = {};
