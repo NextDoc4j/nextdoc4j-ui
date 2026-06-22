@@ -83,7 +83,8 @@
     "clearNotifications": "Clear",
     "search": {
       "title": "Search",
-      "searchNavigate": "Search Navigation",
+      "searchNavigate": "Search APIs, / for paths, # for full text",
+      "prefixHint": "/ Path · # Full text",
       "select": "Select",
       "navigate": "Navigate",
       "close": "Close",
