@@ -30,6 +30,7 @@ import {
   Paragraph as DocxParagraph,
   Table as DocxTable,
   TableCell as DocxTableCell,
+  TableLayoutType as DocxTableLayoutType,
   TableRow as DocxTableRow,
   TextRun as DocxTextRun,
   WidthType as DocxWidthType,
@@ -144,6 +145,8 @@ const PREVIEW_VIRTUAL_BLOCK_CHUNK_SIZE = 24;
 const PREVIEW_VIRTUAL_BLOCK_MIN_COUNT = 24;
 const PREVIEW_CHUNK_PREFETCH_COUNT = 1;
 const PREVIEW_CHUNK_ROOT_MARGIN = '1100px 0px';
+const EXPORT_TABLE_LONG_TEXT_SEGMENT_LENGTH = 32;
+const DOCX_TABLE_GRID_WIDTH = 9000;
 const md = new MarkdownIt({
   html: true,
   linkify: true,
@@ -894,12 +897,29 @@ function stringifyJson(value: unknown) {
   }
 }
 
+/**
+ * 为表格中的长连续文本插入软换行点，避免示例值撑宽整张表格。
+ * @param value 原始单元格文本。
+ * @returns 插入软换行点后的单元格文本。
+ */
+function addExportTableSoftBreaks(value: string) {
+  return value.replaceAll(
+    new RegExp(
+      `([\\w+/=:.\\-]{${EXPORT_TABLE_LONG_TEXT_SEGMENT_LENGTH}})(?=[\\w+/=:.\\-])`,
+      'g',
+    ),
+    '$1\u200B',
+  );
+}
+
 function toMarkdownCell(value: any) {
   const text = `${value ?? ''}`.trim();
   if (!text) {
     return '-';
   }
-  return text.replaceAll('|', String.raw`\|`).replaceAll('\n', '<br/>');
+  return addExportTableSoftBreaks(
+    text.replaceAll('|', String.raw`\|`).replaceAll('\n', '<br/>'),
+  );
 }
 
 function mergeDescriptionWithEnum(description: string, schema?: any) {
@@ -3131,10 +3151,11 @@ function buildExportHtml(markdownContent: string, title: string) {
   <title>${title}</title>
   <style>
     body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; max-width: 980px; margin: 0 auto; padding: 24px; line-height: 1.7; }
-    table { width: 100%; border-collapse: collapse; margin: 12px 0; }
-    th, td { border: 1px solid #dcdfe6; padding: 8px; text-align: left; vertical-align: top; }
+    table { width: 100%; table-layout: fixed; border-collapse: collapse; margin: 12px 0; }
+    th, td { border: 1px solid #dcdfe6; padding: 8px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
     h1, h2, h3 { margin-top: 24px; }
     code { background: #f2f3f5; padding: 2px 4px; border-radius: 4px; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; }
   </style>
 </head>
 <body>${htmlBody}</body>
@@ -3276,15 +3297,48 @@ function isMarkdownTableRowLine(line: string) {
   return cells.length > 1;
 }
 
+/**
+ * 计算 Word 表格列宽，优先兼容接口参数表和响应概要表。
+ * @param headerCells Markdown 表格表头单元格。
+ * @param columnCount 表格列数。
+ * @returns 每列百分比宽度。
+ */
+function resolveDocxTableColumnWidths(
+  headerCells: string[],
+  columnCount: number,
+) {
+  if (
+    columnCount === 5 &&
+    headerCells.includes('字段') &&
+    headerCells.includes('示例值')
+  ) {
+    return [18, 16, 8, 28, 30];
+  }
+
+  if (
+    columnCount === 3 &&
+    headerCells.includes('响应码') &&
+    headerCells.includes('类型')
+  ) {
+    return [16, 44, 40];
+  }
+
+  const width = Math.floor(100 / columnCount);
+  return Array.from({ length: columnCount }, (_, index) =>
+    index === columnCount - 1 ? 100 - width * (columnCount - 1) : width,
+  );
+}
+
 function buildDocxTableFromRows(headerCells: string[], bodyRows: string[][]) {
   const columnCount = Math.max(
     headerCells.length,
     ...bodyRows.map((row) => row.length),
   );
+  const columnWidths = resolveDocxTableColumnWidths(headerCells, columnCount);
 
   const buildRowCells = (cells: string[], header = false) =>
     Array.from({ length: columnCount }, (_, index) => {
-      const text = cells[index] || '-';
+      const text = addExportTableSoftBreaks(cells[index] || '-');
       return new DocxTableCell({
         children: [
           new DocxParagraph({
@@ -3296,10 +3350,18 @@ function buildDocxTableFromRows(headerCells: string[], bodyRows: string[][]) {
             ],
           }),
         ],
+        width: {
+          size: columnWidths[index] || Math.floor(100 / columnCount),
+          type: DocxWidthType.PERCENTAGE,
+        },
       });
     });
 
   return new DocxTable({
+    columnWidths: columnWidths.map((width) =>
+      Math.round((DOCX_TABLE_GRID_WIDTH * width) / 100),
+    ),
+    layout: DocxTableLayoutType.FIXED,
     rows: [
       new DocxTableRow({
         children: buildRowCells(headerCells, true),
@@ -4842,6 +4904,20 @@ onBeforeUnmount(() => {
   min-height: 0;
   line-height: 1.85;
   overflow-wrap: anywhere;
+}
+
+.doc-preview-html:deep(table) {
+  table-layout: fixed;
+}
+
+.doc-preview-html:deep(th),
+.doc-preview-html:deep(td),
+.doc-preview-html:deep(pre) {
+  overflow-wrap: anywhere;
+}
+
+.doc-preview-html:deep(pre) {
+  white-space: pre-wrap;
 }
 
 .doc-preview-html-content,
