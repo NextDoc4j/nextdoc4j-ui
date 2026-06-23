@@ -11,7 +11,7 @@ import { adaptSchemaForView, hasRenderableSchema } from '#/utils/schema';
 
 const route = useRoute();
 const apiStore = useApiStore();
-const exampleOpen = ref(false);
+const exampleOpen = ref(true);
 const entityVariantState = ref<Record<string, number>>({});
 
 const entityName = computed(() => {
