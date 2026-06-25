@@ -136,6 +136,11 @@ const isArray = (item: Schema) => {
     &:first-child {
       @apply border-none;
     }
+
+    /* 鼠标悬停整行高亮，便于定位当前查看的字段 */
+    &:hover {
+      background-color: var(--el-fill-color-light);
+    }
   }
 
   td {

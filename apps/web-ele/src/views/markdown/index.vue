@@ -304,8 +304,50 @@ function updateActiveToc() {
     }
   });
 
+  const activeTocChanged = currentId !== activeTocId.value;
   activeTocId.value = currentId;
   updateTocThumb();
+  // 目录过长时，正文滚动切换高亮项后让选中项在目录容器内保持可见
+  if (activeTocChanged) {
+    scrollActiveTocIntoView();
+  }
+}
+
+/**
+ * 让当前高亮的目录项在目录滚动容器内保持可见。
+ * 仅滚动目录容器自身，不联动正文；选中项已在可视区内时不滚动。
+ */
+function scrollActiveTocIntoView() {
+  const list = tocListRef.value;
+  const scroller = list?.parentElement;
+  if (!list || !scroller) return;
+
+  const activeIndex = tocItems.value.findIndex(
+    (item) => item.id === activeTocId.value,
+  );
+  if (activeIndex === -1) return;
+
+  const activeLink =
+    list.querySelectorAll<HTMLElement>('.toc-link')[activeIndex];
+  if (!activeLink) return;
+
+  const scrollerRect = scroller.getBoundingClientRect();
+  const linkRect = activeLink.getBoundingClientRect();
+  const margin = 24;
+  const relativeTop = linkRect.top - scrollerRect.top;
+  const relativeBottom = linkRect.bottom - scrollerRect.top;
+
+  if (relativeTop < margin) {
+    scroller.scrollTo({
+      top: scroller.scrollTop + relativeTop - margin,
+      behavior: 'smooth',
+    });
+  } else if (relativeBottom > scroller.clientHeight - margin) {
+    scroller.scrollTo({
+      top: scroller.scrollTop + relativeBottom - scroller.clientHeight + margin,
+      behavior: 'smooth',
+    });
+  }
 }
 
 function handleTocClick(item: TocItem) {
@@ -315,6 +357,7 @@ function handleTocClick(item: TocItem) {
   target.scrollIntoView({ behavior: 'smooth', block: 'start' });
   activeTocId.value = item.id;
   updateTocThumb();
+  scrollActiveTocIntoView();
 }
 
 // 配置链接在新窗口打开

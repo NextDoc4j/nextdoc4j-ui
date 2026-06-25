@@ -4634,6 +4634,9 @@ onBeforeUnmount(() => {
 .doc-range-card {
   flex: 1;
   min-height: 0;
+
+  /* 与下方「导出其他」卡片保持间距，避免两卡紧贴 */
+  margin-bottom: 16px;
 }
 
 .doc-other-card {
