@@ -11,6 +11,7 @@ import type { DetectedBase64Image } from '#/utils/base64-image';
 
 import {
   computed,
+  defineAsyncComponent,
   nextTick,
   onBeforeUnmount,
   onMounted,
@@ -21,15 +22,18 @@ import {
 
 import { useAppConfig } from '@vben/hooks';
 import {
+  SvgAiCopyIcon,
   SvgApiPrefixIcon,
   SvgDocumentLayoutIcon,
   SvgDocumentOmittedIcon,
   SvgDocumentResetIcon,
+  SvgGlobalConfigIcon,
 } from '@vben/icons';
 import { usePreferences } from '@vben/preferences';
 
 import {
   ElButton,
+  ElDialog,
   ElDrawer,
   ElDropdown,
   ElDropdownItem,
@@ -57,6 +61,7 @@ import {
   useTokenStore,
 } from '#/store';
 import { useAggregationStore } from '#/store/aggregation';
+import { buildDebugPrompt } from '#/utils/ai-copy';
 import {
   buildDetectedImageFileName,
   detectBase64ImagesInData,
@@ -67,6 +72,24 @@ import { adaptSchemaForView, hasRenderableSchema } from '#/utils/schema';
 
 import bodyParams from './body-params.vue';
 import paramsTable from './params-table.vue';
+
+const props = defineProps<{
+  method: string;
+  parameters: ParameterObject[];
+  path: string;
+  requestBody: any;
+  requestBodyType: string;
+  requestBodyVariantState?: Record<string, number>;
+  responses?: Record<string, ResponseObject>;
+  security: any;
+}>();
+
+defineEmits(['cancel']);
+
+// 全局配置弹窗内容按需加载，避免影响调试面板首屏
+const GlobalConfigPanel = defineAsyncComponent(
+  () => import('./global-config-panel.vue'),
+);
 
 interface TableParamsObject {
   __rowKey?: string;
@@ -137,19 +160,6 @@ interface DebugBodyTabExpose {
   }) => Promise<void> | void;
 }
 
-const props = defineProps<{
-  method: string;
-  parameters: ParameterObject[];
-  path: string;
-  requestBody: any;
-  requestBodyType: string;
-  requestBodyVariantState?: Record<string, number>;
-  responses?: Record<string, ResponseObject>;
-  security: any;
-}>();
-
-defineEmits(['cancel']);
-
 const { apiURL } = useAppConfig(import.meta.env, import.meta.env.PROD);
 const { isDark } = usePreferences();
 const baseUrl = ref();
@@ -184,6 +194,8 @@ const headers = ref<Array<TableParamsObject>>([]);
 const cookies = ref<Array<TableParamsObject>>([]);
 const isRestoringCache = ref(false);
 const defaultRequestState = ref<DebugRequestStateSnapshot | null>(null);
+// 全局配置弹窗（全局参数 + 全局认证）显示状态
+const globalConfigVisible = ref(false);
 let persistTimer: null | number = null;
 
 const methodPillStyle = computed(() => {
@@ -567,6 +579,7 @@ watch(
               type,
               format,
               enum: enumValues,
+              'x-nextdoc4j-enum': (schema as any)['x-nextdoc4j-enum'],
               items: items
                 ? {
                     enum: items.enum,
@@ -1053,6 +1066,50 @@ async function handleCopyBaseUrl() {
     return;
   }
   ElMessage.error('Base URL 复制失败');
+}
+
+/**
+ * 复制在线调试的请求 / 响应 / 错误信息，便于粘贴给 Coding Agent 排查并修复代码
+ */
+async function handleCopyForAi() {
+  const snapshot = actualRequestSnapshot.value;
+  const hasResponse = responseStatus.value.type !== 'default';
+
+  const resolveResponseBody = () => {
+    if (responseData.value === null || responseData.value === undefined) {
+      return '';
+    }
+    return typeof responseData.value === 'string'
+      ? responseData.value
+      : toPrettyJson(responseData.value);
+  };
+  const responseBody = resolveResponseBody();
+
+  const prompt = buildDebugPrompt({
+    method: props.method,
+    url:
+      snapshot?.url ||
+      applyPathParamsToRequestUrl(requestUrl.value || props.path),
+    headers: snapshot?.headers,
+    queryParams: snapshot?.queryParams,
+    pathParams: snapshot?.pathParams,
+    bodyText: snapshot?.bodyText,
+    bodyType: snapshot?.bodyType,
+    responseStatus: hasResponse ? responseStatus.value.text : '',
+    responseTime: hasResponse ? responseTime.value : '',
+    responseSize: hasResponse ? responseSize.value : '',
+    responseMime: hasResponse ? responseMimeType.value : '',
+    responseBody,
+    errorMessage:
+      responseStatus.value.type === 'error' ? responseStatus.value.text : '',
+  });
+
+  const copied = await copyText(prompt);
+  if (copied) {
+    ElMessage.success('已复制调试信息，可粘贴给 Coding Agent');
+    return;
+  }
+  ElMessage.error('复制失败');
 }
 
 const normalizeResizeRatio = (value: number) => {
@@ -2245,6 +2302,21 @@ onBeforeUnmount(() => {
   <div class="debug-console">
     <div class="debug-console__top">
       <div class="debug-console__request-row">
+        <ElButton class="debug-back-button" @click="$emit('cancel')">
+          <svg
+            class="debug-back-button__icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="m15 18-6-6 6-6" />
+          </svg>
+          <span class="debug-back-button__label">接口详情</span>
+        </ElButton>
         <ElInput
           v-model="requestUrlDisplay"
           placeholder="请输入正确的URL"
@@ -2274,28 +2346,48 @@ onBeforeUnmount(() => {
           >
             发送
           </ElButton>
-          <ElTooltip content="恢复默认" placement="top">
-            <ElButton
-              text
-              class="debug-icon-button"
-              @click="handleRestoreDefault"
+          <div class="debug-console__icon-group">
+            <ElTooltip content="全局配置管理" placement="top">
+              <ElButton
+                text
+                class="debug-icon-button"
+                @click="globalConfigVisible = true"
+              >
+                <SvgGlobalConfigIcon class="size-4" />
+              </ElButton>
+            </ElTooltip>
+            <ElTooltip
+              content="一键复制请求信息、响应内容、错误信息，粘贴到 claude code 等 AI 编程工具，让 AI 排查和修复代码"
+              placement="top"
+              :enterable="false"
             >
-              <SvgDocumentResetIcon class="size-4" />
-            </ElButton>
-          </ElTooltip>
-          <ElTooltip :content="layoutTooltipText" placement="top">
-            <ElButton
-              text
-              class="debug-icon-button"
-              :class="{ 'debug-icon-button--active': !isStackedLayout }"
-              @click="togglePaneLayout"
-            >
-              <SvgDocumentLayoutIcon
-                class="size-4 transition-transform"
-                :class="{ 'rotate-90': !isStackedLayout }"
-              />
-            </ElButton>
-          </ElTooltip>
+              <ElButton text class="debug-icon-button" @click="handleCopyForAi">
+                <SvgAiCopyIcon class="size-4" />
+              </ElButton>
+            </ElTooltip>
+            <ElTooltip content="恢复默认" placement="top">
+              <ElButton
+                text
+                class="debug-icon-button"
+                @click="handleRestoreDefault"
+              >
+                <SvgDocumentResetIcon class="size-4" />
+              </ElButton>
+            </ElTooltip>
+            <ElTooltip :content="layoutTooltipText" placement="top">
+              <ElButton
+                text
+                class="debug-icon-button"
+                :class="{ 'debug-icon-button--active': !isStackedLayout }"
+                @click="togglePaneLayout"
+              >
+                <SvgDocumentLayoutIcon
+                  class="size-4 transition-transform"
+                  :class="{ 'rotate-90': !isStackedLayout }"
+                />
+              </ElButton>
+            </ElTooltip>
+          </div>
         </div>
       </div>
       <div
@@ -2889,6 +2981,19 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </div>
+
+    <!-- 全局配置弹窗：左侧全局参数、右侧全局认证，与文档管理共用数据 -->
+    <ElDialog
+      v-model="globalConfigVisible"
+      title="全局配置管理"
+      align-center
+      append-to-body
+      destroy-on-close
+      class="global-config-dialog"
+      width="min(960px, calc(100vw - 120px))"
+    >
+      <GlobalConfigPanel v-if="globalConfigVisible" />
+    </ElDialog>
   </div>
 </template>
 
@@ -2911,14 +3016,35 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 1024px) {
+  /* 中等宽度：保持单行，收起返回按钮文案为图标，避免换行 */
+  .debug-back-button__label {
+    display: none;
+  }
+
+  .debug-back-button {
+    padding: 0 10px;
+  }
+
+  .debug-send-button {
+    min-width: 64px;
+  }
+}
+
+@media (max-width: 720px) {
+  /* 窄屏：返回 + URL 一行，发送按钮和图标组整体换到第二行，最多两行，图标组保持在一行不再拆散 */
   .debug-console__request-row {
-    flex-direction: column;
-    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .debug-request-input {
+    flex: 1 1 auto;
+    min-width: 0;
   }
 
   .debug-console__request-actions {
-    justify-content: flex-end;
-    padding-left: 0;
+    flex: 1 0 auto;
+    justify-content: space-between;
+    width: 100%;
   }
 
   .debug-console__request-actions::before {
@@ -2926,7 +3052,13 @@ onBeforeUnmount(() => {
   }
 
   .debug-send-button {
-    min-width: 92px;
+    flex: 1;
+    min-width: 72px;
+    max-width: 120px;
+  }
+
+  .debug-console__icon-group {
+    flex: 0 0 auto;
   }
 
   .debug-status-list {
@@ -3224,11 +3356,11 @@ onBeforeUnmount(() => {
 }
 
 .debug-console__request-actions {
-  display: inline-flex;
+  display: flex;
   flex: none;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
-  padding-left: 8px;
 }
 
 .debug-console__request-actions::before {
@@ -3236,6 +3368,14 @@ onBeforeUnmount(() => {
   height: 18px;
   content: '';
   background: var(--debug-border);
+}
+
+/* 图标按钮组：响应式布局时保证按钮不换行 */
+.debug-console__icon-group {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+  align-items: center;
 }
 
 .debug-console__body {
@@ -3570,7 +3710,8 @@ onBeforeUnmount(() => {
   --el-input-focus-border-color: transparent;
   --el-input-hover-border-color: transparent;
 
-  flex: 1;
+  flex: 1 1 200px;
+  min-width: 0;
 }
 
 :deep(.debug-request-input .el-input__wrapper) {
@@ -3618,16 +3759,16 @@ onBeforeUnmount(() => {
 }
 
 .debug-prefix-button {
-  width: 30px;
-  height: 30px;
+  width: 26px;
+  height: 26px;
   color: var(--el-text-color-secondary);
   border-radius: var(--debug-chip-radius);
   transition: all 0.16s ease;
 }
 
 .debug-prefix-button__icon {
-  width: 18px;
-  height: 18px;
+  width: 12px;
+  height: 12px;
 }
 
 .debug-prefix-button:hover {
@@ -3653,6 +3794,35 @@ onBeforeUnmount(() => {
 
 .debug-send-button:hover {
   transform: translateY(-1px);
+}
+
+.debug-back-button {
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+  align-items: center;
+  height: 32px;
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-regular);
+  background: var(--debug-soft-bg-strong);
+  border: 1px solid var(--debug-border);
+  border-radius: var(--debug-chip-radius);
+  transition:
+    color 0.16s ease,
+    border-color 0.16s ease;
+}
+
+.debug-back-button:hover {
+  color: var(--el-color-primary);
+  background: var(--debug-soft-bg-strong);
+  border-color: color-mix(in srgb, var(--el-color-primary) 40%, transparent);
+}
+
+.debug-back-button__icon {
+  width: 16px;
+  height: 16px;
 }
 
 .debug-tabs-wrap,
@@ -3930,5 +4100,24 @@ onBeforeUnmount(() => {
     0 10px 22px -14px color-mix(in srgb, #000 62%, transparent),
     0 -10px 22px -14px color-mix(in srgb, #fff 16%, transparent);
   --debug-shadow: 0 8px 20px color-mix(in srgb, #000 45%, transparent);
+}
+
+/* 全局配置弹窗样式：弹窗固定高度（约 10 行参数 + 留白），整体不滚动，仅内部参数/认证区域滚动 */
+:deep(.global-config-dialog) {
+  display: flex;
+  flex-direction: column;
+  height: 720px;
+  max-height: calc(100vh - 80px);
+  margin: 0;
+  overflow: hidden;
+}
+
+:deep(.global-config-dialog .el-dialog__body) {
+  flex: 1;
+  min-height: 0;
+
+  /* body 不滚动，滚动交给内部 .gcp-section（仅参数列表区滚动） */
+  padding: 16px 20px 20px;
+  overflow: hidden;
 }
 </style>

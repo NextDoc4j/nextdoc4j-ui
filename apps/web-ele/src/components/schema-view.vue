@@ -720,6 +720,35 @@ const showSchemaStack = computed(() => {
 </template>
 
 <style scoped>
+@media (max-width: 768px) {
+  .schema-item__details {
+    grid-template-columns: 1fr;
+    row-gap: 4px;
+  }
+
+  .schema-item__detail-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
+  .schema-item__headline {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .schema-item__headline-main {
+    gap: 6px 8px;
+  }
+
+  .schema-item__summary {
+    flex-basis: 240px;
+  }
+
+  .schema-item__detail-label {
+    min-width: 0;
+  }
+}
+
 .schema-root-pill,
 .schema-stack {
   --field-chip-radius: calc(var(--radius, 12px) * 0.82);
@@ -787,6 +816,20 @@ const showSchemaStack = computed(() => {
   gap: 8px;
   align-items: flex-start;
   width: 100%;
+  padding: 4px 8px;
+
+  /* 不向左右负外边距溢出：外层 ElCollapse 的 __wrap 为 overflow:hidden，
+     负 margin 会使行左侧圆角被裁切；贴齐折叠内容区即可完整显示圆角 */
+  margin: 0;
+  border-radius: var(--field-chip-radius);
+  transition: background-color 0.2s ease;
+}
+
+/* 单个字段悬停高亮：父行 __top 在 DOM 上包裹了展开的子块 __children，
+   故用 :has 排除「指针正落在子块区域内」的情况（含子块左缩进条/行间隙），
+   确保只有鼠标实际所在的那一行被高亮，父级字段不会被子块连带变色。 */
+.schema-item__top:hover:not(:has(.schema-item__children:hover)) {
+  background-color: var(--el-fill-color);
 }
 
 .schema-item__control {
@@ -1091,34 +1134,5 @@ const showSchemaStack = computed(() => {
   margin-left: 2px;
   border-left: 1px solid
     color-mix(in srgb, var(--el-border-color-lighter) 88%, transparent);
-}
-
-@media (max-width: 768px) {
-  .schema-item__details {
-    grid-template-columns: 1fr;
-    row-gap: 4px;
-  }
-
-  .schema-item__detail-row {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 2px;
-  }
-
-  .schema-item__headline {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .schema-item__headline-main {
-    gap: 6px 8px;
-  }
-
-  .schema-item__summary {
-    flex-basis: 240px;
-  }
-
-  .schema-item__detail-label {
-    min-width: 0;
-  }
 }
 </style>

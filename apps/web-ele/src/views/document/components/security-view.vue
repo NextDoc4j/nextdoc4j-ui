@@ -173,6 +173,8 @@ const formatOrTypeLabel = (orType?: string) => {
           :disabled="!item.description"
           effect="dark"
           placement="top"
+          :enterable="false"
+          :hide-after="0"
         >
           <div class="auth-chip">
             <span class="auth-chip__title">{{ item.label }}</span>

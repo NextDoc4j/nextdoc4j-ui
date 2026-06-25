@@ -2,14 +2,16 @@
 import type { ApiInfo, SecuritySchemeObject } from '#/typings/openApi';
 import type { SecurityMetadata } from '#/utils/securityexpand';
 
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 
 import {
   ApiTestRun,
   ApiTestRunning,
+  SvgAiCopyIcon,
   SvgApiPrefixIcon,
   SvgCopyIcon,
+  SvgDoubleArrowUpIcon,
 } from '@vben/icons';
 import { usePreferences } from '@vben/preferences';
 
@@ -30,6 +32,7 @@ import MarkdownCodeBlock from '#/components/markdown-code-block.vue';
 import SchemaView from '#/components/schema-view.vue';
 import { getMethodStyle } from '#/constants/methods';
 import { useApiStore } from '#/store';
+import { buildApiDocPrompt } from '#/utils/ai-copy';
 import { renderTypeDefinitions } from '#/utils/api-code-example';
 import { copyText } from '#/utils/clipboard';
 import {
@@ -213,8 +216,9 @@ const loadCurrentDocument = () => {
   apiInfo.value = data || ({} as ApiInfo);
 
   requestExampleOpen.value = true;
+  // 所有响应状态码的 JSON 示例默认展开
   responseExampleOpen.value = Object.fromEntries(
-    responseCodes.value.map((code, index) => [code, index === 0]),
+    responseCodes.value.map((code) => [code, true]),
   );
   responseExampleSelection.value = {};
   responseVariantState.value = {};
@@ -1112,6 +1116,141 @@ async function handleCopyPath() {
   ElMessage.error('Path 复制失败');
 }
 
+// 接口详情滚动容器与「回到顶部」按钮状态
+const scrollContainerRef = ref<HTMLElement | null>(null);
+const showBackTop = ref(false);
+
+const handleDetailScroll = () => {
+  const el = scrollContainerRef.value;
+  showBackTop.value = Boolean(el) && (el as HTMLElement).scrollTop > 240;
+};
+
+const handleBackTop = () => {
+  scrollContainerRef.value?.scrollTo({ top: 0, behavior: 'smooth' });
+};
+
+onMounted(() => {
+  scrollContainerRef.value?.addEventListener('scroll', handleDetailScroll, {
+    passive: true,
+  });
+});
+
+onBeforeUnmount(() => {
+  scrollContainerRef.value?.removeEventListener('scroll', handleDetailScroll);
+});
+
+/**
+ * 收集当前接口在原始 OpenAPI 文档中的定义片段（路径对象 + 直接引用的实体），
+ * 供 AI 编程工具获取无损的接口契约信息。引用解析仅展开一层，避免循环引用与体积膨胀。
+ */
+function buildRawOpenApiJson() {
+  const openApi = apiStore.openApi;
+  const path = apiInfo.value?.path;
+  const method = apiInfo.value?.method?.toLowerCase?.();
+  if (!openApi || !path || !method) {
+    return '';
+  }
+
+  const pathItem = openApi.paths?.[path];
+  const operation = (pathItem as any)?.[method];
+  if (!operation) {
+    return '';
+  }
+
+  // 收集片段中出现的 schema 引用名，附带对应的实体定义
+  const refNames = new Set<string>();
+  const collectRefs = (node: unknown) => {
+    if (!node || typeof node !== 'object') {
+      return;
+    }
+    if (Array.isArray(node)) {
+      node.forEach((item) => collectRefs(item));
+      return;
+    }
+    Object.entries(node as Record<string, unknown>).forEach(([key, value]) => {
+      if (key === '$ref' && typeof value === 'string') {
+        const name = parseSchemaRefName(value);
+        if (name) {
+          refNames.add(name);
+        }
+        return;
+      }
+      collectRefs(value);
+    });
+  };
+  collectRefs(operation);
+
+  const schemas: Record<string, unknown> = {};
+  refNames.forEach((name) => {
+    const schema = schemaMap.value[name];
+    if (schema) {
+      schemas[name] = schema;
+      // 展开一层嵌套引用，保证常见的关联实体也能带上
+      collectRefs(schema);
+    }
+  });
+  refNames.forEach((name) => {
+    if (!schemas[name] && schemaMap.value[name]) {
+      schemas[name] = schemaMap.value[name];
+    }
+  });
+
+  const fragment: Record<string, unknown> = {
+    path,
+    method: method.toUpperCase(),
+    operation,
+  };
+  if (Object.keys(schemas).length > 0) {
+    fragment.components = { schemas };
+  }
+
+  try {
+    return JSON.stringify(fragment, null, 2);
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * 复制接口文档信息（定义、参数、TS 实体、响应）给 Cursor 等 AI 编程工具生成代码
+ */
+async function handleCopyForAi() {
+  const toParamLite = (item: any) => ({
+    name: item?.name,
+    type: item?.schema?.type,
+    required: item?.required,
+    description: item?.description,
+  });
+
+  const prompt = buildApiDocPrompt({
+    summary: summaryText.value,
+    method: apiInfo.value.method,
+    url: `${baseUrl.value || ''}${apiInfo.value.path || ''}`,
+    description: apiInfo.value.description,
+    tags: displayTags.value,
+    authMethods: authMethods.value.map((item) => ({
+      detail: item.detail,
+      label: item.label,
+    })),
+    pathParams: parametersInPath.value.map((item) => toParamLite(item)),
+    queryParams: parametersInQuery.value.map((item) => toParamLite(item)),
+    requestTs: requestTypeCode.value,
+    responseTs: responseTypeCode.value,
+    responses: responseCodes.value.map((code) => ({
+      code,
+      description: apiInfo.value?.responses?.[code]?.description,
+    })),
+    openApiJson: buildRawOpenApiJson(),
+  });
+
+  const copied = await copyText(prompt);
+  if (copied) {
+    ElMessage.success('已复制接口信息，可粘贴给 AI 生成代码');
+    return;
+  }
+  ElMessage.error('复制失败');
+}
+
 const openTypeCodeDialog = (scope: CodeDialogScope) => {
   const nextCode =
     scope === 'request' ? requestTypeCode.value : responseTypeCode.value;
@@ -1192,7 +1331,11 @@ defineExpose({
 </script>
 
 <template>
-  <div class="document-detail" :class="{ 'document-detail--dark': isDark }">
+  <div
+    ref="scrollContainerRef"
+    class="document-detail"
+    :class="{ 'document-detail--dark': isDark }"
+  >
     <div class="document-detail__stack">
       <section class="panel hero-panel">
         <div class="hero-panel__top">
@@ -1208,16 +1351,31 @@ defineExpose({
             </ElTag>
           </div>
 
-          <ElButton
-            class="hero-panel__debug-button"
-            :style="methodStyle"
-            @click="handleTest"
-            :disabled="showTest"
-          >
-            {{ showTest ? '调试中' : '在线调试' }}
-            <ApiTestRunning v-if="showTest" class="ml-1 size-4 animate-spin" />
-            <ApiTestRun v-else class="ml-1 size-4" />
-          </ElButton>
+          <div class="hero-panel__actions">
+            <ElTooltip
+              content="复制接口文档信息给 claude code 等 AI 编程工具，让 AI 根据接口定义生成高质量的代码"
+              placement="top"
+              :enterable="false"
+            >
+              <ElButton class="hero-panel__ai-button" @click="handleCopyForAi">
+                <SvgAiCopyIcon class="hero-panel__ai-icon" />
+                <span>Ai Coding</span>
+              </ElButton>
+            </ElTooltip>
+            <ElButton
+              class="hero-panel__debug-button"
+              :style="methodStyle"
+              @click="handleTest"
+              :disabled="showTest"
+            >
+              {{ showTest ? '调试中' : '在线调试' }}
+              <ApiTestRunning
+                v-if="showTest"
+                class="ml-1 size-4 animate-spin"
+              />
+              <ApiTestRun v-else class="ml-1 size-4" />
+            </ElButton>
+          </div>
         </div>
 
         <div class="hero-panel__body">
@@ -1231,7 +1389,13 @@ defineExpose({
               {{ apiInfo.method?.toUpperCase() }}
             </span>
 
-            <ElTooltip v-if="baseUrl" :content="baseUrl" placement="top">
+            <ElTooltip
+              v-if="baseUrl"
+              :content="baseUrl"
+              placement="top"
+              :enterable="false"
+              :hide-after="0"
+            >
               <button class="endpoint-prefix" @click="handleCopyBaseUrl">
                 <SvgApiPrefixIcon class="endpoint-prefix__icon" />
               </button>
@@ -1547,6 +1711,21 @@ defineExpose({
       </section>
     </div>
 
+    <!-- 右下角「回到顶部」按钮：随详情滚动容器悬浮 -->
+    <div class="document-detail__backtop">
+      <transition name="fade">
+        <button
+          v-show="showBackTop"
+          type="button"
+          class="document-backtop-button"
+          aria-label="回到顶部"
+          @click="handleBackTop"
+        >
+          <SvgDoubleArrowUpIcon class="document-backtop-button__icon" />
+        </button>
+      </transition>
+    </div>
+
     <ElDialog
       v-model="codeDialogVisible"
       align-center
@@ -1781,6 +1960,42 @@ defineExpose({
   border: none;
 }
 
+.hero-panel__actions {
+  display: inline-flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.hero-panel__ai-button {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  height: 36px;
+  padding: 0 14px;
+  font-weight: 700;
+  color: var(--el-color-primary);
+  background: color-mix(
+    in srgb,
+    var(--doc-panel-bg) 88%,
+    var(--el-color-primary-light-9) 12%
+  );
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 28%, transparent);
+}
+
+.hero-panel__ai-button:hover {
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+  border-color: color-mix(in srgb, var(--el-color-primary) 42%, transparent);
+}
+
+.hero-panel__ai-icon {
+  width: 17px;
+  height: 17px;
+}
+
 .hero-panel__endpoint {
   flex-wrap: wrap;
   gap: 8px;
@@ -1814,8 +2029,8 @@ defineExpose({
 
 .endpoint-prefix {
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 26px;
+  height: 26px;
   padding: 0;
   color: var(--el-text-color-secondary);
   cursor: pointer;
@@ -1827,8 +2042,8 @@ defineExpose({
 }
 
 .endpoint-prefix__icon {
-  width: 18px;
-  height: 18px;
+  width: 12px;
+  height: 12px;
 }
 
 .endpoint-path {
@@ -2220,8 +2435,10 @@ defineExpose({
 }
 
 .schema-layout--with-actions:not(.schema-layout--open) .schema-layout__main {
+  /* 字段列表占满整列，分割线延伸至内容区最右边界；
+     「JSON 示例」按钮为绝对定位浮层，仅悬浮于右上角，不再用整列右内边距挤压字段，
+     避免字段分割线被截断。 */
   grid-column: 1 / -1;
-  padding-right: 100px;
 }
 
 .schema-layout--with-actions:not(.schema-layout--open)
@@ -2435,6 +2652,48 @@ defineExpose({
   border-radius: var(--doc-radius-xs);
 }
 
+.document-detail__backtop {
+  position: sticky;
+  bottom: 0;
+  z-index: 6;
+  height: 0;
+  pointer-events: none;
+}
+
+.document-backtop-button {
+  position: absolute;
+  right: 12px;
+  bottom: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  color: var(--el-color-primary);
+  pointer-events: auto;
+  cursor: pointer;
+  background: color-mix(in srgb, var(--el-bg-color) 90%, transparent);
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 28%, transparent);
+  border-radius: var(--doc-radius-md);
+  box-shadow: 0 10px 24px
+    color-mix(in srgb, var(--el-text-color-primary) 12%, transparent);
+  backdrop-filter: blur(8px);
+  transition:
+    color 0.16s ease,
+    border-color 0.16s ease,
+    transform 0.16s ease;
+}
+
+.document-backtop-button:hover {
+  border-color: color-mix(in srgb, var(--el-color-primary) 50%, transparent);
+  transform: translateY(-2px);
+}
+
+.document-backtop-button__icon {
+  width: 20px;
+  height: 20px;
+}
+
 :global(.type-code-dialog-overlay) {
   overflow: hidden;
 }
@@ -2545,6 +2804,7 @@ defineExpose({
   }
 
   .hero-panel__tags,
+  .hero-panel__actions,
   .section-panel__actions,
   .sub-panel__actions,
   .sub-panel__title-wrap,

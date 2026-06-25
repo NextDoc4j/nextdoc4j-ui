@@ -180,8 +180,18 @@ const formatValue = (value: unknown) => {
   --field-required: var(--el-color-danger);
   --field-leading-gutter: 26px;
 
-  padding: 10px 0;
+  padding: 10px 12px;
+
+  /* 不向左右负外边距溢出：外层 ElCollapse 的 __wrap 为 overflow:hidden，
+     负 margin 会使行左侧圆角被裁切；贴齐折叠内容区即可完整显示圆角 */
+  margin: 0;
   border-bottom: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--field-chip-radius);
+  transition: background-color 0.2s ease;
+}
+
+.parameter-item:hover {
+  background-color: var(--el-fill-color);
 }
 
 .parameter-item:last-child {
