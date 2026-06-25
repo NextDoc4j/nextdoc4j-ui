@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { GlobalParamItem } from '#/store';
 
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 
 import { useAccessStore } from '@vben/stores';
@@ -229,7 +229,12 @@ const refreshDocumentRoutes = async (targetPath?: string) => {
   }
 };
 
-watch(groupOverviewEnabled, async (enabled) => {
+// 开关切换到路由重建之间的延迟：路由重建会同步遍历全部接口生成菜单与搜索索引，
+// 与开关切换同帧执行会阻塞主线程导致开关动画卡顿，故延迟到过渡动画(~300ms)结束后再执行。
+const ROUTE_REFRESH_DELAY = 320;
+let refreshRoutesTimer: null | ReturnType<typeof setTimeout> = null;
+
+watch(groupOverviewEnabled, (enabled) => {
   const routeName = router.currentRoute.value.name;
   const activePath = router.currentRoute.value.meta.activePath as
     | string
@@ -240,7 +245,20 @@ watch(groupOverviewEnabled, async (enabled) => {
     routeName.endsWith('__overview__')
       ? activePath
       : undefined;
-  await refreshDocumentRoutes(targetPath);
+  if (refreshRoutesTimer) {
+    clearTimeout(refreshRoutesTimer);
+  }
+  refreshRoutesTimer = setTimeout(() => {
+    refreshRoutesTimer = null;
+    void refreshDocumentRoutes(targetPath);
+  }, ROUTE_REFRESH_DELAY);
+});
+
+onBeforeUnmount(() => {
+  if (refreshRoutesTimer) {
+    clearTimeout(refreshRoutesTimer);
+    refreshRoutesTimer = null;
+  }
 });
 </script>
 
@@ -285,7 +303,7 @@ watch(groupOverviewEnabled, async (enabled) => {
 
         <ElAlert class="mb-4" type="info" show-icon :closable="false">
           <template #default>
-            开启后，点击左侧菜单的接口分组会在右侧展示该分组下全部接口的概览页；关闭后点击分组将直接进入分组内的第一个接口详情。
+            开启后，点击左侧菜单的接口分组会在右侧展示该分组下全部接口的概览页；关闭后点击分组仅展开或收起子菜单，需点击具体接口才进入对应详情。
           </template>
         </ElAlert>
 

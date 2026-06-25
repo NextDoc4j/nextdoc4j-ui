@@ -1,11 +1,11 @@
 import type { MenuRecordRaw } from '@vben/types';
 
 import { computed, onBeforeMount, ref, watch } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 
 import { preferences, usePreferences } from '@vben/preferences';
 import { useAccessStore } from '@vben/stores';
-import { findMenuByPath, findRootMenuByPath } from '@vben/utils';
+import { findRootMenuByPath } from '@vben/utils';
 
 import { useNavigation } from './use-navigation';
 
@@ -13,6 +13,7 @@ function useMixedMenu() {
   const { navigation, willOpenedByWindow } = useNavigation();
   const accessStore = useAccessStore();
   const route = useRoute();
+  const router = useRouter();
   const splitSideMenus = ref<MenuRecordRaw[]>([]);
   const rootMenuPath = ref<string>('');
   const mixedRootMenuPath = ref<string>('');
@@ -109,29 +110,44 @@ function useMixedMenu() {
   };
 
   /**
+   * 点击接口分组菜单时跳转到该分组的概览页。
+   * 仅在「分组概览」开启时生效：此时路由生成会为分组挂载 `${key}/__overview__` 概览子路由，
+   * 据此判断而无需让框架层反向依赖业务层的开关 store。关闭概览开关、或实体模型/其它文档分组
+   * （均无概览子路由）点击时只展开/收起、不跳转，符合「只有点击具体项才进入详情」的预期。
+   * @param key 被点击分组的路由路径
+   * @returns 是否已触发概览跳转
+   */
+  const navigateGroupOverview = (key: string): boolean => {
+    // 折叠态侧边菜单依靠悬浮展开，避免 hover 误触发跳转
+    if (preferences.sidebar.collapsed) {
+      return false;
+    }
+    const hasOverviewRoute = router
+      .getRoutes()
+      .some((item) => item.path === `${key}/__overview__`);
+    if (!hasOverviewRoute) {
+      return false;
+    }
+    // 跳过「当前路由已在该分组内」：点击接口详情或刷新时菜单会自动展开祖先分组，
+    // 此时不应把用户从正在浏览的接口强制拉回概览页。
+    const activePath = (route?.meta?.activePath as string) ?? route.path;
+    if (key === activePath || activePath.startsWith(`${key}/`)) {
+      return false;
+    }
+    // 分组 redirect 指向概览页，跳转分组路径即进入概览，不依赖 autoActivateChild 偏好。
+    navigation(key);
+    return true;
+  };
+
+  /**
    * 侧边菜单展开事件
    * @param key 路由路径
    * @param parentsPath 父级路径
    */
   const handleMenuOpen = (key: string, parentsPath: string[]) => {
+    // 接口分组（非顶级菜单）：展开任意层级分组都尝试跳转概览页，否则仅展开
     if (parentsPath.length > 1) {
-      // 仅当展开的分组是「接口的直接上级」时才打开概览页：其子项均为接口叶子（无下级），
-      // 而多级分组中的外层分组子项仍是子分组（有下级），不应触发概览。
-      const openedMenu = findMenuByPath(menus.value, key);
-      const isLeafGroup =
-        !!openedMenu?.children?.length &&
-        openedMenu.children.every((child) => !child.children?.length);
-      if (!isLeafGroup) {
-        return;
-      }
-      // 跳过「当前路由已在该分组内」的展开：刷新或应用内跳转时菜单会自动展开祖先分组，
-      // 此时不应把用户从正在浏览的接口详情强制跳回概览页。
-      const activePath = (route?.meta?.activePath as string) ?? route.path;
-      if (key === activePath || activePath.startsWith(`${key}/`)) {
-        return;
-      }
-      // 点击分组同步打开其概览页（分组 redirect 指向概览页），不依赖 autoActivateChild 偏好。
-      navigation(key);
+      navigateGroupOverview(key);
       return;
     }
     // 顶级菜单展开：自动激活最近一次访问的子级（保持原有行为，受 autoActivateChild 控制）
@@ -141,6 +157,18 @@ function useMixedMenu() {
     navigation(
       defaultSubMap.has(key) ? (defaultSubMap.get(key) as string) : key,
     );
+  };
+
+  /**
+   * 侧边菜单收起事件：收起接口分组时同样跳转到概览页，
+   * 保证「无论展开还是收起，点击分组都进入概览」的一致交互。
+   * @param key 路由路径
+   * @param parentsPath 父级路径
+   */
+  const handleMenuClose = (key: string, parentsPath: string[]) => {
+    if (parentsPath.length > 1) {
+      navigateGroupOverview(key);
+    }
   };
 
   /**
@@ -181,6 +209,7 @@ function useMixedMenu() {
   return {
     handleMenuSelect,
     handleMenuOpen,
+    handleMenuClose,
     headerActive,
     headerMenus,
     sidebarActive,
