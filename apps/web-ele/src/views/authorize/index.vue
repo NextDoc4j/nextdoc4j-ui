@@ -122,11 +122,8 @@ onMounted(() => {});
 
       <!-- 状态和操作区 -->
       <div
-        class="mb-6 flex items-center justify-between rounded-lg p-4 shadow-sm"
-        style="
-          background-color: var(--el-bg-color-overlay);
-          border: 1px solid var(--el-border-color);
-        "
+        class="auth-card mb-6 flex items-center justify-between border border-[var(--el-border-color)] p-4"
+        style="background-color: var(--el-bg-color-overlay)"
       >
         <div
           class="flex items-center text-sm text-[var(--el-text-color-regular)]"
@@ -149,7 +146,7 @@ onMounted(() => {});
       <!-- 认证方式卡片网格 -->
       <div class="grid grid-cols-1 gap-4">
         <div
-          class="relative cursor-pointer overflow-hidden rounded-lg border-2 p-4 shadow-sm transition-all hover:shadow-md"
+          class="auth-card relative cursor-pointer overflow-hidden border-2 p-4 transition-all"
           :class="[
             value[tokenKey(index, item)]
               ? 'border-[var(--el-color-primary-light-5)]'
@@ -233,5 +230,21 @@ onMounted(() => {});
 </template>
 
 <style scoped>
-/* 可以添加额外的样式 */
+/* 卡片观感与首页保持一致：更大的圆角、柔和边框与悬浮阴影 */
+.auth-card {
+  border-radius: calc(var(--radius) * 2.25);
+  box-shadow:
+    0 1px 2px color-mix(in srgb, var(--el-text-color-primary) 6%, transparent),
+    0 2px 8px color-mix(in srgb, var(--el-text-color-primary) 5%, transparent);
+  transition:
+    box-shadow 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.auth-card:hover {
+  border-color: color-mix(in srgb, var(--el-color-primary) 25%, transparent);
+  box-shadow:
+    0 4px 14px color-mix(in srgb, var(--el-text-color-primary) 8%, transparent),
+    0 10px 30px color-mix(in srgb, var(--el-text-color-primary) 7%, transparent);
+}
 </style>

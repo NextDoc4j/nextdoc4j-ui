@@ -246,45 +246,63 @@ watch(groupOverviewEnabled, async (enabled) => {
 
 <template>
   <div class="h-full overflow-auto p-5">
-    <ElCard shadow="never" class="mb-4">
-      <template #header>
-        <div class="flex items-center justify-between">
-          <span class="font-medium">全局调试缓存</span>
-          <ElSpace>
-            <ElButton text type="danger" @click="clearAllDebugRequestCache">
-              清理全部缓存
-            </ElButton>
-          </ElSpace>
-        </div>
-      </template>
-
-      <ElAlert class="mb-4" type="info" show-icon :closable="false">
-        <template #default>
-          开启后会缓存在线调试的请求数据（刷新页面后仍保留）。关闭后回到当前默认行为，不读取也不写入调试缓存。
+    <!-- 全局调试缓存 与 分组概览 两张卡片并列，各占一半宽度 -->
+    <div class="config-card-row mb-4">
+      <ElCard shadow="never" class="config-card">
+        <template #header>
+          <div class="flex items-center justify-between">
+            <span class="font-medium">全局调试缓存</span>
+            <ElSpace>
+              <ElButton text type="danger" @click="clearAllDebugRequestCache">
+                清理全部缓存
+              </ElButton>
+            </ElSpace>
+          </div>
         </template>
-      </ElAlert>
 
-      <ElForm label-width="110px" class="debug-switch-form">
-        <ElFormItem label="调试缓存开关" class="debug-switch-form__item">
-          <ElSwitch
-            v-model="debugCacheEnabled"
-            active-text="开启"
-            inactive-text="关闭"
-            inline-prompt
-          />
-        </ElFormItem>
-        <ElFormItem label="分组概览" class="debug-switch-form__item">
-          <ElSwitch
-            v-model="groupOverviewEnabled"
-            active-text="开启"
-            inactive-text="关闭"
-            inline-prompt
-          />
-        </ElFormItem>
-      </ElForm>
-    </ElCard>
+        <ElAlert class="mb-4" type="info" show-icon :closable="false">
+          <template #default>
+            开启后会缓存在线调试的请求数据（刷新页面后仍保留）。关闭后回到当前默认行为，不读取也不写入调试缓存。
+          </template>
+        </ElAlert>
 
-    <ElCard shadow="never">
+        <ElForm label-width="110px">
+          <ElFormItem label="调试缓存开关" class="config-switch-item">
+            <ElSwitch
+              v-model="debugCacheEnabled"
+              active-text="开启"
+              inactive-text="关闭"
+              inline-prompt
+            />
+          </ElFormItem>
+        </ElForm>
+      </ElCard>
+
+      <ElCard shadow="never" class="config-card">
+        <template #header>
+          <span class="font-medium">分组概览</span>
+        </template>
+
+        <ElAlert class="mb-4" type="info" show-icon :closable="false">
+          <template #default>
+            开启后，点击左侧菜单的接口分组会在右侧展示该分组下全部接口的概览页；关闭后点击分组将直接进入分组内的第一个接口详情。
+          </template>
+        </ElAlert>
+
+        <ElForm label-width="110px">
+          <ElFormItem label="分组概览" class="config-switch-item">
+            <ElSwitch
+              v-model="groupOverviewEnabled"
+              active-text="开启"
+              inactive-text="关闭"
+              inline-prompt
+            />
+          </ElFormItem>
+        </ElForm>
+      </ElCard>
+    </div>
+
+    <ElCard shadow="never" class="config-card">
       <template #header>
         <div class="flex items-center justify-between">
           <span class="font-medium">全局参数配置</span>
@@ -442,13 +460,39 @@ watch(groupOverviewEnabled, async (enabled) => {
 </template>
 
 <style scoped>
-/* 调试缓存 / 分组概览 两开关同行各占 1/2，样式沿用 ElFormItem 默认，不引入新样式 */
-.debug-switch-form {
-  display: flex;
+/* 卡片观感与首页保持一致：更大的圆角、柔和边框与悬浮阴影 */
+.config-card {
+  --config-radius: calc(var(--radius) * 2.25);
+
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--config-radius);
+  box-shadow:
+    0 1px 2px color-mix(in srgb, var(--el-text-color-primary) 6%, transparent),
+    0 2px 8px color-mix(in srgb, var(--el-text-color-primary) 5%, transparent);
+  transition:
+    box-shadow 0.18s ease,
+    border-color 0.18s ease;
 }
 
-.debug-switch-form__item {
+.config-card:hover {
+  border-color: color-mix(in srgb, var(--el-color-primary) 25%, transparent);
+  box-shadow:
+    0 4px 14px color-mix(in srgb, var(--el-text-color-primary) 8%, transparent),
+    0 10px 30px color-mix(in srgb, var(--el-text-color-primary) 7%, transparent);
+}
+
+/* 全局调试缓存 / 分组概览 两卡片并列，各占一半 */
+.config-card-row {
+  display: flex;
+  gap: 16px;
+}
+
+.config-card-row .config-card {
   flex: 1;
+  min-width: 0;
+}
+
+.config-switch-item {
   margin-bottom: 0;
 }
 

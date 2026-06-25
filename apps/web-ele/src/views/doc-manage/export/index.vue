@@ -4573,6 +4573,61 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped lang="scss">
+
+
+@supports not (scrollbar-gutter: stable) {
+  .scope-tree-panel {
+    overflow-y: scroll;
+  }
+}
+
+@supports (content-visibility: auto) {
+  .doc-preview-html:deep(.doc-preview-virtual-block) {
+    display: block;
+    contain-intrinsic-size: auto 1200px;
+    contain: content;
+    content-visibility: auto;
+  }
+}
+
+@media (max-width: 920px) {
+  .export-format-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  :deep(.doc-export-dialog .el-dialog__header) {
+    padding: 20px 20px 0;
+  }
+
+  :deep(.doc-export-dialog .el-dialog__body) {
+    padding: 16px 20px 8px;
+  }
+
+  :deep(.doc-export-dialog .el-dialog__footer) {
+    padding: 0 20px 20px;
+  }
+
+  .export-dialog-intro__title {
+    font-size: 18px;
+  }
+
+  .export-format-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .export-format-card {
+    min-height: 168px;
+  }
+}
+
+@media (max-width: 520px) {
+  .export-format-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .doc-export-page {
   box-sizing: border-box;
   display: flex;
@@ -4620,6 +4675,29 @@ onBeforeUnmount(() => {
   width: 100%;
   min-width: 0;
   min-height: 0;
+}
+
+/* 卡片观感与首页保持一致：更大的圆角、柔和边框与悬浮阴影 */
+.doc-range-card,
+.doc-other-card,
+.doc-preview-card {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: calc(var(--radius) * 2.25);
+  box-shadow:
+    0 1px 2px color-mix(in srgb, var(--el-text-color-primary) 6%, transparent),
+    0 2px 8px color-mix(in srgb, var(--el-text-color-primary) 5%, transparent);
+  transition:
+    box-shadow 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.doc-range-card:hover,
+.doc-other-card:hover,
+.doc-preview-card:hover {
+  border-color: color-mix(in srgb, var(--el-color-primary) 25%, transparent);
+  box-shadow:
+    0 4px 14px color-mix(in srgb, var(--el-text-color-primary) 8%, transparent),
+    0 10px 30px color-mix(in srgb, var(--el-text-color-primary) 7%, transparent);
 }
 
 .doc-range-card,
@@ -4847,12 +4925,6 @@ onBeforeUnmount(() => {
   scrollbar-gutter: stable;
 }
 
-@supports not (scrollbar-gutter: stable) {
-  .scope-tree-panel {
-    overflow-y: scroll;
-  }
-}
-
 .group-toggle-area {
   position: relative;
   z-index: 1;
@@ -4926,15 +4998,6 @@ onBeforeUnmount(() => {
 .doc-preview-html-content,
 .doc-preview-virtual-block {
   width: 100%;
-}
-
-@supports (content-visibility: auto) {
-  .doc-preview-html:deep(.doc-preview-virtual-block) {
-    display: block;
-    contain-intrinsic-size: auto 1200px;
-    contain: content;
-    content-visibility: auto;
-  }
 }
 
 .doc-preview-html:deep(p) {
@@ -5023,43 +5086,5 @@ onBeforeUnmount(() => {
 .group-submenu-motion-leave-from {
   max-height: 1000px;
   opacity: 1;
-}
-
-@media (max-width: 920px) {
-  .export-format-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 768px) {
-  :deep(.doc-export-dialog .el-dialog__header) {
-    padding: 20px 20px 0;
-  }
-
-  :deep(.doc-export-dialog .el-dialog__body) {
-    padding: 16px 20px 8px;
-  }
-
-  :deep(.doc-export-dialog .el-dialog__footer) {
-    padding: 0 20px 20px;
-  }
-
-  .export-dialog-intro__title {
-    font-size: 18px;
-  }
-
-  .export-format-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .export-format-card {
-    min-height: 168px;
-  }
-}
-
-@media (max-width: 520px) {
-  .export-format-grid {
-    grid-template-columns: 1fr;
-  }
 }
 </style>
