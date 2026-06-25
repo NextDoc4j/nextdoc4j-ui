@@ -2,6 +2,9 @@
 import type { GlobalParamItem } from '#/store';
 
 import { computed, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
+
+import { useAccessStore } from '@vben/stores';
 
 import {
   ElAlert,
@@ -22,6 +25,8 @@ import {
 } from 'element-plus';
 import { storeToRefs } from 'pinia';
 
+import { generateAccess } from '#/router/access';
+import { accessRoutes } from '#/router/routes';
 import { useApiTestCacheStore, useDocManageStore } from '#/store';
 import { useAggregationStore } from '#/store/aggregation';
 
@@ -30,8 +35,11 @@ defineOptions({ name: 'DocManageGlobalParams' });
 const docManageStore = useDocManageStore();
 const apiTestCacheStore = useApiTestCacheStore();
 const aggregationStore = useAggregationStore();
+const accessStore = useAccessStore();
+const router = useRouter();
 
-const { debugCacheEnabled } = storeToRefs(apiTestCacheStore);
+const { debugCacheEnabled, groupOverviewEnabled } =
+  storeToRefs(apiTestCacheStore);
 const { currentService, isAggregation, services } =
   storeToRefs(aggregationStore);
 
@@ -141,13 +149,37 @@ const resetScope = () => {
   headerParams.value = [];
 };
 
-const addQueryParam = () => {
-  queryParams.value.push(createParamRow());
-};
+// 末尾草稿行：替代「添加参数」按钮，用户在末尾空白行任意填写即自动新增正式行。
+const queryDraft = ref<GlobalParamItem>(createParamRow());
+const headerDraft = ref<GlobalParamItem>(createParamRow());
 
-const addHeaderParam = () => {
-  headerParams.value.push(createParamRow());
-};
+/** 将草稿行提交为正式行，并重置草稿行以便继续录入 */
+function commitDraft(
+  draft: GlobalParamItem,
+  list: GlobalParamItem[],
+): GlobalParamItem {
+  if (draft.name?.trim() || `${draft.value ?? ''}`.trim()) {
+    list.push({ ...draft });
+    return createParamRow();
+  }
+  return draft;
+}
+
+watch(
+  queryDraft,
+  (draft) => {
+    queryDraft.value = commitDraft(draft, queryParams.value);
+  },
+  { deep: true },
+);
+
+watch(
+  headerDraft,
+  (draft) => {
+    headerDraft.value = commitDraft(draft, headerParams.value);
+  },
+  { deep: true },
+);
 
 const removeQueryParam = (id: string) => {
   queryParams.value = queryParams.value.filter((item) => item.id !== id);
@@ -170,6 +202,46 @@ const clearAllDebugRequestCache = () => {
   apiTestCacheStore.clearAllRequestCache();
   ElMessage.success('已清理全部调试缓存');
 };
+
+/**
+ * 用途：刷新接口文档菜单和动态路由，使分组概览开关切换后立即生效。
+ * 参数说明：targetPath 为刷新完成后需要跳转的目标路径，未传入时保持当前路由。
+ * 返回值说明：无返回值，刷新失败时仅提示错误并保留当前页面状态。
+ */
+const refreshDocumentRoutes = async (targetPath?: string) => {
+  try {
+    const { accessibleMenus, accessibleRoutes } = await generateAccess({
+      roles: [],
+      router,
+      routes: accessRoutes,
+    });
+
+    accessStore.setAccessMenus(accessibleMenus);
+    accessStore.setAccessRoutes(accessibleRoutes);
+    accessStore.setIsAccessChecked(true);
+
+    if (targetPath) {
+      await router.replace(targetPath);
+    }
+  } catch (error) {
+    console.error('Failed to refresh document routes:', error);
+    ElMessage.error('刷新文档菜单失败');
+  }
+};
+
+watch(groupOverviewEnabled, async (enabled) => {
+  const routeName = router.currentRoute.value.name;
+  const activePath = router.currentRoute.value.meta.activePath as
+    | string
+    | undefined;
+  const targetPath =
+    !enabled &&
+    typeof routeName === 'string' &&
+    routeName.endsWith('__overview__')
+      ? activePath
+      : undefined;
+  await refreshDocumentRoutes(targetPath);
+});
 </script>
 
 <template>
@@ -192,10 +264,18 @@ const clearAllDebugRequestCache = () => {
         </template>
       </ElAlert>
 
-      <ElForm label-width="110px">
-        <ElFormItem label="调试缓存开关">
+      <ElForm label-width="110px" class="debug-switch-form">
+        <ElFormItem label="调试缓存开关" class="debug-switch-form__item">
           <ElSwitch
             v-model="debugCacheEnabled"
+            active-text="开启"
+            inactive-text="关闭"
+            inline-prompt
+          />
+        </ElFormItem>
+        <ElFormItem label="分组概览" class="debug-switch-form__item">
+          <ElSwitch
+            v-model="groupOverviewEnabled"
             active-text="开启"
             inactive-text="关闭"
             inline-prompt
@@ -241,24 +321,28 @@ const clearAllDebugRequestCache = () => {
 
       <ElTabs>
         <ElTabPane label="全局请求头参数">
-          <ElButton class="mb-3" @click="addHeaderParam">
-            新增 Header 参数
-          </ElButton>
-          <ElTable :data="headerParams" border>
+          <ElTable :data="[...headerParams, headerDraft]" border>
             <ElTableColumn label="启用" width="80" align="center">
-              <template #default="{ row }">
-                <ElSwitch v-model="row.enabled" />
+              <template #default="{ row, $index }">
+                <ElSwitch
+                  v-model="row.enabled"
+                  :disabled="$index === headerParams.length"
+                />
               </template>
             </ElTableColumn>
             <ElTableColumn label="请求头" min-width="180">
-              <template #default="{ row }">
+              <template #default="{ row, $index }">
                 <ElSelect
                   v-model="row.name"
                   filterable
                   allow-create
                   default-first-option
                   clearable
-                  placeholder="例如 Authorization"
+                  :placeholder="
+                    $index === headerParams.length
+                      ? '添加请求头'
+                      : '例如 Authorization'
+                  "
                 >
                   <ElOption
                     v-for="name in commonHeaderNameOptions"
@@ -270,8 +354,15 @@ const clearAllDebugRequestCache = () => {
               </template>
             </ElTableColumn>
             <ElTableColumn label="值" min-width="260">
-              <template #default="{ row }">
-                <ElInput v-model="row.value" placeholder="Header 值" />
+              <template #default="{ row, $index }">
+                <ElInput
+                  v-model="row.value"
+                  :placeholder="
+                    $index === headerParams.length
+                      ? '添加 Header 值'
+                      : 'Header 值'
+                  "
+                />
               </template>
             </ElTableColumn>
             <ElTableColumn label="说明" min-width="220">
@@ -280,8 +371,13 @@ const clearAllDebugRequestCache = () => {
               </template>
             </ElTableColumn>
             <ElTableColumn label="操作" width="100" fixed="right">
-              <template #default="{ row }">
-                <ElButton text type="danger" @click="removeHeaderParam(row.id)">
+              <template #default="{ row, $index }">
+                <ElButton
+                  v-if="$index < headerParams.length"
+                  text
+                  type="danger"
+                  @click="removeHeaderParam(row.id)"
+                >
                   删除
                 </ElButton>
               </template>
@@ -290,23 +386,35 @@ const clearAllDebugRequestCache = () => {
         </ElTabPane>
 
         <ElTabPane label="全局 Query 参数">
-          <ElButton class="mb-3" @click="addQueryParam">
-            新增 Query 参数
-          </ElButton>
-          <ElTable :data="queryParams" border>
+          <ElTable :data="[...queryParams, queryDraft]" border>
             <ElTableColumn label="启用" width="80" align="center">
-              <template #default="{ row }">
-                <ElSwitch v-model="row.enabled" />
+              <template #default="{ row, $index }">
+                <ElSwitch
+                  v-model="row.enabled"
+                  :disabled="$index === queryParams.length"
+                />
               </template>
             </ElTableColumn>
             <ElTableColumn label="参数名" min-width="180">
-              <template #default="{ row }">
-                <ElInput v-model.trim="row.name" placeholder="例如 tenantId" />
+              <template #default="{ row, $index }">
+                <ElInput
+                  v-model.trim="row.name"
+                  :placeholder="
+                    $index === queryParams.length
+                      ? '添加参数名'
+                      : '例如 tenantId'
+                  "
+                />
               </template>
             </ElTableColumn>
             <ElTableColumn label="参数值" min-width="200">
-              <template #default="{ row }">
-                <ElInput v-model="row.value" placeholder="参数值" />
+              <template #default="{ row, $index }">
+                <ElInput
+                  v-model="row.value"
+                  :placeholder="
+                    $index === queryParams.length ? '添加参数值' : '参数值'
+                  "
+                />
               </template>
             </ElTableColumn>
             <ElTableColumn label="说明" min-width="220">
@@ -315,8 +423,13 @@ const clearAllDebugRequestCache = () => {
               </template>
             </ElTableColumn>
             <ElTableColumn label="操作" width="100" fixed="right">
-              <template #default="{ row }">
-                <ElButton text type="danger" @click="removeQueryParam(row.id)">
+              <template #default="{ row, $index }">
+                <ElButton
+                  v-if="$index < queryParams.length"
+                  text
+                  type="danger"
+                  @click="removeQueryParam(row.id)"
+                >
                   删除
                 </ElButton>
               </template>
@@ -327,3 +440,23 @@ const clearAllDebugRequestCache = () => {
     </ElCard>
   </div>
 </template>
+
+<style scoped>
+/* 调试缓存 / 分组概览 两开关同行各占 1/2，样式沿用 ElFormItem 默认，不引入新样式 */
+.debug-switch-form {
+  display: flex;
+}
+
+.debug-switch-form__item {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+:deep(.el-table__row:last-child) {
+  background: color-mix(in srgb, var(--el-fill-color-light) 50%, transparent);
+}
+
+:deep(.el-table__row:last-child .el-input__inner::placeholder) {
+  color: var(--el-text-color-placeholder);
+}
+</style>
