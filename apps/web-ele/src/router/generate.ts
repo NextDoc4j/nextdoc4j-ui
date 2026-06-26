@@ -12,6 +12,7 @@ import type {
 } from '#/typings/openApi';
 
 import {
+  SvgFileDownIcon,
   SvgGlobalConfigIcon,
   SvgMenuApiIcon,
   SvgMenuDocumentIcon,
@@ -82,7 +83,7 @@ const createDocManageRoute = (
     {
       meta: {
         title: '文档下载',
-        icon: SvgMenuDocumentIcon,
+        icon: SvgFileDownIcon,
       },
       name: '文档下载',
       path: '/doc-manage/export',

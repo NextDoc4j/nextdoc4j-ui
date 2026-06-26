@@ -19,6 +19,7 @@ const SvgDocumentDocTrashBinIcon = createIconifyIcon(
 const SvgDocumentLayoutIcon = createIconifyIcon('svg:document-layout');
 const SvgDocumentOmittedIcon = createIconifyIcon('svg:document-omitted');
 const SvgDocumentResetIcon = createIconifyIcon('svg:document-reset');
+const SvgFileDownIcon = createIconifyIcon('svg:file-down');
 const SvgDoubleArrowDownIcon = createIconifyIcon('svg:chevrons-down');
 const SvgDoubleArrowUpIcon = createIconifyIcon('svg:chevrons-up');
 const SvgMenuDocumentManageIcon = createIconifyIcon('svg:menu-document-manage');
@@ -48,6 +49,7 @@ export {
   SvgDocumentResetIcon,
   SvgDoubleArrowDownIcon,
   SvgDoubleArrowUpIcon,
+  SvgFileDownIcon,
   SvgFormatLeftIcon,
   SvgGlobalConfigIcon,
   SvgMenuApiIcon,
