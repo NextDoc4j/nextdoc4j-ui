@@ -2545,7 +2545,11 @@ onBeforeUnmount(() => {
                       <h3 class="actual-request__title">Cookies</h3>
                     </div>
                     <div class="params-table-block__body">
-                      <params-table :table-data="cookies" />
+                      <params-table
+                        :table-data="cookies"
+                        show-description-column
+                        show-delete-in-description
+                      />
                     </div>
                   </div>
                 </ElTabPane>

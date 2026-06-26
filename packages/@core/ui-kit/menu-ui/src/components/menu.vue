@@ -97,11 +97,20 @@ watch(
   },
 );
 
+// 上一次注册项变化时，激活项是否已在菜单中注册
+let activeItemRegistered = false;
 watch(
   itemPathsKey,
   () => {
     nextTick(() => {
-      initMenu();
+      // 仅在「激活项随菜单项变化新出现」（如动态菜单数据加载完成、深链/刷新预挂载激活分组）时
+      // 才自动展开到激活项。子菜单懒挂载只会注册被展开分组的子项，激活项注册状态不变，
+      // 此时不应重新展开——否则手风琴模式下会把用户刚展开的同级分组立即收起。
+      const registered = !!(activePath.value && items.value[activePath.value]);
+      if (registered && !activeItemRegistered) {
+        initMenu();
+      }
+      activeItemRegistered = registered;
     });
   },
   { flush: 'post' },

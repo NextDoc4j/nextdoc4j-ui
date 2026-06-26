@@ -1,7 +1,5 @@
 <script setup lang="ts">
-import type { GlobalParamItem } from '#/store';
-
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { onBeforeUnmount, watch } from 'vue';
 import { useRouter } from 'vue-router';
 
 import { useAccessStore } from '@vben/stores';
@@ -12,191 +10,25 @@ import {
   ElCard,
   ElForm,
   ElFormItem,
-  ElInput,
   ElMessage,
-  ElOption,
-  ElSelect,
   ElSpace,
   ElSwitch,
-  ElTable,
-  ElTableColumn,
-  ElTabPane,
-  ElTabs,
 } from 'element-plus';
 import { storeToRefs } from 'pinia';
 
+import GlobalParamsConfig from '#/components/global-params-config.vue';
 import { generateAccess } from '#/router/access';
 import { accessRoutes } from '#/router/routes';
-import { useApiTestCacheStore, useDocManageStore } from '#/store';
-import { useAggregationStore } from '#/store/aggregation';
+import { useApiTestCacheStore } from '#/store';
 
 defineOptions({ name: 'DocManageGlobalParams' });
 
-const docManageStore = useDocManageStore();
 const apiTestCacheStore = useApiTestCacheStore();
-const aggregationStore = useAggregationStore();
 const accessStore = useAccessStore();
 const router = useRouter();
 
 const { debugCacheEnabled, groupOverviewEnabled } =
   storeToRefs(apiTestCacheStore);
-const { currentService, isAggregation, services } =
-  storeToRefs(aggregationStore);
-
-const activeScope = ref(docManageStore.ALL_SCOPE_KEY);
-const queryParams = ref<GlobalParamItem[]>([]);
-const headerParams = ref<GlobalParamItem[]>([]);
-const commonHeaderNameOptions = [
-  'Accept',
-  'Accept-Charset',
-  'Accept-Encoding',
-  'Accept-Language',
-  'Access-Control-Request-Headers',
-  'Access-Control-Request-Method',
-  'If-Range',
-  'If-Unmodified-Since',
-  'Keep-Alive',
-  'Max-Forwards',
-  'Origin',
-  'Pragma',
-];
-
-const scopeOptions = computed(() => {
-  const options = [
-    {
-      label: '全部文档（全局）',
-      value: docManageStore.ALL_SCOPE_KEY,
-    },
-  ];
-
-  if (isAggregation.value) {
-    services.value.forEach((service) => {
-      options.push({
-        label: `服务：${service.name}`,
-        value: docManageStore.toScopeKey(service.url),
-      });
-    });
-  }
-
-  return options;
-});
-
-const currentServiceScopeKey = computed(() => {
-  return docManageStore.toScopeKey(currentService.value?.url);
-});
-
-const mergedActiveQueryCount = computed(() => {
-  return docManageStore
-    .getMergedQueryParams(currentService.value?.url)
-    .filter((item) => item.enabled && item.name).length;
-});
-
-const mergedActiveHeaderCount = computed(() => {
-  return docManageStore
-    .getMergedHeaderParams(currentService.value?.url)
-    .filter((item) => item.enabled && item.name).length;
-});
-
-const createParamRow = (): GlobalParamItem => ({
-  id: Math.random().toString(36).slice(2, 10),
-  enabled: true,
-  name: '',
-  value: '',
-  description: '',
-});
-
-const loadScope = (scopeKey: string) => {
-  const data = docManageStore.getScopeParams(scopeKey);
-  queryParams.value = data.queryParams;
-  headerParams.value = data.headerParams;
-};
-
-watch(
-  scopeOptions,
-  (options) => {
-    if (!options.some((item) => item.value === activeScope.value)) {
-      activeScope.value = docManageStore.ALL_SCOPE_KEY;
-    }
-  },
-  { immediate: true },
-);
-
-watch(
-  activeScope,
-  (scopeKey) => {
-    loadScope(scopeKey);
-  },
-  { immediate: true },
-);
-
-const persistCurrentScope = () => {
-  docManageStore.setScopeParams(activeScope.value, {
-    queryParams: queryParams.value,
-    headerParams: headerParams.value,
-  });
-};
-
-watch(
-  [queryParams, headerParams],
-  () => {
-    persistCurrentScope();
-  },
-  { deep: true },
-);
-
-const resetScope = () => {
-  queryParams.value = [];
-  headerParams.value = [];
-};
-
-// 末尾草稿行：替代「添加参数」按钮，用户在末尾空白行任意填写即自动新增正式行。
-const queryDraft = ref<GlobalParamItem>(createParamRow());
-const headerDraft = ref<GlobalParamItem>(createParamRow());
-
-/** 将草稿行提交为正式行，并重置草稿行以便继续录入 */
-function commitDraft(
-  draft: GlobalParamItem,
-  list: GlobalParamItem[],
-): GlobalParamItem {
-  if (draft.name?.trim() || `${draft.value ?? ''}`.trim()) {
-    list.push({ ...draft });
-    return createParamRow();
-  }
-  return draft;
-}
-
-watch(
-  queryDraft,
-  (draft) => {
-    queryDraft.value = commitDraft(draft, queryParams.value);
-  },
-  { deep: true },
-);
-
-watch(
-  headerDraft,
-  (draft) => {
-    headerDraft.value = commitDraft(draft, headerParams.value);
-  },
-  { deep: true },
-);
-
-const removeQueryParam = (id: string) => {
-  queryParams.value = queryParams.value.filter((item) => item.id !== id);
-};
-
-const removeHeaderParam = (id: string) => {
-  headerParams.value = headerParams.value.filter((item) => item.id !== id);
-};
-
-const applyCurrentServiceTemplate = () => {
-  if (!currentService.value?.url) {
-    ElMessage.warning('当前不是聚合模式或未选择服务');
-    return;
-  }
-
-  activeScope.value = currentServiceScopeKey.value;
-};
 
 const clearAllDebugRequestCache = () => {
   apiTestCacheStore.clearAllRequestCache();
@@ -320,160 +152,7 @@ onBeforeUnmount(() => {
       </ElCard>
     </div>
 
-    <ElCard shadow="never" class="config-card">
-      <template #header>
-        <div class="flex items-center justify-between">
-          <span class="font-medium">全局参数配置</span>
-          <ElSpace>
-            <ElButton v-if="isAggregation" @click="applyCurrentServiceTemplate">
-              切换到当前服务作用域
-            </ElButton>
-            <ElButton @click="resetScope">清空当前作用域</ElButton>
-          </ElSpace>
-        </div>
-      </template>
-
-      <ElAlert class="mb-4" type="info" show-icon :closable="false">
-        <template #default>
-          调试请求会自动注入全局参数。若调试页填写了同名参数，调试页参数优先。
-          当前为实时生效，无需手动保存。 当前有效注入：Query
-          {{ mergedActiveQueryCount }} 项，Header
-          {{ mergedActiveHeaderCount }} 项。
-        </template>
-      </ElAlert>
-
-      <ElForm label-width="90px" class="mb-4 mt-2">
-        <ElFormItem label="作用域">
-          <ElSelect v-model="activeScope" style="width: 360px">
-            <ElOption
-              v-for="item in scopeOptions"
-              :key="item.value"
-              :label="item.label"
-              :value="item.value"
-            />
-          </ElSelect>
-        </ElFormItem>
-      </ElForm>
-
-      <ElTabs>
-        <ElTabPane label="全局请求头参数">
-          <ElTable :data="[...headerParams, headerDraft]" border>
-            <ElTableColumn label="启用" width="80" align="center">
-              <template #default="{ row, $index }">
-                <ElSwitch
-                  v-model="row.enabled"
-                  :disabled="$index === headerParams.length"
-                />
-              </template>
-            </ElTableColumn>
-            <ElTableColumn label="请求头" min-width="180">
-              <template #default="{ row, $index }">
-                <ElSelect
-                  v-model="row.name"
-                  filterable
-                  allow-create
-                  default-first-option
-                  clearable
-                  :placeholder="
-                    $index === headerParams.length
-                      ? '添加请求头'
-                      : '例如 Authorization'
-                  "
-                >
-                  <ElOption
-                    v-for="name in commonHeaderNameOptions"
-                    :key="name"
-                    :label="name"
-                    :value="name"
-                  />
-                </ElSelect>
-              </template>
-            </ElTableColumn>
-            <ElTableColumn label="值" min-width="260">
-              <template #default="{ row, $index }">
-                <ElInput
-                  v-model="row.value"
-                  :placeholder="
-                    $index === headerParams.length
-                      ? '添加 Header 值'
-                      : 'Header 值'
-                  "
-                />
-              </template>
-            </ElTableColumn>
-            <ElTableColumn label="说明" min-width="220">
-              <template #default="{ row }">
-                <ElInput v-model="row.description" placeholder="可选说明" />
-              </template>
-            </ElTableColumn>
-            <ElTableColumn label="操作" width="100" fixed="right">
-              <template #default="{ row, $index }">
-                <ElButton
-                  v-if="$index < headerParams.length"
-                  text
-                  type="danger"
-                  @click="removeHeaderParam(row.id)"
-                >
-                  删除
-                </ElButton>
-              </template>
-            </ElTableColumn>
-          </ElTable>
-        </ElTabPane>
-
-        <ElTabPane label="全局 Query 参数">
-          <ElTable :data="[...queryParams, queryDraft]" border>
-            <ElTableColumn label="启用" width="80" align="center">
-              <template #default="{ row, $index }">
-                <ElSwitch
-                  v-model="row.enabled"
-                  :disabled="$index === queryParams.length"
-                />
-              </template>
-            </ElTableColumn>
-            <ElTableColumn label="参数名" min-width="180">
-              <template #default="{ row, $index }">
-                <ElInput
-                  v-model.trim="row.name"
-                  :placeholder="
-                    $index === queryParams.length
-                      ? '添加参数名'
-                      : '例如 tenantId'
-                  "
-                />
-              </template>
-            </ElTableColumn>
-            <ElTableColumn label="参数值" min-width="200">
-              <template #default="{ row, $index }">
-                <ElInput
-                  v-model="row.value"
-                  :placeholder="
-                    $index === queryParams.length ? '添加参数值' : '参数值'
-                  "
-                />
-              </template>
-            </ElTableColumn>
-            <ElTableColumn label="说明" min-width="220">
-              <template #default="{ row }">
-                <ElInput v-model="row.description" placeholder="可选说明" />
-              </template>
-            </ElTableColumn>
-            <ElTableColumn label="操作" width="100" fixed="right">
-              <template #default="{ row, $index }">
-                <ElButton
-                  v-if="$index < queryParams.length"
-                  text
-                  type="danger"
-                  @click="removeQueryParam(row.id)"
-                >
-                  删除
-                </ElButton>
-              </template>
-            </ElTableColumn>
-          </ElTable>
-        </ElTabPane>
-      </ElTabs>
-    </ElCard>
+    <GlobalParamsConfig />
   </div>
 </template>
 
@@ -512,13 +191,5 @@ onBeforeUnmount(() => {
 
 .config-switch-item {
   margin-bottom: 0;
-}
-
-:deep(.el-table__row:last-child) {
-  background: color-mix(in srgb, var(--el-fill-color-light) 50%, transparent);
-}
-
-:deep(.el-table__row:last-child .el-input__inner::placeholder) {
-  color: var(--el-text-color-placeholder);
 }
 </style>

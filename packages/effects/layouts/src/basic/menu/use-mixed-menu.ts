@@ -145,18 +145,12 @@ function useMixedMenu() {
    * @param parentsPath 父级路径
    */
   const handleMenuOpen = (key: string, parentsPath: string[]) => {
-    // 接口分组（非顶级菜单）：展开任意层级分组都尝试跳转概览页，否则仅展开
+    // 接口分组（非顶级菜单）：仅在开启分组概览时跳转概览页，否则仅展开。
+    // 顶级菜单（接口文档/实体模型/文档管理等）展开时只展开、不自动选中任何子项，
+    // 保证「正常菜单展开、只有点击具体项才进入详情」的预期。
     if (parentsPath.length > 1) {
       navigateGroupOverview(key);
-      return;
     }
-    // 顶级菜单展开：自动激活最近一次访问的子级（保持原有行为，受 autoActivateChild 控制）
-    if (!preferences.sidebar.autoActivateChild) {
-      return;
-    }
-    navigation(
-      defaultSubMap.has(key) ? (defaultSubMap.get(key) as string) : key,
-    );
   };
 
   /**
