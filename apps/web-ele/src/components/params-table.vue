@@ -1048,9 +1048,10 @@ watch(
   gap: 12px;
   width: 100%;
   max-width: 560px;
+  min-height: 0;
+
   /* 限制在覆盖层内（已含 padding），卡片高度自适应且不溢出面板 */
   max-height: 100%;
-  min-height: 0;
   padding: 16px;
   background: var(--el-bg-color);
   border: 1px solid var(--el-border-color);
@@ -1066,6 +1067,7 @@ watch(
 
 .param-editor__textarea {
   box-sizing: border-box;
+
   /* flex 撑满受限的卡片高度，超出时内部滚动；禁用手动 resize 以免拖出面板 */
   flex: 1 1 auto;
   width: 100%;
