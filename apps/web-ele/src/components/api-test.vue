@@ -3834,6 +3834,11 @@ onBeforeUnmount(() => {
   background: var(--debug-soft-bg);
 }
 
+/* 作为参数值编辑覆盖层（Teleport 自 params-table）的定位上下文，使其填满请求参数区 */
+.debug-tabs-wrap {
+  position: relative;
+}
+
 .debug-section-title {
   margin-top: 2px;
   margin-bottom: 8px;

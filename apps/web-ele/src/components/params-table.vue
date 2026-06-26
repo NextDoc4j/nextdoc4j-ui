@@ -12,7 +12,7 @@ import { computed, ref, watch } from 'vue';
 import {
   SvgCloseIcon,
   SvgDocumentDocTrashBinIcon,
-  SvgFormatLeftIcon,
+  SvgExpandEditorIcon,
 } from '@vben/icons';
 
 import {
@@ -240,6 +240,10 @@ const valueEditorVisible = ref(false);
 const valueEditorDraft = ref('');
 // 仅持有当前编辑行引用，确认后写回该行 value；不跨行复用，避免错位
 const valueEditorRow = ref<null | ParamItem>(null);
+// 组件根节点引用，用于向上查找「请求参数」内容区作为覆盖层挂载点
+const wrapRef = ref<HTMLElement | null>(null);
+// 覆盖层 Teleport 目标：「请求参数」内容区容器，未找到时为 null（回退到根节点）
+const editorTeleportTarget = ref<HTMLElement | null>(null);
 
 /**
  * 用途：打开参数值编辑覆盖层，并将当前行参数值载入草稿。
@@ -249,6 +253,10 @@ const valueEditorRow = ref<null | ParamItem>(null);
 function openValueEditor(row: ParamItem) {
   valueEditorRow.value = row;
   valueEditorDraft.value = `${row.value ?? ''}`;
+  // 覆盖层挂到「请求参数」内容区（.debug-tabs-wrap），使其填满整个请求参数面板而非
+  // 单个小表格；找不到时 target 为 null，Teleport 被禁用，回退到组件根节点。
+  editorTeleportTarget.value =
+    wrapRef.value?.closest<HTMLElement>('.debug-tabs-wrap') ?? null;
   valueEditorVisible.value = true;
 }
 
@@ -373,7 +381,7 @@ watch(
 </script>
 
 <template>
-  <div class="params-table-wrap">
+  <div ref="wrapRef" class="params-table-wrap">
     <div class="params-table-shell">
       <div class="params-grid-table">
         <div
@@ -539,7 +547,7 @@ watch(
                 title="编辑参数值"
                 @click="openValueEditor(row)"
               >
-                <SvgFormatLeftIcon class="param-edit-icon" />
+                <SvgExpandEditorIcon class="param-edit-icon" />
               </button>
               <button
                 v-if="showInlineDelete"
@@ -643,23 +651,26 @@ watch(
       </div>
     </div>
 
-    <!-- 参数值编辑覆盖层：文档流内绝对定位（非 fixed），提供大文本域便于编辑/粘贴长参数值 -->
-    <div v-if="valueEditorVisible" class="param-editor-overlay">
-      <div class="param-editor">
-        <div class="param-editor__header">编辑参数值</div>
-        <textarea
-          v-model="valueEditorDraft"
-          class="param-editor__textarea"
-          placeholder="在此输入或粘贴完整的参数值"
-        ></textarea>
-        <div class="param-editor__footer">
-          <ElButton size="small" @click="closeValueEditor">取消</ElButton>
-          <ElButton size="small" type="primary" @click="confirmValueEditor">
-            确定
-          </ElButton>
+    <!-- 参数值编辑覆盖层：Teleport 到「请求参数」内容区，覆盖层填满该区域、
+         编辑框不超出面板；目标不存在时回退到组件根节点。 -->
+    <Teleport :to="editorTeleportTarget" :disabled="!editorTeleportTarget">
+      <div v-if="valueEditorVisible" class="param-editor-overlay">
+        <div class="param-editor">
+          <div class="param-editor__header">编辑参数值</div>
+          <textarea
+            v-model="valueEditorDraft"
+            class="param-editor__textarea"
+            placeholder="在此输入或粘贴完整的参数值"
+          ></textarea>
+          <div class="param-editor__footer">
+            <ElButton size="small" @click="closeValueEditor">取消</ElButton>
+            <ElButton size="small" type="primary" @click="confirmValueEditor">
+              确定
+            </ElButton>
+          </div>
         </div>
       </div>
-    </div>
+    </Teleport>
   </div>
 </template>
 
@@ -1017,7 +1028,7 @@ watch(
   height: 12px;
 }
 
-/* 编辑覆盖层：absolute 铺满表格区域（非 fixed），随表格滚动留在文档流内 */
+/* 编辑覆盖层：absolute 铺满「请求参数」内容区（Teleport 目标），永不超出面板 */
 .param-editor-overlay {
   position: absolute;
   inset: 0;
@@ -1031,11 +1042,15 @@ watch(
 }
 
 .param-editor {
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 12px;
   width: 100%;
   max-width: 560px;
+  /* 限制在覆盖层内（已含 padding），卡片高度自适应且不溢出面板 */
+  max-height: 100%;
+  min-height: 0;
   padding: 16px;
   background: var(--el-bg-color);
   border: 1px solid var(--el-border-color);
@@ -1050,14 +1065,18 @@ watch(
 }
 
 .param-editor__textarea {
+  box-sizing: border-box;
+  /* flex 撑满受限的卡片高度，超出时内部滚动；禁用手动 resize 以免拖出面板 */
+  flex: 1 1 auto;
   width: 100%;
   min-height: 180px;
   padding: 10px 12px;
+  overflow: auto;
   font-family: inherit;
   font-size: 13px;
   line-height: 1.6;
   color: var(--el-text-color-primary);
-  resize: vertical;
+  resize: none;
   background: var(--el-fill-color-blank);
   border: 1px solid var(--el-border-color);
   border-radius: calc(var(--radius) * 0.72);
