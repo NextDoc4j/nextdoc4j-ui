@@ -16,6 +16,10 @@ import GlobalParamsConfig from './global-params-config.vue';
 
 defineOptions({ name: 'GlobalConfigPanel' });
 
+const props = defineProps<{
+  paramsTableMaxHeight?: number | string;
+}>();
+
 const apiStore = useApiStore();
 const tokenStore = useTokenStore();
 const aggregationStore = useAggregationStore();
@@ -113,7 +117,7 @@ const hasSecurity = computed(
         v-show="activeMenu === 'params'"
         class="gcp-section gcp-section--params"
       >
-        <GlobalParamsConfig />
+        <GlobalParamsConfig :table-max-height="props.paramsTableMaxHeight" />
       </div>
 
       <!-- 全局认证配置 -->

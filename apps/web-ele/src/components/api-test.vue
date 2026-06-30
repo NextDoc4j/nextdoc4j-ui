@@ -2296,9 +2296,9 @@ onBeforeUnmount(() => {
 <template>
   <div class="debug-console">
     <div class="debug-console__top">
-      <div class="debug-console__request-row">
+      <div class="debug-console__toolbar">
         <div class="debug-back-button-wrap">
-          <ElButton text class="debug-back-button" @click="$emit('cancel')">
+          <ElButton class="debug-back-button" @click="$emit('cancel')">
             <svg
               class="debug-back-button__icon"
               viewBox="0 0 24 24"
@@ -2314,76 +2314,83 @@ onBeforeUnmount(() => {
             <span class="debug-back-button__label">接口详情</span>
           </ElButton>
         </div>
-        <ElInput
-          v-model="requestUrlDisplay"
-          placeholder="请输入正确的URL"
-          class="debug-request-input"
-        >
-          <template #prefix>
-            <span class="method-pill" :style="methodPillStyle">
-              {{ method?.toUpperCase() }}
-            </span>
-            <ElTooltip v-if="baseUrl" placement="top" :content="baseUrl">
-              <ElButton
-                text
-                class="debug-prefix-button"
-                @click="handleCopyBaseUrl"
-              >
-                <SvgApiPrefixIcon class="debug-prefix-button__icon" />
-              </ElButton>
-            </ElTooltip>
-          </template>
-        </ElInput>
-        <div class="debug-console__request-actions">
-          <ElButton
-            type="primary"
-            class="debug-send-button"
-            :loading="loading"
-            @click="sendRequest"
+
+        <div class="debug-console__request-row">
+          <ElInput
+            v-model="requestUrlDisplay"
+            placeholder="请输入正确的URL"
+            class="debug-request-input"
           >
-            发送
-          </ElButton>
-          <div class="debug-console__icon-group">
-            <ElTooltip content="全局配置管理" placement="top">
-              <ElButton
-                text
-                class="debug-icon-button"
-                @click="globalConfigVisible = true"
-              >
-                <SvgGlobalConfigIcon class="size-4" />
-              </ElButton>
-            </ElTooltip>
-            <ElTooltip
-              content="一键复制请求信息、响应内容、错误信息，粘贴到 claude code 等 AI 编程工具，让 AI 排查和修复代码"
-              placement="top"
-              :enterable="false"
+            <template #prefix>
+              <span class="method-pill" :style="methodPillStyle">
+                {{ method?.toUpperCase() }}
+              </span>
+              <ElTooltip v-if="baseUrl" placement="top" :content="baseUrl">
+                <ElButton
+                  text
+                  class="debug-prefix-button"
+                  @click="handleCopyBaseUrl"
+                >
+                  <SvgApiPrefixIcon class="debug-prefix-button__icon" />
+                </ElButton>
+              </ElTooltip>
+            </template>
+          </ElInput>
+          <div class="debug-console__request-actions">
+            <ElButton
+              type="primary"
+              class="debug-send-button"
+              :loading="loading"
+              @click="sendRequest"
             >
-              <ElButton text class="debug-icon-button" @click="handleCopyForAi">
-                <SvgAiCopyIcon class="size-4" />
-              </ElButton>
-            </ElTooltip>
-            <ElTooltip content="恢复默认" placement="top">
-              <ElButton
-                text
-                class="debug-icon-button"
-                @click="handleRestoreDefault"
+              发送
+            </ElButton>
+            <div class="debug-console__icon-group">
+              <ElTooltip content="全局配置管理" placement="top">
+                <ElButton
+                  text
+                  class="debug-icon-button"
+                  @click="globalConfigVisible = true"
+                >
+                  <SvgGlobalConfigIcon class="size-4" />
+                </ElButton>
+              </ElTooltip>
+              <ElTooltip
+                content="一键复制请求信息、响应内容、错误信息，粘贴到 claude code 等 AI 编程工具，让 AI 排查和修复代码"
+                placement="top"
+                :enterable="false"
               >
-                <SvgDocumentResetIcon class="size-4" />
-              </ElButton>
-            </ElTooltip>
-            <ElTooltip :content="layoutTooltipText" placement="top">
-              <ElButton
-                text
-                class="debug-icon-button"
-                :class="{ 'debug-icon-button--active': !isStackedLayout }"
-                @click="togglePaneLayout"
-              >
-                <SvgDocumentLayoutIcon
-                  class="size-4 transition-transform"
-                  :class="{ 'rotate-90': !isStackedLayout }"
-                />
-              </ElButton>
-            </ElTooltip>
+                <ElButton
+                  text
+                  class="debug-icon-button"
+                  @click="handleCopyForAi"
+                >
+                  <SvgAiCopyIcon class="size-4" />
+                </ElButton>
+              </ElTooltip>
+              <ElTooltip content="恢复默认" placement="top">
+                <ElButton
+                  text
+                  class="debug-icon-button"
+                  @click="handleRestoreDefault"
+                >
+                  <SvgDocumentResetIcon class="size-4" />
+                </ElButton>
+              </ElTooltip>
+              <ElTooltip :content="layoutTooltipText" placement="top">
+                <ElButton
+                  text
+                  class="debug-icon-button"
+                  :class="{ 'debug-icon-button--active': !isStackedLayout }"
+                  @click="togglePaneLayout"
+                >
+                  <SvgDocumentLayoutIcon
+                    class="size-4 transition-transform"
+                    :class="{ 'rotate-90': !isStackedLayout }"
+                  />
+                </ElButton>
+              </ElTooltip>
+            </div>
           </div>
         </div>
       </div>
@@ -2990,9 +2997,12 @@ onBeforeUnmount(() => {
       align-center
       append-to-body
       class="global-config-dialog"
+      modal-class="global-config-dialog-overlay"
       width="min(1180px, calc(100vw - 80px))"
     >
-      <GlobalConfigPanel />
+      <GlobalConfigPanel
+        params-table-max-height="min(384px, calc(100vh - 360px))"
+      />
     </ElDialog>
   </div>
 </template>
@@ -3022,7 +3032,8 @@ onBeforeUnmount(() => {
   }
 
   .debug-back-button {
-    padding: 0 8px;
+    width: 52px;
+    padding: 0;
   }
 
   .debug-send-button {
@@ -3031,7 +3042,11 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 720px) {
-  /* 窄屏：返回 + URL 一行，发送按钮和图标组整体换到第二行，最多两行，图标组保持在一行不再拆散 */
+  /* 窄屏：返回按钮独立占位，请求条内部按空间换行，图标组保持在一行不再拆散 */
+  .debug-console__toolbar {
+    align-items: flex-start;
+  }
+
   .debug-console__request-row {
     flex-wrap: wrap;
   }
@@ -3067,7 +3082,7 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 768px) {
-  :deep(.global-config-dialog) {
+  :global(.global-config-dialog) {
     width: calc(100vw - 32px) !important;
     height: calc(100vh - 48px);
     max-height: calc(100vh - 48px);
@@ -3332,12 +3347,22 @@ onBeforeUnmount(() => {
   box-shadow: none;
 }
 
-.debug-console__request-row {
+.debug-console__toolbar {
   display: flex;
   gap: 10px;
   align-items: center;
-  padding: 7px 10px;
+  min-width: 0;
   margin: 0 2px;
+}
+
+.debug-console__request-row {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 7px 10px;
+  margin: 0;
   background: var(--debug-request-shell-bg);
   border-radius: var(--debug-radius-md);
   box-shadow: var(--debug-request-shell-shadow);
@@ -3349,23 +3374,6 @@ onBeforeUnmount(() => {
   flex: none;
   align-items: center;
   justify-content: center;
-  min-height: 38px;
-  padding: 3px;
-  background: var(--debug-surface);
-  border: 1px solid var(--debug-border);
-  border-radius: var(--debug-radius-sm);
-  box-shadow: 0 3px 9px
-    color-mix(in srgb, var(--el-text-color-primary) 4%, transparent);
-  transition:
-    border-color 0.16s ease,
-    box-shadow 0.16s ease;
-}
-
-.debug-back-button-wrap:hover,
-.debug-back-button-wrap:focus-within {
-  border-color: color-mix(in srgb, var(--el-color-primary) 34%, transparent);
-  box-shadow: 0 5px 14px
-    color-mix(in srgb, var(--el-color-primary) 9%, transparent);
 }
 
 .debug-console__request-row:hover,
@@ -3829,28 +3837,44 @@ onBeforeUnmount(() => {
 }
 
 .debug-back-button {
-  --el-button-bg-color: transparent;
-  --el-button-border-color: transparent;
-  --el-button-hover-bg-color: transparent;
-  --el-button-hover-border-color: transparent;
-  --el-button-active-bg-color: transparent;
-  --el-button-active-border-color: transparent;
+  --el-button-bg-color: var(--debug-surface);
+  --el-button-border-color: var(--debug-border);
+  --el-button-hover-bg-color: color-mix(
+    in srgb,
+    var(--el-color-primary-light-9) 62%,
+    transparent
+  );
+  --el-button-hover-border-color: color-mix(
+    in srgb,
+    var(--el-color-primary) 34%,
+    transparent
+  );
+  --el-button-active-bg-color: var(--el-color-primary-light-9);
+  --el-button-active-border-color: color-mix(
+    in srgb,
+    var(--el-color-primary) 40%,
+    transparent
+  );
   --el-button-text-color: var(--el-text-color-regular);
   --el-button-hover-text-color: var(--el-color-primary);
 
   display: inline-flex;
   flex: none;
-  gap: 4px;
+  gap: 7px;
   align-items: center;
-  height: 32px;
-  padding: 0 12px;
-  font-size: 13px;
-  font-weight: 600;
+  height: 52px;
+  padding: 0 16px;
+  font-size: 14.5px;
+  font-weight: 700;
   color: var(--el-text-color-regular);
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--debug-chip-radius);
+  background: var(--debug-surface);
+  border: 1px solid var(--debug-border);
+  border-radius: var(--debug-radius-md);
+  box-shadow: 0 3px 9px
+    color-mix(in srgb, var(--el-text-color-primary) 5%, transparent);
   transition:
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
     color 0.16s ease,
     background-color 0.16s ease;
 }
@@ -3862,11 +3886,14 @@ onBeforeUnmount(() => {
     var(--el-color-primary-light-9) 62%,
     transparent
   );
+  border-color: color-mix(in srgb, var(--el-color-primary) 34%, transparent);
+  box-shadow: 0 5px 14px
+    color-mix(in srgb, var(--el-color-primary) 9%, transparent);
 }
 
 .debug-back-button__icon {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
 }
 
 .debug-tabs-wrap,
@@ -4151,17 +4178,34 @@ onBeforeUnmount(() => {
   --debug-shadow: 0 8px 20px color-mix(in srgb, #000 45%, transparent);
 }
 
-/* 全局配置弹窗样式：弹窗固定高度（约 8 行参数 + 留白），整体不滚动，仅内部参数/认证区域滚动 */
-:deep(.global-config-dialog) {
+/* 全局配置弹窗样式：弹窗固定高度，整体不滚动；参数表格约 8 行后在右侧卡片内滚动 */
+:global(.global-config-dialog-overlay) {
+  overflow: hidden;
+}
+
+:global(.global-config-dialog-overlay .el-overlay-dialog) {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  overflow: hidden;
+}
+
+:global(.global-config-dialog) {
   display: flex;
   flex-direction: column;
   height: 760px;
   max-height: calc(100vh - 80px);
-  margin: 0;
+  margin: 0 !important;
   overflow: hidden;
 }
 
-:deep(.global-config-dialog .el-dialog__body) {
+:global(.global-config-dialog .el-dialog__header) {
+  flex: none;
+}
+
+:global(.global-config-dialog .el-dialog__body) {
   flex: 1;
   min-height: 0;
 
@@ -4170,27 +4214,33 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
-:deep(.global-config-dialog .global-config-panel) {
+:global(.global-config-dialog .global-config-panel) {
   grid-template-columns: 180px minmax(0, 1fr);
   height: 100%;
+  min-height: 0;
 }
 
-:deep(.global-config-dialog .gcp-section--params) {
+:global(.global-config-dialog .gcp-content) {
+  min-height: 0;
   overflow: hidden;
 }
 
-:deep(.global-config-dialog .gcp-section--params .config-card) {
+:global(.global-config-dialog .gcp-section--params) {
+  overflow: hidden !important;
+}
+
+:global(.global-config-dialog .gcp-section--params .config-card) {
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
 }
 
-:deep(.global-config-dialog .gcp-section--params .el-card__header) {
+:global(.global-config-dialog .gcp-section--params .el-card__header) {
   flex: none;
 }
 
-:deep(.global-config-dialog .gcp-section--params .el-card__body) {
+:global(.global-config-dialog .gcp-section--params .el-card__body) {
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -4199,47 +4249,30 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
-:deep(.global-config-dialog .gcp-section--params .el-alert),
-:deep(.global-config-dialog .gcp-section--params .el-form) {
+:global(.global-config-dialog .gcp-section--params .el-alert),
+:global(.global-config-dialog .gcp-section--params .el-form) {
   flex: none;
 }
 
-:deep(.global-config-dialog .gcp-section--params .el-tabs) {
-  display: flex;
+:global(.global-config-dialog .gcp-section--params .el-tabs) {
   flex: 1;
-  flex-direction: column;
   min-height: 0;
 }
 
-:deep(.global-config-dialog .gcp-section--params .el-tabs__header) {
-  flex: none;
-}
-
-:deep(.global-config-dialog .gcp-section--params .el-tabs__content) {
-  flex: 1;
+:global(.global-config-dialog .gcp-section--params .el-tab-pane) {
   min-height: 0;
   overflow: hidden;
 }
 
-:deep(.global-config-dialog .gcp-section--params .el-tab-pane) {
-  height: 100%;
-  min-height: 0;
-  overflow: hidden;
+:global(.global-config-dialog .gcp-section--params .el-table) {
+  width: 100%;
 }
 
-:deep(.global-config-dialog .gcp-section--params .el-table) {
-  height: 100%;
-}
-
-:deep(.global-config-dialog .gcp-section--params .el-table__inner-wrapper) {
+:global(.global-config-dialog .gcp-section--params .el-table__inner-wrapper) {
   min-width: 0;
 }
 
-:deep(.global-config-dialog .gcp-section--params .el-table__body-wrapper) {
-  overflow-y: auto;
-}
-
-:deep(.global-config-dialog .gcp-section--params .el-table__cell .cell) {
+:global(.global-config-dialog .gcp-section--params .el-table__cell .cell) {
   white-space: nowrap;
 }
 </style>

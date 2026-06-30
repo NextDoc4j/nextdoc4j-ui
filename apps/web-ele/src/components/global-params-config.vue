@@ -27,6 +27,10 @@ import { useAggregationStore } from '#/store/aggregation';
 
 defineOptions({ name: 'GlobalParamsConfig' });
 
+const props = defineProps<{
+  tableMaxHeight?: number | string;
+}>();
+
 const docManageStore = useDocManageStore();
 const aggregationStore = useAggregationStore();
 
@@ -321,7 +325,11 @@ const applyCurrentServiceTemplate = () => {
 
     <ElTabs>
       <ElTabPane label="全局请求头参数">
-        <ElTable :data="[...headerParams, headerDraft]" border>
+        <ElTable
+          :data="[...headerParams, headerDraft]"
+          :max-height="props.tableMaxHeight"
+          border
+        >
           <ElTableColumn label="启用" width="80" align="center">
             <template #default="{ row, $index }">
               <ElSwitch
@@ -413,7 +421,11 @@ const applyCurrentServiceTemplate = () => {
       </ElTabPane>
 
       <ElTabPane label="全局 Query 参数">
-        <ElTable :data="[...queryParams, queryDraft]" border>
+        <ElTable
+          :data="[...queryParams, queryDraft]"
+          :max-height="props.tableMaxHeight"
+          border
+        >
           <ElTableColumn label="启用" width="80" align="center">
             <template #default="{ row, $index }">
               <ElSwitch
