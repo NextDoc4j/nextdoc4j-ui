@@ -11,7 +11,6 @@ import type { DetectedBase64Image } from '#/utils/base64-image';
 
 import {
   computed,
-  defineAsyncComponent,
   nextTick,
   onBeforeUnmount,
   onMounted,
@@ -71,6 +70,7 @@ import { copyText } from '#/utils/clipboard';
 import { adaptSchemaForView, hasRenderableSchema } from '#/utils/schema';
 
 import bodyParams from './body-params.vue';
+import GlobalConfigPanel from './global-config-panel.vue';
 import paramsTable from './params-table.vue';
 
 const props = defineProps<{
@@ -85,11 +85,6 @@ const props = defineProps<{
 }>();
 
 defineEmits(['cancel']);
-
-// 全局配置弹窗内容按需加载，避免影响调试面板首屏
-const GlobalConfigPanel = defineAsyncComponent(
-  () => import('./global-config-panel.vue'),
-);
 
 interface TableParamsObject {
   __rowKey?: string;
@@ -2302,21 +2297,23 @@ onBeforeUnmount(() => {
   <div class="debug-console">
     <div class="debug-console__top">
       <div class="debug-console__request-row">
-        <ElButton class="debug-back-button" @click="$emit('cancel')">
-          <svg
-            class="debug-back-button__icon"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
-          >
-            <path d="m15 18-6-6 6-6" />
-          </svg>
-          <span class="debug-back-button__label">接口详情</span>
-        </ElButton>
+        <div class="debug-back-button-wrap">
+          <ElButton text class="debug-back-button" @click="$emit('cancel')">
+            <svg
+              class="debug-back-button__icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="m15 18-6-6 6-6" />
+            </svg>
+            <span class="debug-back-button__label">接口详情</span>
+          </ElButton>
+        </div>
         <ElInput
           v-model="requestUrlDisplay"
           placeholder="请输入正确的URL"
@@ -2992,11 +2989,10 @@ onBeforeUnmount(() => {
       title="全局配置管理"
       align-center
       append-to-body
-      destroy-on-close
       class="global-config-dialog"
-      width="min(960px, calc(100vw - 120px))"
+      width="min(1180px, calc(100vw - 80px))"
     >
-      <GlobalConfigPanel v-if="globalConfigVisible" />
+      <GlobalConfigPanel />
     </ElDialog>
   </div>
 </template>
@@ -3026,7 +3022,7 @@ onBeforeUnmount(() => {
   }
 
   .debug-back-button {
-    padding: 0 10px;
+    padding: 0 8px;
   }
 
   .debug-send-button {
@@ -3338,6 +3334,30 @@ onBeforeUnmount(() => {
   border-radius: var(--debug-radius-md);
   box-shadow: var(--debug-request-shell-shadow);
   transition: box-shadow 0.16s ease;
+}
+
+.debug-back-button-wrap {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 3px;
+  background: var(--debug-surface);
+  border: 1px solid var(--debug-border);
+  border-radius: var(--debug-radius-sm);
+  box-shadow: 0 3px 9px
+    color-mix(in srgb, var(--el-text-color-primary) 4%, transparent);
+  transition:
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.debug-back-button-wrap:hover,
+.debug-back-button-wrap:focus-within {
+  border-color: color-mix(in srgb, var(--el-color-primary) 34%, transparent);
+  box-shadow: 0 5px 14px
+    color-mix(in srgb, var(--el-color-primary) 9%, transparent);
 }
 
 .debug-console__request-row:hover,
@@ -3801,6 +3821,15 @@ onBeforeUnmount(() => {
 }
 
 .debug-back-button {
+  --el-button-bg-color: transparent;
+  --el-button-border-color: transparent;
+  --el-button-hover-bg-color: transparent;
+  --el-button-hover-border-color: transparent;
+  --el-button-active-bg-color: transparent;
+  --el-button-active-border-color: transparent;
+  --el-button-text-color: var(--el-text-color-regular);
+  --el-button-hover-text-color: var(--el-color-primary);
+
   display: inline-flex;
   flex: none;
   gap: 4px;
@@ -3810,18 +3839,21 @@ onBeforeUnmount(() => {
   font-size: 13px;
   font-weight: 600;
   color: var(--el-text-color-regular);
-  background: var(--debug-soft-bg-strong);
-  border: 1px solid var(--debug-border);
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: var(--debug-chip-radius);
   transition:
     color 0.16s ease,
-    border-color 0.16s ease;
+    background-color 0.16s ease;
 }
 
 .debug-back-button:hover {
   color: var(--el-color-primary);
-  background: var(--debug-soft-bg-strong);
-  border-color: color-mix(in srgb, var(--el-color-primary) 40%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--el-color-primary-light-9) 62%,
+    transparent
+  );
 }
 
 .debug-back-button__icon {
@@ -4111,11 +4143,11 @@ onBeforeUnmount(() => {
   --debug-shadow: 0 8px 20px color-mix(in srgb, #000 45%, transparent);
 }
 
-/* 全局配置弹窗样式：弹窗固定高度（约 10 行参数 + 留白），整体不滚动，仅内部参数/认证区域滚动 */
+/* 全局配置弹窗样式：弹窗固定高度（约 8 行参数 + 留白），整体不滚动，仅内部参数/认证区域滚动 */
 :deep(.global-config-dialog) {
   display: flex;
   flex-direction: column;
-  height: 720px;
+  height: 760px;
   max-height: calc(100vh - 80px);
   margin: 0;
   overflow: hidden;
@@ -4125,8 +4157,89 @@ onBeforeUnmount(() => {
   flex: 1;
   min-height: 0;
 
-  /* body 不滚动，滚动交给内部 .gcp-section（仅参数列表区滚动） */
+  /* body 不滚动，滚动交给内部参数表格和认证列表 */
   padding: 16px 20px 20px;
   overflow: hidden;
+}
+
+:deep(.global-config-dialog .global-config-panel) {
+  grid-template-columns: 180px minmax(0, 1fr);
+  height: 100%;
+}
+
+:deep(.global-config-dialog .gcp-section--params) {
+  overflow: hidden;
+}
+
+:deep(.global-config-dialog .gcp-section--params .config-card) {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+:deep(.global-config-dialog .gcp-section--params .el-card__header) {
+  flex: none;
+}
+
+:deep(.global-config-dialog .gcp-section--params .el-card__body) {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: 18px 20px 20px;
+  overflow: hidden;
+}
+
+:deep(.global-config-dialog .gcp-section--params .el-alert),
+:deep(.global-config-dialog .gcp-section--params .el-form) {
+  flex: none;
+}
+
+:deep(.global-config-dialog .gcp-section--params .el-tabs) {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+:deep(.global-config-dialog .gcp-section--params .el-tabs__header) {
+  flex: none;
+}
+
+:deep(.global-config-dialog .gcp-section--params .el-tabs__content) {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+:deep(.global-config-dialog .gcp-section--params .el-tab-pane) {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+:deep(.global-config-dialog .gcp-section--params .el-table) {
+  height: 100%;
+}
+
+:deep(.global-config-dialog .gcp-section--params .el-table__inner-wrapper) {
+  min-width: 0;
+}
+
+:deep(.global-config-dialog .gcp-section--params .el-table__body-wrapper) {
+  overflow-y: auto;
+}
+
+:deep(.global-config-dialog .gcp-section--params .el-table__cell .cell) {
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  :deep(.global-config-dialog) {
+    width: calc(100vw - 32px) !important;
+    height: calc(100vh - 48px);
+    max-height: calc(100vh - 48px);
+  }
 }
 </style>
