@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { GlobalParamItem } from '#/store';
 
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 
 import {
   ElAlert,
@@ -34,8 +34,11 @@ const { currentService, isAggregation, services } =
   storeToRefs(aggregationStore);
 
 const activeScope = ref(docManageStore.ALL_SCOPE_KEY);
+const configCardRef = ref<unknown>(null);
 const queryParams = ref<GlobalParamItem[]>([]);
 const headerParams = ref<GlobalParamItem[]>([]);
+type GlobalParamField = 'description' | 'name' | 'value';
+type GlobalParamKind = 'header' | 'query';
 const commonHeaderNameOptions = [
   'Accept',
   'Accept-Charset',
@@ -143,33 +146,124 @@ const resetScope = () => {
 const queryDraft = ref<GlobalParamItem>(createParamRow());
 const headerDraft = ref<GlobalParamItem>(createParamRow());
 
-/** 将草稿行提交为正式行，并重置草稿行以便继续录入 */
-function commitDraft(
-  draft: GlobalParamItem,
-  list: GlobalParamItem[],
-): GlobalParamItem {
-  if (draft.name?.trim() || `${draft.value ?? ''}`.trim()) {
-    list.push({ ...draft });
-    return createParamRow();
-  }
-  return draft;
+/**
+ * 用途：获取指定类型参数的草稿行引用。
+ * 参数说明：kind 表示参数类型，header 为请求头，query 为查询参数。
+ * 返回值说明：返回对应参数类型的草稿行 ref。
+ */
+function getDraftRef(kind: GlobalParamKind) {
+  return kind === 'header' ? headerDraft : queryDraft;
 }
 
-watch(
-  queryDraft,
-  (draft) => {
-    queryDraft.value = commitDraft(draft, queryParams.value);
-  },
-  { deep: true },
-);
+/**
+ * 用途：获取指定类型参数的正式行列表引用。
+ * 参数说明：kind 表示参数类型，header 为请求头，query 为查询参数。
+ * 返回值说明：返回对应参数类型的正式行列表 ref。
+ */
+function getParamListRef(kind: GlobalParamKind) {
+  return kind === 'header' ? headerParams : queryParams;
+}
 
-watch(
-  headerDraft,
-  (draft) => {
-    headerDraft.value = commitDraft(draft, headerParams.value);
-  },
-  { deep: true },
-);
+/**
+ * 用途：判断指定索引是否为当前表格的末尾草稿行。
+ * 参数说明：kind 表示参数类型，index 为表格当前行索引。
+ * 返回值说明：当前索引等于正式行数量时返回 true。
+ */
+function isDraftRow(kind: GlobalParamKind, index: number) {
+  return index === getParamListRef(kind).value.length;
+}
+
+/**
+ * 用途：判断草稿行是否已经填写了可提交内容。
+ * 参数说明：draft 为当前末尾草稿行数据。
+ * 返回值说明：存在参数名或参数值时返回 true。
+ */
+function hasDraftContent(draft: GlobalParamItem) {
+  return Boolean(draft.name?.trim() || `${draft.value ?? ''}`.trim());
+}
+
+/**
+ * 用途：获取当前组件根 DOM，用于在表格重绘后恢复输入焦点。
+ * 参数说明：无参数。
+ * 返回值说明：返回 ElCard 根元素，未挂载时返回 null。
+ */
+function getConfigRootElement() {
+  const target = configCardRef.value;
+  if (target instanceof HTMLElement) {
+    return target;
+  }
+  return (target as null | { $el?: HTMLElement })?.$el ?? null;
+}
+
+/**
+ * 用途：将焦点恢复到刚由草稿行提交出来的正式参数行字段。
+ * 参数说明：rowId 为正式行唯一标识，field 为需要恢复焦点的字段。
+ * 返回值说明：无返回值，仅在 DOM 更新后恢复输入焦点和光标位置。
+ */
+function focusCommittedParamField(rowId: string, field: GlobalParamField) {
+  void nextTick(() => {
+    const input = getConfigRootElement()?.querySelector<HTMLInputElement>(
+      `[data-global-param-row-id="${rowId}"][data-global-param-field="${field}"] input`,
+    );
+    if (!input) {
+      return;
+    }
+    input.focus();
+    const cursorPosition = input.value.length;
+    input.setSelectionRange(cursorPosition, cursorPosition);
+  });
+}
+
+/**
+ * 用途：将指定类型的草稿行提交为正式行，并重置草稿行。
+ * 参数说明：kind 表示参数类型，field 为触发提交的字段。
+ * 返回值说明：无返回值，会向对应列表追加一行并恢复当前输入焦点。
+ */
+function commitDraft(kind: GlobalParamKind, field: GlobalParamField) {
+  const draftRef = getDraftRef(kind);
+  const listRef = getParamListRef(kind);
+  const row = { ...draftRef.value };
+  listRef.value.push(row);
+  draftRef.value = createParamRow();
+  focusCommittedParamField(row.id, field);
+}
+
+/**
+ * 用途：处理草稿行字段输入，首次填写后自动提交成正式行。
+ * 参数说明：kind 表示参数类型，field 为正在输入的字段，value 为输入后的字段值。
+ * 返回值说明：无返回值，会在草稿行有内容时自动新增下一空行。
+ */
+function handleDraftInput(
+  kind: GlobalParamKind,
+  field: GlobalParamField,
+  value: string,
+) {
+  const draftRef = getDraftRef(kind);
+  draftRef.value[field] = value;
+  if (hasDraftContent(draftRef.value)) {
+    commitDraft(kind, field);
+  }
+}
+
+/**
+ * 用途：处理表格字段输入，区分正式行直接更新与草稿行自动提交。
+ * 参数说明：kind 表示参数类型，row 为当前行，index 为行索引，field 为字段名，value 为输入值。
+ * 返回值说明：无返回值，会更新正式行或提交草稿行。
+ */
+function handleParamFieldInput(
+  kind: GlobalParamKind,
+  row: GlobalParamItem,
+  index: number,
+  field: GlobalParamField,
+  value: string,
+) {
+  const nextValue = kind === 'query' && field === 'name' ? value.trim() : value;
+  if (isDraftRow(kind, index)) {
+    handleDraftInput(kind, field, nextValue);
+    return;
+  }
+  row[field] = nextValue;
+}
 
 const removeQueryParam = (id: string) => {
   queryParams.value = queryParams.value.filter((item) => item.id !== id);
@@ -190,7 +284,7 @@ const applyCurrentServiceTemplate = () => {
 </script>
 
 <template>
-  <ElCard shadow="never" class="config-card">
+  <ElCard ref="configCardRef" shadow="never" class="config-card">
     <template #header>
       <div class="flex items-center justify-between">
         <span class="font-medium">全局参数配置</span>
@@ -239,7 +333,7 @@ const applyCurrentServiceTemplate = () => {
           <ElTableColumn label="请求头" min-width="180">
             <template #default="{ row, $index }">
               <ElSelect
-                v-model="row.name"
+                :model-value="row.name"
                 filterable
                 allow-create
                 default-first-option
@@ -248,6 +342,12 @@ const applyCurrentServiceTemplate = () => {
                   $index === headerParams.length
                     ? '添加请求头'
                     : '例如 Authorization'
+                "
+                :data-global-param-row-id="row.id"
+                data-global-param-field="name"
+                @update:model-value="
+                  (value) =>
+                    handleParamFieldInput('header', row, $index, 'name', value)
                 "
               >
                 <ElOption
@@ -262,18 +362,39 @@ const applyCurrentServiceTemplate = () => {
           <ElTableColumn label="值" min-width="260">
             <template #default="{ row, $index }">
               <ElInput
-                v-model="row.value"
+                :model-value="row.value"
                 :placeholder="
                   $index === headerParams.length
                     ? '添加 Header 值'
                     : 'Header 值'
                 "
+                :data-global-param-row-id="row.id"
+                data-global-param-field="value"
+                @update:model-value="
+                  (value) =>
+                    handleParamFieldInput('header', row, $index, 'value', value)
+                "
               />
             </template>
           </ElTableColumn>
           <ElTableColumn label="说明" min-width="220">
-            <template #default="{ row }">
-              <ElInput v-model="row.description" placeholder="可选说明" />
+            <template #default="{ row, $index }">
+              <ElInput
+                :model-value="row.description"
+                placeholder="可选说明"
+                :data-global-param-row-id="row.id"
+                data-global-param-field="description"
+                @update:model-value="
+                  (value) =>
+                    handleParamFieldInput(
+                      'header',
+                      row,
+                      $index,
+                      'description',
+                      value,
+                    )
+                "
+              />
             </template>
           </ElTableColumn>
           <ElTableColumn label="操作" width="100" fixed="right">
@@ -304,9 +425,15 @@ const applyCurrentServiceTemplate = () => {
           <ElTableColumn label="参数名" min-width="180">
             <template #default="{ row, $index }">
               <ElInput
-                v-model.trim="row.name"
+                :model-value="row.name"
                 :placeholder="
                   $index === queryParams.length ? '添加参数名' : '例如 tenantId'
+                "
+                :data-global-param-row-id="row.id"
+                data-global-param-field="name"
+                @update:model-value="
+                  (value) =>
+                    handleParamFieldInput('query', row, $index, 'name', value)
                 "
               />
             </template>
@@ -314,16 +441,37 @@ const applyCurrentServiceTemplate = () => {
           <ElTableColumn label="参数值" min-width="200">
             <template #default="{ row, $index }">
               <ElInput
-                v-model="row.value"
+                :model-value="row.value"
                 :placeholder="
                   $index === queryParams.length ? '添加参数值' : '参数值'
+                "
+                :data-global-param-row-id="row.id"
+                data-global-param-field="value"
+                @update:model-value="
+                  (value) =>
+                    handleParamFieldInput('query', row, $index, 'value', value)
                 "
               />
             </template>
           </ElTableColumn>
           <ElTableColumn label="说明" min-width="220">
-            <template #default="{ row }">
-              <ElInput v-model="row.description" placeholder="可选说明" />
+            <template #default="{ row, $index }">
+              <ElInput
+                :model-value="row.description"
+                placeholder="可选说明"
+                :data-global-param-row-id="row.id"
+                data-global-param-field="description"
+                @update:model-value="
+                  (value) =>
+                    handleParamFieldInput(
+                      'query',
+                      row,
+                      $index,
+                      'description',
+                      value,
+                    )
+                "
+              />
             </template>
           </ElTableColumn>
           <ElTableColumn label="操作" width="100" fixed="right">

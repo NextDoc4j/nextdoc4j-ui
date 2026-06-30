@@ -7,7 +7,7 @@ import type {
   UploadRawFile,
 } from 'element-plus';
 
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 
 import {
   SvgCloseIcon,
@@ -53,6 +53,8 @@ interface ParamItem {
     };
   };
 }
+
+type DraftInputField = 'description' | 'name' | 'value';
 
 const props = withDefaults(
   defineProps<{
@@ -285,38 +287,170 @@ function confirmValueEditor() {
 
 // 末尾草稿行：替代「添加参数」按钮，用户在末尾空白行任意填写即自动新增正式行。
 // 草稿行独立于 tableData，避免空行干扰参数数量统计与缓存持久化。
-const draftRow = ref<ParamItem>({
+/**
+ * 用途：创建末尾草稿行数据。
+ * 参数说明：无参数。
+ * 返回值说明：返回带唯一行标识的空参数行。
+ */
+const createDraftRow = (): ParamItem => ({
+  __rowKey: createParamRowKey(),
   name: '',
   value: '',
   enabled: true,
   fileList: [],
 });
 
-/** 将草稿行提交为正式行，并重置草稿行以便继续录入 */
-function commitDraftRow() {
-  // eslint-disable-next-line vue/no-mutating-props
-  props.tableData.push({
-    ...draftRow.value,
-    __rowKey: createParamRowKey(),
-  });
-  draftRow.value = {
-    name: '',
-    value: '',
-    enabled: true,
-    fileList: [],
-  };
+const draftRow = ref<ParamItem>(createDraftRow());
+let focusRetryTimers: number[] = [];
+
+const displayRows = computed(() => {
+  return props.showAddButton
+    ? [...props.tableData, draftRow.value]
+    : props.tableData;
+});
+
+/**
+ * 用途：判断草稿行是否已经填写了可提交内容。
+ * 参数说明：row 为当前末尾草稿行数据。
+ * 返回值说明：存在参数名或参数值时返回 true。
+ */
+function hasDraftRowContent(row: ParamItem) {
+  return Boolean(row.name?.trim() || `${row.value ?? ''}`.trim());
 }
 
-/** 草稿行被填写（参数名或参数值非空）时自动提交为正式行 */
-watch(
-  draftRow,
-  (row) => {
-    if (row.name?.trim() || `${row.value ?? ''}`.trim()) {
-      commitDraftRow();
+/**
+ * 用途：判断当前行是否为末尾草稿行。
+ * 参数说明：row 为当前渲染行数据。
+ * 返回值说明：当前行是草稿行对象时返回 true。
+ */
+function isDraftRow(row: ParamItem) {
+  return props.showAddButton && row === draftRow.value;
+}
+
+/**
+ * 用途：清理提交草稿行后的焦点重试计时器。
+ * 参数说明：无参数。
+ * 返回值说明：无返回值，仅取消尚未执行的焦点重试。
+ */
+function clearFocusRetryTimers() {
+  focusRetryTimers.forEach((timer) => {
+    window.clearTimeout(timer);
+  });
+  focusRetryTimers = [];
+}
+
+/**
+ * 用途：查找刚由草稿行提交出来的正式参数行输入框。
+ * 参数说明：rowKey 为正式行唯一标识，field 为需要定位的字段。
+ * 返回值说明：找到时返回对应原生 input 元素，否则返回 null。
+ */
+function findCommittedDraftInput(rowKey: string, field: DraftInputField) {
+  return (
+    wrapRef.value?.querySelector<HTMLInputElement>(
+      `[data-param-row-key="${rowKey}"][data-param-field="${field}"] input`,
+    ) ?? null
+  );
+}
+
+/**
+ * 用途：将焦点恢复到刚由草稿行提交出来的正式参数行字段。
+ * 参数说明：rowKey 为正式行唯一标识，field 为需要恢复焦点的字段。
+ * 返回值说明：无返回值，仅在 DOM 更新后恢复输入焦点和光标位置。
+ */
+function focusCommittedDraftField(rowKey: string, field: DraftInputField) {
+  clearFocusRetryTimers();
+  const focusInput = () => {
+    const input = findCommittedDraftInput(rowKey, field);
+    if (!input) {
+      return false;
     }
-  },
-  { deep: true },
-);
+    input.focus();
+    const cursorPosition = input.value.length;
+    input.setSelectionRange(cursorPosition, cursorPosition);
+    clearFocusRetryTimers();
+    return true;
+  };
+
+  void nextTick(() => {
+    if (focusInput()) {
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      if (focusInput()) {
+        return;
+      }
+      [30, 80, 160].forEach((delay) => {
+        const timer = window.setTimeout(() => {
+          focusInput();
+        }, delay);
+        focusRetryTimers.push(timer);
+      });
+    });
+  });
+}
+
+/**
+ * 用途：更新正式参数行字段。
+ * 参数说明：row 为当前正式行，field 为字段名，value 为输入后的字段值。
+ * 返回值说明：无返回值，仅更新当前字段。
+ */
+function handleCommittedInput(
+  row: ParamItem,
+  field: DraftInputField,
+  value: string,
+) {
+  row[field] = value;
+}
+
+/**
+ * 用途：将草稿行提交为正式行，并重置草稿行以便继续录入。
+ * 参数说明：field 为触发提交的字段，用于提交后恢复焦点。
+ * 返回值说明：无返回值，会向参数列表追加一行并重置草稿行。
+ */
+function commitDraftRow(field: DraftInputField) {
+  const rowKey = draftRow.value.__rowKey || createParamRowKey();
+  const row = {
+    ...draftRow.value,
+    __rowKey: rowKey,
+  };
+  // eslint-disable-next-line vue/no-mutating-props
+  props.tableData.push(row);
+  draftRow.value = createDraftRow();
+  focusCommittedDraftField(rowKey, field);
+}
+
+/**
+ * 用途：处理草稿行字段输入，首次填写后自动提交成正式行。
+ * 参数说明：field 为正在输入的字段，value 为输入后的字段值。
+ * 返回值说明：无返回值，会在草稿行有内容时自动新增下一空行。
+ */
+function handleDraftInput(field: DraftInputField, value: string) {
+  draftRow.value[field] = value;
+  if (hasDraftRowContent(draftRow.value)) {
+    commitDraftRow(field);
+  }
+}
+
+/**
+ * 用途：处理参数表字段输入，草稿行负责自动提交，正式行直接更新字段。
+ * 参数说明：row 为当前行数据，index 为行索引，field 为字段名，value 为输入后的字段值。
+ * 返回值说明：无返回值，会根据行类型更新草稿行或正式参数行。
+ */
+function handleParamFieldInput(
+  row: ParamItem,
+  field: DraftInputField,
+  value: string,
+) {
+  if (isDraftRow(row)) {
+    handleDraftInput(field, value);
+    return;
+  }
+  handleCommittedInput(row, field, value);
+}
+
+onBeforeUnmount(() => {
+  clearFocusRetryTimers();
+});
 
 function handleUpload(
   _uploadFile: UploadFile,
@@ -415,20 +549,29 @@ watch(
         </div>
 
         <div
-          v-for="(row, index) in tableData"
+          v-for="(row, index) in displayRows"
           :key="getRowKey(row, index)"
           class="params-grid-table__row"
+          :class="{ 'params-grid-table__row--draft': isDraftRow(row) }"
           :style="rowStyle"
         >
           <div
             v-if="showSelectionColumn"
             class="params-grid-table__cell params-grid-table__cell--selection params-grid-table__cell--body"
           >
-            <ElCheckbox v-model="row.enabled" />
+            <ElCheckbox v-model="row.enabled" :disabled="isDraftRow(row)" />
           </div>
 
           <div class="params-grid-table__cell params-grid-table__cell--body">
-            <ElInput v-model="row.name" placeholder="参数名" />
+            <ElInput
+              :model-value="row.name"
+              :placeholder="isDraftRow(row) ? '添加参数名' : '参数名'"
+              :data-param-row-key="row.__rowKey"
+              data-param-field="name"
+              @update:model-value="
+                (value) => handleParamFieldInput(row, 'name', value)
+              "
+            />
           </div>
 
           <div class="params-grid-table__cell params-grid-table__cell--body">
@@ -540,8 +683,19 @@ watch(
             </div>
 
             <div v-else class="params-grid-table__control">
-              <ElInput v-model="row.value" :placeholder="getPlaceholder(row)" />
+              <ElInput
+                :model-value="row.value"
+                :placeholder="
+                  isDraftRow(row) ? '添加参数值' : getPlaceholder(row)
+                "
+                :data-param-row-key="row.__rowKey"
+                data-param-field="value"
+                @update:model-value="
+                  (value) => handleParamFieldInput(row, 'value', value)
+                "
+              />
               <button
+                v-if="!isDraftRow(row)"
                 type="button"
                 class="param-edit-button"
                 title="编辑参数值"
@@ -550,7 +704,7 @@ watch(
                 <SvgExpandEditorIcon class="param-edit-icon" />
               </button>
               <button
-                v-if="showInlineDelete"
+                v-if="showInlineDelete && !isDraftRow(row)"
                 type="button"
                 class="param-inline-delete"
                 @click="remove(index)"
@@ -565,6 +719,7 @@ watch(
             class="params-grid-table__cell params-grid-table__cell--body"
           >
             <ElSelect
+              v-if="!isDraftRow(row)"
               v-model="row.contentType"
               placeholder="自动"
               clearable
@@ -584,7 +739,17 @@ watch(
             v-if="showDescriptionColumn"
             class="params-grid-table__cell params-grid-table__cell--body"
           >
-            <div class="param-description-cell">
+            <ElInput
+              v-if="isDraftRow(row)"
+              :model-value="row.description"
+              placeholder="可选说明"
+              :data-param-row-key="row.__rowKey"
+              data-param-field="description"
+              @update:model-value="
+                (value) => handleParamFieldInput(row, 'description', value)
+              "
+            />
+            <div v-else class="param-description-cell">
               <span class="param-description-main">
                 <ElTooltip
                   v-if="getDescription(row)"
@@ -610,42 +775,6 @@ watch(
                 <SvgDocumentDocTrashBinIcon class="param-delete-icon" />
               </button>
             </div>
-          </div>
-        </div>
-
-        <!-- 末尾草稿行：在任意单元格输入即自动新增一行参数，替代「添加参数」按钮 -->
-        <div
-          v-if="showAddButton"
-          class="params-grid-table__row params-grid-table__row--draft"
-          :style="rowStyle"
-        >
-          <div
-            v-if="showSelectionColumn"
-            class="params-grid-table__cell params-grid-table__cell--selection params-grid-table__cell--body"
-          >
-            <ElCheckbox v-model="draftRow.enabled" disabled />
-          </div>
-
-          <div class="params-grid-table__cell params-grid-table__cell--body">
-            <ElInput v-model="draftRow.name" placeholder="添加参数名" />
-          </div>
-
-          <div class="params-grid-table__cell params-grid-table__cell--body">
-            <div class="params-grid-table__control">
-              <ElInput v-model="draftRow.value" placeholder="添加参数值" />
-            </div>
-          </div>
-
-          <div
-            v-if="showContentType"
-            class="params-grid-table__cell params-grid-table__cell--body"
-          ></div>
-
-          <div
-            v-if="showDescriptionColumn"
-            class="params-grid-table__cell params-grid-table__cell--body"
-          >
-            <ElInput v-model="draftRow.description" placeholder="可选说明" />
           </div>
         </div>
       </div>
