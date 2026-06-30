@@ -698,22 +698,21 @@ const showSchemaStack = computed(() => {
               </div>
             </div>
           </div>
-
-          <div
-            v-if="
-              isExpandable(value, getNodePath(String(key))) &&
-              !foldState[getNodePath(String(key))]
-            "
-            class="schema-item__children"
-          >
-            <SchemaView
-              :data="getDisplaySchema(value, getNodePath(String(key)))"
-              :mode="mode"
-              :path-prefix="getNodePath(String(key))"
-              @variant-change="handleChildVariantChange"
-            />
-          </div>
         </div>
+      </div>
+      <div
+        v-if="
+          isExpandable(value, getNodePath(String(key))) &&
+          !foldState[getNodePath(String(key))]
+        "
+        class="schema-item__children"
+      >
+        <SchemaView
+          :data="getDisplaySchema(value, getNodePath(String(key)))"
+          :mode="mode"
+          :path-prefix="getNodePath(String(key))"
+          @variant-change="handleChildVariantChange"
+        />
       </div>
     </div>
   </div>
@@ -825,10 +824,7 @@ const showSchemaStack = computed(() => {
   transition: background-color 0.2s ease;
 }
 
-/* 单个字段悬停高亮：父行 __top 在 DOM 上包裹了展开的子块 __children，
-   故用 :has 排除「指针正落在子块区域内」的情况（含子块左缩进条/行间隙），
-   确保只有鼠标实际所在的那一行被高亮，父级字段不会被子块连带变色。 */
-.schema-item__top:hover:not(:has(.schema-item__children:hover)) {
+.schema-item__top:hover {
   background-color: var(--el-fill-color);
 }
 
@@ -1128,10 +1124,10 @@ const showSchemaStack = computed(() => {
 
 .schema-item__children {
   box-sizing: border-box;
-  width: 100%;
+  width: calc(100% - 36px);
   padding-left: 12px;
   margin-top: 10px;
-  margin-left: 2px;
+  margin-left: 30px;
   border-left: 1px solid
     color-mix(in srgb, var(--el-border-color-lighter) 88%, transparent);
 }
