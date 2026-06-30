@@ -1357,9 +1357,12 @@ defineExpose({
               placement="top"
               :enterable="false"
             >
-              <ElButton class="hero-panel__ai-button" @click="handleCopyForAi">
+              <ElButton
+                class="hero-panel__ai-button"
+                aria-label="复制接口文档信息给 AI 编程工具"
+                @click="handleCopyForAi"
+              >
                 <SvgAiCopyIcon class="hero-panel__ai-icon" />
-                <span>Ai Coding</span>
               </ElButton>
             </ElTooltip>
             <ElButton
@@ -1970,30 +1973,41 @@ defineExpose({
 }
 
 .hero-panel__ai-button {
+  --el-button-bg-color: transparent;
+  --el-button-border-color: transparent;
+  --el-button-hover-border-color: transparent;
+  --el-button-active-border-color: transparent;
+
   display: inline-flex;
-  gap: 5px;
   align-items: center;
+  justify-content: center;
+  width: 36px;
   height: 36px;
-  padding: 0 14px;
+  padding: 0;
   font-weight: 700;
   color: var(--el-color-primary);
-  background: color-mix(
-    in srgb,
-    var(--doc-panel-bg) 88%,
-    var(--el-color-primary-light-9) 12%
-  );
-  border: 1px solid color-mix(in srgb, var(--el-color-primary) 28%, transparent);
+  background: transparent;
+  border: 1px solid transparent;
 }
 
 .hero-panel__ai-button:hover {
   color: var(--el-color-primary);
-  background: var(--el-color-primary-light-9);
-  border-color: color-mix(in srgb, var(--el-color-primary) 42%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--el-color-primary-light-9) 72%,
+    transparent
+  );
+}
+
+.hero-panel__ai-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--el-color-primary-light-8) 70%, transparent);
 }
 
 .hero-panel__ai-icon {
-  width: 17px;
-  height: 17px;
+  width: 18px;
+  height: 18px;
 }
 
 .hero-panel__endpoint {
