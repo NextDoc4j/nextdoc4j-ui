@@ -218,7 +218,10 @@ onBeforeUnmount(() => {
 <template>
   <div
     class="document-page h-full overflow-hidden"
-    :class="{ 'document-page--dark': isDark }"
+    :class="{
+      'document-page--dark': isDark,
+      'document-page--overview': isOverview,
+    }"
   >
     <!-- 分组概览页：路由名以 __overview__ 结尾时渲染，展示该分组下全部接口 -->
     <div v-if="isOverview" class="document-view">
@@ -289,6 +292,7 @@ onBeforeUnmount(() => {
   --doc-radius-md: calc(var(--radius) * 0.94);
   --doc-radius-sm: calc(var(--radius) * 0.72);
   --doc-page-bg: var(--el-bg-color);
+  --doc-overview-bg: var(--el-fill-color-light);
   --el-border-radius-base: calc(var(--radius) * 0.75);
   --el-border-radius-small: calc(var(--radius) * 0.62);
 
@@ -302,6 +306,11 @@ onBeforeUnmount(() => {
     var(--el-bg-color) 90%,
     var(--el-fill-color-light) 10%
   );
+}
+
+.document-page--overview {
+  padding: 0;
+  background: var(--doc-overview-bg);
 }
 
 .document-view {

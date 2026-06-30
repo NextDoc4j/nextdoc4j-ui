@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import type { ApiInfo } from '#/typings/openApi';
 
-import { computed, ref } from 'vue';
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { ElEmpty, ElInput } from 'element-plus';
@@ -17,9 +24,33 @@ interface OverviewGroupSection {
   title: string;
 }
 
+interface VirtualOverviewGroupSection extends OverviewGroupSection {
+  estimatedHeight: number;
+  offsetTop: number;
+}
+
+interface RenderedOverviewGroupSection extends VirtualOverviewGroupSection {
+  bottomSpacerHeight: number;
+  firstApiIndex: number;
+  topSpacerHeight: number;
+  visibleApis: ApiInfo[];
+}
+
+const API_ROW_HEIGHT = 72;
+const API_LIST_BORDER_HEIGHT = 2;
+const SECTION_GAP = 26;
+const SECTION_HEADER_HEIGHT = 34;
+const VIRTUAL_OVERSCAN = 900;
+
 const route = useRoute();
 const router = useRouter();
 const apiStore = useApiStore();
+const overviewRef = ref<HTMLElement | null>(null);
+const overviewSectionsRef = ref<HTMLElement | null>(null);
+const overviewListOffsetTop = ref(0);
+const overviewScrollTop = ref(0);
+const overviewViewportHeight = ref(900);
+let overviewResizeObserver: null | ResizeObserver = null;
 
 /** 从路由名中解析分组信息：如 "all*用户管理*__overview__" -> ["all", "用户管理"]，一级概览 group 为空 */
 const groupInfo = computed(() => {
@@ -120,11 +151,15 @@ const methodStats = computed(() => {
     const method = api.method?.toUpperCase() || 'GET';
     counter[method] = (counter[method] ?? 0) + 1;
   });
-  return METHOD_ORDER.filter((method) => counter[method]).map((method) => ({
-    method,
-    count: counter[method] ?? 0,
-    color: getMethodStyle(method).color,
-  }));
+  return METHOD_ORDER.filter((method) => counter[method]).map((method) => {
+    const style = getMethodStyle(method);
+    return {
+      method,
+      count: counter[method] ?? 0,
+      backgroundColor: style.backgroundColor,
+      color: style.color,
+    };
+  });
 });
 
 // ===== 搜索 + 方法筛选 =====
@@ -134,10 +169,14 @@ const activeMethod = ref<string>('');
 /** 方法筛选选项：全部 + 当前分组实际出现的方法 */
 const methodFilters = computed(() => {
   return [
-    { label: '全部', value: '' },
+    { label: '全部', value: '', style: undefined },
     ...methodStats.value.map((item) => ({
       label: item.method,
       value: item.method,
+      style: {
+        '--overview-method-bg': item.backgroundColor,
+        '--overview-method-color': item.color,
+      },
     })),
   ];
 });
@@ -181,10 +220,108 @@ const filteredGroupSections = computed<OverviewGroupSection[]>(() => {
     .filter((section) => section.apis.length > 0);
 });
 
+/** 当前列表是否显示多个分组标题 */
+const showSectionHeader = computed(() => groupSections.value.length > 1);
+
+/** 按固定行高估算每个分组高度，供概览页长列表虚拟渲染使用 */
+const virtualGroupSections = computed<VirtualOverviewGroupSection[]>(() => {
+  let offsetTop = 0;
+  return filteredGroupSections.value.map((section, index) => {
+    const estimatedHeight =
+      (showSectionHeader.value ? SECTION_HEADER_HEIGHT : 0) +
+      API_LIST_BORDER_HEIGHT +
+      section.apis.length * API_ROW_HEIGHT;
+    const virtualSection = {
+      ...section,
+      estimatedHeight,
+      offsetTop,
+    };
+    offsetTop +=
+      estimatedHeight +
+      (index === filteredGroupSections.value.length - 1 ? 0 : SECTION_GAP);
+    return virtualSection;
+  });
+});
+
+const virtualTotalHeight = computed(() => {
+  const lastSection =
+    virtualGroupSections.value[virtualGroupSections.value.length - 1];
+  return lastSection ? lastSection.offsetTop + lastSection.estimatedHeight : 0;
+});
+
+const visibleGroupSections = computed<RenderedOverviewGroupSection[]>(() => {
+  const listScrollTop = Math.max(
+    overviewScrollTop.value - overviewListOffsetTop.value,
+    0,
+  );
+  const viewportTop = Math.max(listScrollTop - VIRTUAL_OVERSCAN, 0);
+  const viewportBottom =
+    listScrollTop + overviewViewportHeight.value + VIRTUAL_OVERSCAN;
+
+  return virtualGroupSections.value
+    .filter((section) => {
+      const sectionBottom = section.offsetTop + section.estimatedHeight;
+      return (
+        sectionBottom >= viewportTop && section.offsetTop <= viewportBottom
+      );
+    })
+    .map((section) => {
+      const listOffsetTop =
+        section.offsetTop +
+        (showSectionHeader.value ? SECTION_HEADER_HEIGHT : 0);
+      const firstApiIndex = Math.max(
+        Math.floor((viewportTop - listOffsetTop) / API_ROW_HEIGHT),
+        0,
+      );
+      const lastApiIndex = Math.min(
+        Math.ceil((viewportBottom - listOffsetTop) / API_ROW_HEIGHT),
+        section.apis.length,
+      );
+      return {
+        ...section,
+        firstApiIndex,
+        visibleApis: section.apis.slice(firstApiIndex, lastApiIndex),
+        topSpacerHeight: firstApiIndex * API_ROW_HEIGHT,
+        bottomSpacerHeight:
+          (section.apis.length - lastApiIndex) * API_ROW_HEIGHT,
+      };
+    });
+});
+
 /** 是否处于筛选状态（用于区分「无结果」与「空分组」两种空态） */
 const isFiltering = computed(
   () => Boolean(keyword.value.trim()) || Boolean(activeMethod.value),
 );
+
+const updateOverviewViewportHeight = () => {
+  overviewViewportHeight.value = overviewRef.value?.clientHeight || 900;
+  overviewListOffsetTop.value = overviewSectionsRef.value?.offsetTop || 0;
+};
+
+const handleOverviewScroll = () => {
+  overviewScrollTop.value = overviewRef.value?.scrollTop || 0;
+};
+
+watch([keyword, activeMethod, () => route.fullPath], async () => {
+  await nextTick();
+  if (overviewRef.value) {
+    overviewRef.value.scrollTop = 0;
+  }
+  overviewScrollTop.value = 0;
+});
+
+onMounted(() => {
+  updateOverviewViewportHeight();
+  if (overviewRef.value && typeof ResizeObserver !== 'undefined') {
+    overviewResizeObserver = new ResizeObserver(updateOverviewViewportHeight);
+    overviewResizeObserver.observe(overviewRef.value);
+  }
+});
+
+onBeforeUnmount(() => {
+  overviewResizeObserver?.disconnect();
+  overviewResizeObserver = null;
+});
 
 /**
  * 用途：清空当前概览页的关键词和请求方法筛选条件。
@@ -210,7 +347,11 @@ const goToApi = (groupKey: string, api: ApiInfo) => {
 </script>
 
 <template>
-  <div class="group-overview">
+  <div
+    ref="overviewRef"
+    class="group-overview"
+    @scroll.passive="handleOverviewScroll"
+  >
     <!-- 顶部：分组信息 + 方法数量统计 -->
     <header class="overview-header">
       <div class="overview-header__info">
@@ -226,6 +367,10 @@ const goToApi = (groupKey: string, api: ApiInfo) => {
           v-for="item in methodStats"
           :key="item.method"
           class="overview-stat"
+          :style="{
+            backgroundColor: item.backgroundColor,
+            color: item.color,
+          }"
         >
           <i class="overview-stat__dot" :style="{ background: item.color }"></i>
           <span class="overview-stat__method">{{ item.method }}</span>
@@ -266,6 +411,7 @@ const goToApi = (groupKey: string, api: ApiInfo) => {
           type="button"
           class="overview-filter"
           :class="{ 'overview-filter--active': activeMethod === filter.value }"
+          :style="filter.style"
           @click="activeMethod = filter.value"
         >
           {{ filter.label }}
@@ -274,16 +420,22 @@ const goToApi = (groupKey: string, api: ApiInfo) => {
     </div>
 
     <!-- 接口列表 -->
-    <div v-if="filteredApis.length > 0" class="overview-sections">
+    <div
+      v-if="filteredApis.length > 0"
+      ref="overviewSectionsRef"
+      class="overview-sections"
+      :style="{ height: `${virtualTotalHeight}px` }"
+    >
       <section
-        v-for="section in filteredGroupSections"
+        v-for="section in visibleGroupSections"
         :key="section.key"
         class="overview-section"
+        :style="{
+          height: `${section.estimatedHeight}px`,
+          transform: `translateY(${section.offsetTop}px)`,
+        }"
       >
-        <header
-          v-if="groupSections.length > 1"
-          class="overview-section__header"
-        >
+        <header v-if="showSectionHeader" class="overview-section__header">
           <h3 class="overview-section__title">{{ section.title }}</h3>
           <span class="overview-section__count">
             {{ section.apis.length }} 个接口
@@ -292,9 +444,20 @@ const goToApi = (groupKey: string, api: ApiInfo) => {
 
         <ul class="api-list">
           <li
-            v-for="api in section.apis"
-            :key="api.operationId"
+            v-if="section.topSpacerHeight > 0"
+            class="api-list__spacer"
+            :style="{ height: `${section.topSpacerHeight}px` }"
+          ></li>
+          <li
+            v-for="(api, apiIndex) in section.visibleApis"
+            :key="`${section.key}-${api.operationId}-${section.firstApiIndex + apiIndex}`"
             class="api-row"
+            :class="{
+              'api-row--single':
+                section.apis.length === 1 &&
+                section.topSpacerHeight === 0 &&
+                section.bottomSpacerHeight === 0,
+            }"
             @click="goToApi(section.key, api)"
           >
             <span
@@ -337,6 +500,11 @@ const goToApi = (groupKey: string, api: ApiInfo) => {
               <path d="m9 18 6-6-6-6" />
             </svg>
           </li>
+          <li
+            v-if="section.bottomSpacerHeight > 0"
+            class="api-list__spacer"
+            :style="{ height: `${section.bottomSpacerHeight}px` }"
+          ></li>
         </ul>
       </section>
     </div>
@@ -358,6 +526,13 @@ const goToApi = (groupKey: string, api: ApiInfo) => {
 </template>
 
 <style scoped lang="scss">
+@supports (content-visibility: auto) {
+  .overview-section {
+    contain-intrinsic-size: auto 520px;
+    content-visibility: auto;
+  }
+}
+
 @media (max-width: 900px) {
   .overview-header {
     flex-direction: column;
@@ -365,6 +540,7 @@ const goToApi = (groupKey: string, api: ApiInfo) => {
 
   .overview-stats {
     justify-content: flex-start;
+    max-width: none;
   }
 
   .api-desc {
@@ -390,49 +566,73 @@ const goToApi = (groupKey: string, api: ApiInfo) => {
     max-width: none;
   }
 
+  .overview-header__title-line {
+    flex-wrap: wrap;
+  }
+
+  .overview-title {
+    white-space: normal;
+  }
+
   .api-path {
     max-width: 100%;
   }
 }
 
 .group-overview {
+  --overview-radius-xl: calc(var(--radius) * 2.25);
+  --overview-radius-lg: calc(var(--radius) * 1.5);
+  --overview-radius-md: calc(var(--radius) * 0.94);
+  --overview-radius-sm: calc(var(--radius) * 0.72);
+  --overview-radius-chip: var(--radius);
+  --overview-line: var(--el-border-color-lighter);
+  --overview-panel: var(--el-bg-color);
+  --overview-shadow-sm:
+    0 1px 2px color-mix(in srgb, var(--el-text-color-primary) 5%, transparent),
+    0 5px 18px color-mix(in srgb, var(--el-text-color-primary) 4%, transparent);
+
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  padding: 20px 24px;
+  padding: 28px 32px;
+  contain: layout paint;
   overflow-y: auto;
-  background: var(--el-bg-color);
+  background: var(--el-fill-color-light);
 }
 
 .overview-sections {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
+  position: relative;
+  flex: none;
 }
 
 .overview-section {
+  position: absolute;
+  top: 0;
+  left: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+  width: 100%;
+  contain: layout paint;
 }
 
 .overview-section__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-bottom: 4px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
+  padding: 0 4px;
 }
 
 .overview-section__title {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--el-text-color-primary);
 }
 
 .overview-section__count {
-  font-size: 12px;
+  font-size: 12.5px;
+  font-weight: 600;
   color: var(--el-text-color-secondary);
 }
 
@@ -443,9 +643,7 @@ const goToApi = (groupKey: string, api: ApiInfo) => {
   gap: 16px;
   align-items: flex-start;
   justify-content: space-between;
-  padding-bottom: 16px;
-  margin-bottom: 16px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
+  margin-bottom: 22px;
 }
 
 .overview-header__info {
@@ -455,30 +653,37 @@ const goToApi = (groupKey: string, api: ApiInfo) => {
 .overview-header__title-line {
   display: flex;
   gap: 10px;
-  align-items: baseline;
+  align-items: center;
+  min-width: 0;
 }
 
 .overview-title {
   margin: 0;
-  font-size: 20px;
-  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1.25;
   color: var(--el-text-color-primary);
+  white-space: nowrap;
 }
 
 .overview-count {
   flex: none;
-  padding: 1px 9px;
-  font-size: 12px;
+  padding: 4px 12px;
+  font-size: 12.5px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--el-text-color-secondary);
-  background: var(--el-fill-color-light);
-  border-radius: 999px;
+  background: var(--overview-panel);
+  border: 1px solid var(--overview-line);
+  border-radius: var(--overview-radius-chip);
+  box-shadow: var(--overview-shadow-sm);
 }
 
 .overview-subtitle {
-  margin: 6px 0 0;
-  font-size: 12.5px;
+  margin: 8px 0 0;
+  font-size: 13px;
   color: var(--el-text-color-secondary);
 }
 
@@ -487,143 +692,181 @@ const goToApi = (groupKey: string, api: ApiInfo) => {
   display: flex;
   flex: none;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 10px;
   justify-content: flex-end;
+  max-width: 58%;
 }
 
 .overview-stat {
   display: inline-flex;
-  gap: 6px;
+  gap: 7px;
   align-items: center;
-  padding: 3px 10px;
-  font-size: 12px;
-  background: var(--el-fill-color-light);
-  border-radius: 6px;
+  padding: 6px 11px;
+  font-size: 12.5px;
+  font-weight: 600;
+  border-radius: var(--overview-radius-sm);
 }
 
 .overview-stat__dot {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
 }
 
 .overview-stat__method {
   font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
-  font-weight: 600;
-  color: var(--el-text-color-regular);
+  font-weight: 700;
 }
 
 .overview-stat__count {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-  color: var(--el-text-color-primary);
 }
 
 /* ===== 工具栏：搜索 + 方法筛选 ===== */
 .overview-toolbar {
   display: flex;
   flex: none;
-  gap: 12px;
+  gap: 16px;
   align-items: center;
-  margin-bottom: 14px;
+  margin-bottom: 26px;
 }
 
 .overview-search {
-  max-width: 360px;
+  max-width: 430px;
+  box-shadow: var(--overview-shadow-sm);
+}
+
+.overview-search :deep(.el-input__wrapper) {
+  min-height: 40px;
+  background: var(--overview-panel);
+  border-radius: var(--overview-radius-lg);
+  box-shadow: 0 0 0 1px var(--overview-line) inset;
+}
+
+.overview-search :deep(.el-input__wrapper.is-focus) {
+  box-shadow:
+    0 0 0 1px var(--el-color-primary) inset,
+    0 0 0 3px color-mix(in srgb, var(--el-color-primary) 16%, transparent);
 }
 
 .overview-search__icon {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
 }
 
 .overview-filters {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+  padding: 4px;
+  background: var(--overview-panel);
+  border: 1px solid var(--overview-line);
+  border-radius: var(--overview-radius-lg);
+  box-shadow: var(--overview-shadow-sm);
 }
 
 .overview-filter {
-  padding: 5px 12px;
+  padding: 6px 13px;
   font-size: 12px;
   font-weight: 600;
-  color: var(--el-text-color-regular);
+  color: var(--overview-method-color, var(--el-text-color-secondary));
   cursor: pointer;
-  background: var(--el-fill-color-light);
+  background: transparent;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--overview-radius-md);
   transition:
     color 0.15s ease,
     background-color 0.15s ease,
-    border-color 0.15s ease;
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 .overview-filter:hover {
-  color: var(--el-text-color-primary);
-  background: var(--el-fill-color);
+  color: var(--overview-method-color, var(--el-text-color-primary));
+  background: var(--overview-method-bg, var(--el-fill-color-light));
 }
 
 .overview-filter--active {
-  color: var(--el-color-primary);
-  background: var(--el-color-primary-light-9);
+  color: var(--overview-method-color, var(--el-color-primary));
+  background: var(--overview-method-bg, var(--el-color-primary-light-9));
   border-color: color-mix(in srgb, var(--el-color-primary) 30%, transparent);
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--el-color-primary) 10%, transparent);
 }
 
-/* ===== 接口列表：行式索引，扫描效率优先 ===== */
+/* ===== 接口列表：卡片式分组，扫描效率优先 ===== */
 .api-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
   padding: 0;
   margin: 0;
+  contain: layout paint;
+  overflow: hidden;
   list-style: none;
+  background: var(--overview-panel);
+  border: 1px solid var(--overview-line);
+  border-radius: var(--overview-radius-xl);
+  box-shadow: var(--overview-shadow-sm);
+}
+
+.api-list__spacer {
+  flex: none;
+  pointer-events: none;
 }
 
 .api-row {
   display: flex;
-  gap: 12px;
-  align-items: flex-start;
-  padding: 10px 12px;
+  gap: 16px;
+  align-items: center;
+  height: 72px;
+  padding: 18px 20px;
   cursor: pointer;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  transition:
-    background-color 0.15s ease,
-    border-color 0.15s ease;
+  border-bottom: 1px solid var(--overview-line);
+  transition: background-color 0.15s ease;
+}
+
+.api-row:last-child {
+  border-bottom: 0;
+}
+
+.api-row--single {
+  border-bottom: 0;
 }
 
 .api-row:hover {
-  background: var(--el-fill-color-light);
-  border-color: var(--el-border-color-lighter);
+  background: color-mix(in srgb, var(--el-fill-color-light) 72%, transparent);
 }
 
 /* 方法 badge：固定宽度，避免不同方法导致列表横向跳动 */
 .api-method {
   box-sizing: border-box;
+  display: inline-flex;
   flex: none;
-  width: 62px;
-  padding: 3px 0;
-  margin-top: 1px;
+  align-items: center;
+  justify-content: center;
+  width: 76px;
+  height: 26px;
   font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
   font-size: 11px;
   font-weight: 700;
+  line-height: 1;
   text-align: center;
-  letter-spacing: 0.4px;
-  border-radius: 6px;
+  border-radius: var(--overview-radius-sm);
 }
 
 .api-main {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 3px;
+  gap: 7px;
   min-width: 0;
 }
 
 .api-main__top {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 10px;
   align-items: center;
   min-width: 0;
 }
@@ -632,22 +875,26 @@ const goToApi = (groupKey: string, api: ApiInfo) => {
 .api-summary {
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--el-text-color-primary);
   white-space: nowrap;
 }
 
+.api-row:hover .api-summary {
+  color: var(--el-color-primary);
+}
+
 /* 标签：小尺寸 chip */
 .api-tag {
   flex: none;
-  padding: 0 7px;
+  padding: 1px 8px;
   font-size: 11px;
   font-weight: 500;
   line-height: 18px;
   color: var(--el-text-color-secondary);
-  background: var(--el-fill-color);
-  border-radius: 4px;
+  background: var(--el-fill-color-light);
+  border-radius: var(--overview-radius-sm);
 }
 
 .api-main__bottom {
@@ -660,13 +907,13 @@ const goToApi = (groupKey: string, api: ApiInfo) => {
 /* 路径：等宽字体，便于识别层级与参数段 */
 .api-path {
   flex: none;
-  max-width: 46%;
+  max-width: 48%;
   overflow: hidden;
   text-overflow: ellipsis;
   font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 500;
-  color: var(--el-text-color-regular);
+  color: var(--el-text-color-secondary);
   white-space: nowrap;
 }
 
@@ -676,16 +923,21 @@ const goToApi = (groupKey: string, api: ApiInfo) => {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--el-text-color-secondary);
   white-space: nowrap;
+}
+
+.api-desc::before {
+  margin-right: 10px;
+  color: var(--el-text-color-placeholder);
+  content: '·';
 }
 
 .api-arrow {
   flex: none;
   width: 16px;
   height: 16px;
-  margin-top: 3px;
   color: var(--el-text-color-placeholder);
   opacity: 0;
   transform: translateX(-4px);
@@ -717,7 +969,7 @@ const goToApi = (groupKey: string, api: ApiInfo) => {
   cursor: pointer;
   background: var(--el-color-primary-light-9);
   border: 1px solid color-mix(in srgb, var(--el-color-primary) 30%, transparent);
-  border-radius: 6px;
+  border-radius: var(--overview-radius-md);
   transition: background-color 0.15s ease;
 }
 
