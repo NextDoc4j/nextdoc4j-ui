@@ -112,6 +112,12 @@ const contentProps = computed((): HoverCardContentProps => {
 });
 
 const active = computed(() => {
+  // 分组概览页的 activePath 即分组自身 path：此时分组标题需高亮为激活态，
+  // 与「选中接口时级联高亮祖先分组」保持一致的视觉。
+  if (rootMenu?.activePath && rootMenu.activePath === props.path) {
+    return true;
+  }
+
   let isActive = false;
 
   Object.values(items.value).forEach((item) => {

@@ -114,55 +114,65 @@ function useMixedMenu() {
    * 仅在「分组概览」开启时生效：此时路由生成会为分组挂载 `${key}/__overview__` 概览子路由，
    * 据此判断而无需让框架层反向依赖业务层的开关 store。关闭概览开关、或实体模型/其它文档分组
    * （均无概览子路由）点击时只展开/收起、不跳转，符合「只有点击具体项才进入详情」的预期。
+   *
+   * 仅当 fromClick=true（用户亲手点击分组标题）时才跳转：点击接口详情或刷新页面会触发菜单
+   * 自动展开祖先分组（fromClick=false），此时不应把用户从正在浏览的接口强制拉回概览页。
+   * 由此用户在分组概览页/分组下接口详情页再次点击该分组标题，都能稳定回到该分组概览。
    * @param key 被点击分组的路由路径
+   * @param fromClick 是否由用户点击触发（false 为 initMenu/hover 等程序自动展开）
    * @returns 是否已触发概览跳转
    */
-  const navigateGroupOverview = (key: string): boolean => {
+  const navigateGroupOverview = (key: string, fromClick: boolean): boolean => {
+    // 仅响应用户主动点击，忽略程序自动展开/收起
+    if (!fromClick) {
+      return false;
+    }
     // 折叠态侧边菜单依靠悬浮展开，避免 hover 误触发跳转
     if (preferences.sidebar.collapsed) {
       return false;
     }
+    const overviewPath = `${key}/__overview__`;
     const hasOverviewRoute = router
       .getRoutes()
-      .some((item) => item.path === `${key}/__overview__`);
+      .some((item) => item.path === overviewPath);
     if (!hasOverviewRoute) {
       return false;
     }
-    // 跳过「当前路由已在该分组内」：点击接口详情或刷新时菜单会自动展开祖先分组，
-    // 此时不应把用户从正在浏览的接口强制拉回概览页。
-    const activePath = (route?.meta?.activePath as string) ?? route.path;
-    if (key === activePath || activePath.startsWith(`${key}/`)) {
-      return false;
-    }
-    // 分组 redirect 指向概览页，跳转分组路径即进入概览，不依赖 autoActivateChild 偏好。
-    navigation(key);
+    // 直接进入隐藏概览路由，避免依赖父分组 redirect 在重复切换时再次解析。
+    navigation(overviewPath);
     return true;
   };
 
   /**
    * 侧边菜单展开事件
    * @param key 路由路径
-   * @param parentsPath 父级路径
+   * @param _parentsPath 父级路径
+   * @param fromClick 是否由用户点击触发
    */
-  const handleMenuOpen = (key: string, parentsPath: string[]) => {
-    // 接口分组（非顶级菜单）：仅在开启分组概览时跳转概览页，否则仅展开。
+  const handleMenuOpen = (
+    key: string,
+    _parentsPath: string[],
+    fromClick = false,
+  ) => {
+    // 接口分组：仅在开启分组概览时跳转概览页，否则仅展开。
     // 顶级菜单（接口文档/实体模型/文档管理等）展开时只展开、不自动选中任何子项，
     // 保证「正常菜单展开、只有点击具体项才进入详情」的预期。
-    if (parentsPath.length > 1) {
-      navigateGroupOverview(key);
-    }
+    navigateGroupOverview(key, fromClick);
   };
 
   /**
    * 侧边菜单收起事件：收起接口分组时同样跳转到概览页，
    * 保证「无论展开还是收起，点击分组都进入概览」的一致交互。
    * @param key 路由路径
-   * @param parentsPath 父级路径
+   * @param _parentsPath 父级路径
+   * @param fromClick 是否由用户点击触发
    */
-  const handleMenuClose = (key: string, parentsPath: string[]) => {
-    if (parentsPath.length > 1) {
-      navigateGroupOverview(key);
-    }
+  const handleMenuClose = (
+    key: string,
+    _parentsPath: string[],
+    fromClick = false,
+  ) => {
+    navigateGroupOverview(key, fromClick);
   };
 
   /**

@@ -15,8 +15,8 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const emit = defineEmits<{
-  close: [string, string[]];
-  open: [string, string[]];
+  close: [string, string[], boolean?];
+  open: [string, string[], boolean?];
   select: [string, string?];
 }>();
 
@@ -24,12 +24,12 @@ function handleMenuSelect(key: string) {
   emit('select', key, props.mode);
 }
 
-function handleMenuOpen(key: string, path: string[]) {
-  emit('open', key, path);
+function handleMenuOpen(key: string, path: string[], fromClick?: boolean) {
+  emit('open', key, path, fromClick);
 }
 
-function handleMenuClose(key: string, path: string[]) {
-  emit('close', key, path);
+function handleMenuClose(key: string, path: string[], fromClick?: boolean) {
+  emit('close', key, path, fromClick);
 }
 </script>
 

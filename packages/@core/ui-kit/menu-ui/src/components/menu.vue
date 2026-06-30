@@ -49,8 +49,10 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const emit = defineEmits<{
-  close: [string, string[]];
-  open: [string, string[]];
+  // 第三个布尔参数 fromClick 标记本次开合是否由用户点击触发，
+  // 用于区分「用户点击分组」与「程序自动展开（initMenu/hover）」，默认 false。
+  close: [string, string[], boolean?];
+  open: [string, string[], boolean?];
   select: [string, string[]];
 }>();
 
@@ -287,10 +289,11 @@ function handleMenuItemClick(data: MenuItemClicked) {
 function handleSubMenuClick({ parentPaths, path }: MenuItemRegistered) {
   const isOpened = openedMenus.value.includes(path);
 
+  // 用户点击分组标题：开合事件标记 fromClick=true，供上层区分自动展开。
   if (isOpened) {
-    closeMenu(path, parentPaths);
+    closeMenu(path, parentPaths, true);
   } else {
-    openMenu(path, parentPaths);
+    openMenu(path, parentPaths, true);
   }
 }
 
@@ -304,21 +307,27 @@ function close(path: string) {
 
 /**
  * 关闭、折叠菜单
+ * @param path 菜单路径
+ * @param parentPaths 父级路径
+ * @param fromClick 是否由用户点击触发（区分程序自动收起）
  */
-function closeMenu(path: string, parentPaths: string[]) {
+function closeMenu(path: string, parentPaths: string[], fromClick = false) {
   if (props.accordion) {
     openedMenus.value = subMenus.value[path]?.parentPaths ?? [];
   }
 
   close(path);
 
-  emit('close', path, parentPaths);
+  emit('close', path, parentPaths, fromClick);
 }
 
 /**
  * 点击展开菜单
+ * @param path 菜单路径
+ * @param parentPaths 父级路径
+ * @param fromClick 是否由用户点击触发（区分 initMenu/hover 等程序自动展开）
  */
-function openMenu(path: string, parentPaths: string[]) {
+function openMenu(path: string, parentPaths: string[], fromClick = false) {
   if (openedMenus.value.includes(path)) {
     return;
   }
@@ -333,7 +342,7 @@ function openMenu(path: string, parentPaths: string[]) {
     );
   }
   openedMenus.value.push(path);
-  emit('open', path, parentPaths);
+  emit('open', path, parentPaths, fromClick);
 }
 
 function addMenuItem(item: MenuItemRegistered) {
