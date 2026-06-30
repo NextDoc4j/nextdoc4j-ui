@@ -3066,6 +3066,14 @@ onBeforeUnmount(() => {
   }
 }
 
+@media (max-width: 768px) {
+  :deep(.global-config-dialog) {
+    width: calc(100vw - 32px) !important;
+    height: calc(100vh - 48px);
+    max-height: calc(100vh - 48px);
+  }
+}
+
 .debug-console {
   --debug-chip-radius: var(--radius);
   --debug-radius-xs: var(--radius);
@@ -4233,13 +4241,5 @@ onBeforeUnmount(() => {
 
 :deep(.global-config-dialog .gcp-section--params .el-table__cell .cell) {
   white-space: nowrap;
-}
-
-@media (max-width: 768px) {
-  :deep(.global-config-dialog) {
-    width: calc(100vw - 32px) !important;
-    height: calc(100vh - 48px);
-    max-height: calc(100vh - 48px);
-  }
 }
 </style>
