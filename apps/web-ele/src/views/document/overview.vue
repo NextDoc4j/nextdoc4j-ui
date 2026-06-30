@@ -881,10 +881,10 @@ const goToApi = (groupKey: string, api: ApiInfo) => {
   white-space: nowrap;
 }
 
+
 .api-row:hover .api-summary {
   color: var(--el-color-primary);
 }
-
 /* 标签：小尺寸 chip */
 .api-tag {
   flex: none;
