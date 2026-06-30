@@ -530,6 +530,7 @@ const getServiceBadge = (service: ServiceItem) => {
 .header-wrapper {
   @apply flex justify-between px-6 py-10 text-white;
 
+  flex-shrink: 0;
   border-radius: var(--home-radius);
 }
 
