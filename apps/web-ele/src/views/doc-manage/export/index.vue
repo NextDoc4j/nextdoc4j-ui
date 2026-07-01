@@ -4573,8 +4573,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped lang="scss">
-
-
 @supports not (scrollbar-gutter: stable) {
   .scope-tree-panel {
     overflow-y: scroll;
@@ -4682,7 +4680,7 @@ onBeforeUnmount(() => {
 .doc-other-card,
 .doc-preview-card {
   border: 1px solid var(--el-border-color-lighter);
-  border-radius: calc(var(--radius) * 2.25);
+  border-radius: calc(var(--radius) * 1.18);
   box-shadow:
     0 1px 2px color-mix(in srgb, var(--el-text-color-primary) 6%, transparent),
     0 2px 8px color-mix(in srgb, var(--el-text-color-primary) 5%, transparent);
@@ -4745,7 +4743,7 @@ onBeforeUnmount(() => {
     var(--el-bg-color) 100%
   );
   border: 1px solid var(--el-border-color);
-  border-radius: 28px;
+  border-radius: calc(var(--radius) * 1.18);
   box-shadow: 0 28px 80px rgb(15 23 42 / 18%);
 }
 
@@ -4770,9 +4768,9 @@ onBeforeUnmount(() => {
 }
 
 .export-dialog-panel {
-  --doc-export-card-radius: calc(var(--radius) * 2.75);
-  --doc-export-card-inner-radius: calc(var(--radius) * 2.25);
-  --doc-export-badge-radius: calc(var(--radius) * 2);
+  --doc-export-card-radius: calc(var(--radius) * 1.18);
+  --doc-export-card-inner-radius: calc(var(--radius) * 0.94);
+  --doc-export-badge-radius: calc(var(--radius) * 0.72);
 
   display: flex;
   flex-direction: column;
@@ -4789,7 +4787,7 @@ onBeforeUnmount(() => {
     var(--el-fill-color-light) 100%
   );
   border: 1px solid rgb(var(--el-color-primary-rgb) / 18%);
-  border-radius: 22px;
+  border-radius: var(--doc-export-card-radius);
 }
 
 .export-dialog-intro__title {

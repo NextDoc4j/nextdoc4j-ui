@@ -507,8 +507,8 @@ const getServiceBadge = (service: ServiceItem) => {
 }
 
 .home-page {
-  --home-radius: calc(var(--radius) * 2.25);
-  --home-radius-sm: calc(var(--radius) * 1.5);
+  --home-radius: calc(var(--radius) * 1.18);
+  --home-radius-sm: calc(var(--radius) * 0.94);
   --home-radius-chip: var(--radius);
   --home-line: var(--el-border-color-lighter);
   --home-panel: var(--el-bg-color);

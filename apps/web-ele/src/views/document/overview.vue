@@ -580,8 +580,8 @@ const goToApi = (groupKey: string, api: ApiInfo) => {
 }
 
 .group-overview {
-  --overview-radius-xl: calc(var(--radius) * 2.25);
-  --overview-radius-lg: calc(var(--radius) * 1.5);
+  --overview-radius-xl: calc(var(--radius) * 1.18);
+  --overview-radius-lg: calc(var(--radius) * 1.18);
   --overview-radius-md: calc(var(--radius) * 0.94);
   --overview-radius-sm: calc(var(--radius) * 0.72);
   --overview-radius-chip: var(--radius);

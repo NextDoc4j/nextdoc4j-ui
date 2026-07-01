@@ -198,7 +198,7 @@ onBeforeUnmount(() => {
 <style scoped>
 /* 卡片观感与首页保持一致：更大的圆角、柔和边框与悬浮阴影 */
 .config-card {
-  --config-radius: calc(var(--radius) * 2.25);
+  --config-radius: calc(var(--radius) * 1.18);
 
   border: 1px solid var(--el-border-color-lighter);
   border-radius: var(--config-radius);

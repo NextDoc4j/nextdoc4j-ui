@@ -259,7 +259,7 @@ onMounted(() => {});
 <style scoped>
 /* 卡片观感与首页保持一致：更大的圆角、柔和边框与悬浮阴影 */
 .auth-card {
-  border-radius: calc(var(--radius) * 2.25);
+  border-radius: calc(var(--radius) * 1.18);
   box-shadow:
     0 1px 2px color-mix(in srgb, var(--el-text-color-primary) 6%, transparent),
     0 2px 8px color-mix(in srgb, var(--el-text-color-primary) 5%, transparent);
