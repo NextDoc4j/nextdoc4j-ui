@@ -2,7 +2,14 @@
 import type { ApiInfo, SecuritySchemeObject } from '#/typings/openApi';
 import type { SecurityMetadata } from '#/utils/securityexpand';
 
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from 'vue';
 import { useRoute } from 'vue-router';
 
 import {
@@ -17,8 +24,6 @@ import { usePreferences } from '@vben/preferences';
 
 import {
   ElButton,
-  ElCollapse,
-  ElCollapseItem,
   ElDialog,
   ElMessage,
   ElOption,
@@ -102,6 +107,9 @@ const responseExampleSelection = ref<Record<string, string>>({});
 const responseVariantState = ref<Record<string, Record<string, number>>>({});
 const codeDialogVisible = ref(false);
 const codeDialogScope = ref<CodeDialogScope>('request');
+const asideStackRef = ref<HTMLElement | null>(null);
+const asideShouldFlow = ref(false);
+let asideResizeObserver: null | ResizeObserver = null;
 
 const displayTags = computed(() => {
   const tags = apiInfo.value?.tags?.filter(Boolean) ?? [];
@@ -1005,12 +1013,68 @@ const responsePanels = computed(() => {
   });
 });
 
+const showExampleAside = computed(() => {
+  return Boolean(requestPreviewSchema.value || responsePanels.value.length > 0);
+});
+
+/**
+ * 更新右侧示例区是否需要退出 sticky 布局。
+ *
+ * 参数：无。
+ * 返回值：无，仅根据当前内容高度更新展示状态。
+ */
+const updateAsideFlowState = () => {
+  const el = asideStackRef.value;
+  if (!el) {
+    asideShouldFlow.value = false;
+    return;
+  }
+
+  asideShouldFlow.value = el.scrollHeight > window.innerHeight - 48;
+};
+
+/**
+ * 在 DOM 更新后重新计算右侧示例区高度。
+ *
+ * 参数：无。
+ * 返回值：无，仅延迟触发右侧示例区布局状态计算。
+ */
+const scheduleAsideFlowUpdate = () => {
+  void nextTick(() => {
+    updateAsideFlowState();
+  });
+};
+
+watch(
+  [
+    requestPreviewSchema,
+    responsePanels,
+    requestExampleOpen,
+    responseExampleOpen,
+  ],
+  scheduleAsideFlowUpdate,
+  { deep: true, flush: 'post' },
+);
+
 const hasAnyParameters = computed(() => {
   return (
     parametersInPath.value.length > 0 ||
     parametersInQuery.value.length > 0 ||
     Boolean(requestBody.value)
   );
+});
+
+const requestCodeActionSection = computed(() => {
+  if (requestBody.value) {
+    return 'body';
+  }
+  if (parametersInPath.value.length > 0) {
+    return 'path';
+  }
+  if (parametersInQuery.value.length > 0) {
+    return 'query';
+  }
+  return '';
 });
 
 const requestTypeCode = computed(() => {
@@ -1133,10 +1197,19 @@ onMounted(() => {
   scrollContainerRef.value?.addEventListener('scroll', handleDetailScroll, {
     passive: true,
   });
+  asideResizeObserver = new ResizeObserver(scheduleAsideFlowUpdate);
+  if (asideStackRef.value) {
+    asideResizeObserver.observe(asideStackRef.value);
+  }
+  window.addEventListener('resize', scheduleAsideFlowUpdate, { passive: true });
+  scheduleAsideFlowUpdate();
 });
 
 onBeforeUnmount(() => {
   scrollContainerRef.value?.removeEventListener('scroll', handleDetailScroll);
+  asideResizeObserver?.disconnect();
+  asideResizeObserver = null;
+  window.removeEventListener('resize', scheduleAsideFlowUpdate);
 });
 
 /**
@@ -1336,56 +1409,63 @@ defineExpose({
     class="document-detail"
     :class="{ 'document-detail--dark': isDark }"
   >
-    <div class="document-detail__stack">
-      <section class="panel hero-panel">
-        <div class="hero-panel__top">
-          <div class="hero-panel__tags">
-            <ElTag
-              v-for="tag in displayTags"
-              :key="tag"
-              effect="plain"
-              round
-              class="hero-tag"
-            >
-              {{ tag }}
-            </ElTag>
-          </div>
+    <div
+      class="document-detail__layout"
+      :class="{ 'document-detail__layout--single': !showExampleAside }"
+    >
+      <main class="document-detail__main">
+        <header class="hero-panel">
+          <div class="hero-panel__top">
+            <div class="hero-panel__text">
+              <div class="hero-panel__tags">
+                <ElTag
+                  v-for="tag in displayTags"
+                  :key="tag"
+                  effect="plain"
+                  round
+                  class="hero-tag"
+                >
+                  {{ tag }}
+                </ElTag>
+              </div>
+              <h1 class="hero-panel__title">
+                {{ summaryText }}
+              </h1>
+              <div
+                class="hero-panel__description"
+                v-html="descriptionText"
+              ></div>
+            </div>
 
-          <div class="hero-panel__actions">
-            <ElTooltip
-              content="复制接口文档信息给 claude code 等 AI 编程工具，让 AI 根据接口定义生成高质量的代码"
-              placement="top"
-              :enterable="false"
-            >
-              <ElButton
-                class="hero-panel__ai-button"
-                aria-label="复制接口文档信息给 AI 编程工具"
-                @click="handleCopyForAi"
+            <div class="hero-panel__actions">
+              <ElTooltip
+                content="复制接口文档信息给 claude code 等 AI 编程工具，让 AI 根据接口定义生成高质量的代码"
+                placement="top"
+                :enterable="false"
               >
-                <SvgAiCopyIcon class="hero-panel__ai-icon" />
+                <ElButton
+                  class="hero-panel__ai-button"
+                  aria-label="复制接口文档信息给 AI 编程工具"
+                  @click="handleCopyForAi"
+                >
+                  <SvgAiCopyIcon class="hero-panel__ai-icon" />
+                </ElButton>
+              </ElTooltip>
+              <ElButton
+                class="hero-panel__debug-button"
+                :style="methodStyle"
+                @click="handleTest"
+                :disabled="showTest"
+              >
+                {{ showTest ? '调试中' : '在线调试' }}
+                <ApiTestRunning
+                  v-if="showTest"
+                  class="ml-1 size-4 animate-spin"
+                />
+                <ApiTestRun v-else class="ml-1 size-4" />
               </ElButton>
-            </ElTooltip>
-            <ElButton
-              class="hero-panel__debug-button"
-              :style="methodStyle"
-              @click="handleTest"
-              :disabled="showTest"
-            >
-              {{ showTest ? '调试中' : '在线调试' }}
-              <ApiTestRunning
-                v-if="showTest"
-                class="ml-1 size-4 animate-spin"
-              />
-              <ApiTestRun v-else class="ml-1 size-4" />
-            </ElButton>
+            </div>
           </div>
-        </div>
-
-        <div class="hero-panel__body">
-          <h1 class="hero-panel__title">
-            {{ summaryText }}
-          </h1>
-          <div class="hero-panel__description" v-html="descriptionText"></div>
 
           <div class="hero-panel__endpoint">
             <span class="endpoint-method" :style="methodStyle">
@@ -1414,22 +1494,26 @@ defineExpose({
               />
             </button>
           </div>
-        </div>
 
-        <div v-if="showSecurityPanel" class="hero-panel__security">
-          <SecurityView
-            :auth-methods="authMethods"
-            :metadata="securityMetadata"
-          />
-        </div>
-      </section>
+          <div v-if="showSecurityPanel" class="hero-panel__security">
+            <SecurityView
+              :auth-methods="authMethods"
+              :metadata="securityMetadata"
+            />
+          </div>
+        </header>
 
-      <section v-if="hasAnyParameters" class="panel section-panel">
-        <div class="section-panel__header">
-          <div class="section-panel__title">请求参数</div>
-          <div class="section-panel__actions">
+        <section
+          v-if="parametersInPath.length > 0"
+          class="api-section api-section--path"
+        >
+          <div class="api-section__header">
+            <div class="api-section__heading">
+              <h2 class="api-section__title">路径参数</h2>
+              <span class="api-section__badge">Path</span>
+            </div>
             <button
-              v-if="requestTypeCode"
+              v-if="requestTypeCode && requestCodeActionSection === 'path'"
               type="button"
               class="section-panel__code-button"
               @click="openTypeCodeDialog('request')"
@@ -1437,151 +1521,100 @@ defineExpose({
               TS 代码
             </button>
           </div>
-        </div>
 
-        <ElCollapse v-model="activeRequestSections" class="request-collapse">
-          <ElCollapseItem
-            v-if="parametersInPath.length > 0"
-            name="path"
-            class="sub-panel request-collapse__item"
-          >
-            <template #title>
-              <div class="request-collapse__title">
-                <div class="sub-panel__title-wrap">
-                  <div class="sub-panel__title">Path 参数</div>
-                  <span class="sub-panel__count">{{
-                    parametersInPath.length
-                  }}</span>
-                </div>
-              </div>
-            </template>
+          <div class="api-card">
+            <ParameterView
+              v-for="item in parametersInPath"
+              :key="item.name"
+              :parameter="item"
+            />
+          </div>
+        </section>
 
-            <div class="sub-panel__content">
-              <ParameterView
-                v-for="item in parametersInPath"
-                :key="item.name"
-                :parameter="item"
-              />
+        <section
+          v-if="parametersInQuery.length > 0"
+          class="api-section api-section--query"
+        >
+          <div class="api-section__header">
+            <div class="api-section__heading">
+              <h2 class="api-section__title">查询参数</h2>
+              <span class="api-section__badge">Query</span>
             </div>
-          </ElCollapseItem>
+            <button
+              v-if="requestTypeCode && requestCodeActionSection === 'query'"
+              type="button"
+              class="section-panel__code-button"
+              @click="openTypeCodeDialog('request')"
+            >
+              TS 代码
+            </button>
+          </div>
 
-          <ElCollapseItem
-            v-if="parametersInQuery.length > 0"
-            name="query"
-            class="sub-panel request-collapse__item"
-          >
-            <template #title>
-              <div class="request-collapse__title">
-                <div class="sub-panel__title-wrap">
-                  <div class="sub-panel__title">Query 参数</div>
-                  <span class="sub-panel__count">{{
-                    parametersInQuery.length
-                  }}</span>
-                </div>
-              </div>
-            </template>
+          <div class="api-card">
+            <ParameterView
+              v-for="item in parametersInQuery"
+              :key="item.name"
+              :parameter="item"
+            />
+          </div>
+        </section>
 
-            <div class="sub-panel__content">
-              <ParameterView
-                v-for="item in parametersInQuery"
-                :key="item.name"
-                :parameter="item"
-              />
+        <section v-if="requestBody" class="api-section api-section--body">
+          <div class="api-section__header">
+            <div class="api-section__heading">
+              <h2 class="api-section__title">请求体</h2>
+              <span class="api-section__badge">Body</span>
             </div>
-          </ElCollapseItem>
-
-          <ElCollapseItem
-            v-if="requestBody"
-            name="body"
-            class="sub-panel request-collapse__item"
-          >
-            <template #title>
-              <div class="request-collapse__title">
-                <div class="sub-panel__title-wrap">
-                  <div class="sub-panel__title">Body 参数</div>
-                  <span class="sub-panel__count">{{
-                    requestBodyContentType
-                  }}</span>
-                </div>
-              </div>
-            </template>
-
-            <div class="sub-panel__content sub-panel__content--schema">
-              <div
-                class="schema-layout schema-layout--with-actions schema-layout--body"
-                :class="{
-                  'schema-layout--open':
-                    requestExampleOpen && requestPreviewSchema,
-                }"
+            <div class="api-section__meta">
+              <span class="api-section__content-type">
+                {{ requestBodyContentType }}
+              </span>
+              <button
+                v-if="requestTypeCode && requestCodeActionSection === 'body'"
+                type="button"
+                class="section-panel__code-button"
+                @click="openTypeCodeDialog('request')"
               >
-                <div class="schema-layout__main">
-                  <SchemaView
-                    v-if="requestSchemaForView"
-                    :key="requestBodyType || '__request_schema__'"
-                    :data="requestSchemaForView"
-                    mode="request"
-                    @variant-change="handleRequestSchemaVariantChange"
-                  />
-                </div>
-
-                <div class="schema-layout__side">
-                  <div
-                    class="schema-layout__floating-actions schema-layout__floating-actions--body"
-                  >
-                    <div
-                      v-if="Array.isArray(requestBody)"
-                      class="body-type-switch"
-                    >
-                      <ElButton
-                        v-for="item in requestBody"
-                        :key="item.variantKey || item.title"
-                        size="small"
-                        class="body-type-switch__button"
-                        :class="{
-                          'body-type-switch__button--active':
-                            isMatchedRequestBodyVariant(item, requestBodyType),
-                        }"
-                        @click="
-                          requestBodyType = resolveRequestBodyVariantValue(item)
-                        "
-                      >
-                        {{ item.title }}
-                      </ElButton>
-                    </div>
-
-                    <ElButton
-                      size="small"
-                      class="example-toggle-button"
-                      :class="{
-                        'example-toggle-button--active': requestExampleOpen,
-                      }"
-                      @click="requestExampleOpen = !requestExampleOpen"
-                    >
-                      {{ requestExampleOpen ? '收起示例' : 'JSON 示例' }}
-                    </ElButton>
-                  </div>
-
-                  <div
-                    v-if="requestExampleOpen && requestPreviewSchema"
-                    class="schema-layout__aside"
-                  >
-                    <JsonViewer
-                      class="json-panel app-json-schema-viewer"
-                      :schema="requestPreviewSchema"
-                      mode="request"
-                    />
-                  </div>
-                </div>
-              </div>
+                TS 代码
+              </button>
             </div>
-          </ElCollapseItem>
-        </ElCollapse>
-      </section>
+          </div>
 
-      <section class="panel section-panel">
-        <div class="section-panel__header">
-          <div class="section-panel__title">响应参数</div>
-          <div class="section-panel__actions">
+          <div class="api-card">
+            <div v-if="Array.isArray(requestBody)" class="body-type-switch">
+              <ElButton
+                v-for="item in requestBody"
+                :key="item.variantKey || item.title"
+                size="small"
+                class="body-type-switch__button"
+                :class="{
+                  'body-type-switch__button--active':
+                    isMatchedRequestBodyVariant(item, requestBodyType),
+                }"
+                @click="requestBodyType = resolveRequestBodyVariantValue(item)"
+              >
+                {{ item.title }}
+              </ElButton>
+            </div>
+
+            <div class="schema-layout schema-layout--body">
+              <SchemaView
+                v-if="requestSchemaForView"
+                :key="requestBodyType || '__request_schema__'"
+                :data="requestSchemaForView"
+                mode="request"
+                @variant-change="handleRequestSchemaVariantChange"
+              />
+            </div>
+          </div>
+        </section>
+
+        <section class="api-section api-section--response">
+          <div class="api-section__header">
+            <div class="api-section__heading">
+              <h2 class="api-section__title">响应参数</h2>
+              <span class="api-section__badge">Response</span>
+            </div>
             <button
               v-if="responseTypeCode"
               type="button"
@@ -1591,24 +1624,37 @@ defineExpose({
               TS 代码
             </button>
           </div>
-        </div>
 
-        <ElCollapse
-          v-if="responsePanels.length > 0"
-          v-model="activeResponseCode"
-          accordion
-          class="response-collapse"
-        >
-          <ElCollapseItem
-            v-for="panel in responsePanels"
-            :key="panel.code"
-            :name="panel.code"
-            class="response-collapse__item"
-          >
-            <template #title>
-              <div class="response-collapse__title">
+          <div v-if="responsePanels.length > 0" class="response-stack">
+            <div
+              v-for="panel in responsePanels"
+              :key="panel.code"
+              class="response-card"
+              :class="{
+                'response-card--open': activeResponseCode === panel.code,
+              }"
+            >
+              <button
+                type="button"
+                class="response-card__summary"
+                :aria-expanded="activeResponseCode === panel.code"
+                @click="
+                  activeResponseCode =
+                    activeResponseCode === panel.code ? '' : panel.code
+                "
+              >
                 <div class="response-collapse__status">
-                  <span class="response-code">{{ panel.code }}</span>
+                  <span
+                    class="response-code"
+                    :class="{
+                      'response-code--error':
+                        `${panel.code}`.startsWith('4') ||
+                        `${panel.code}`.startsWith('5'),
+                      'response-code--success': `${panel.code}`.startsWith('2'),
+                    }"
+                  >
+                    {{ panel.code }}
+                  </span>
                   <span class="response-desc">
                     {{ panel.response?.description || '响应结果' }}
                   </span>
@@ -1616,102 +1662,158 @@ defineExpose({
                 <span v-if="panel.contentType" class="response-content-type">
                   {{ panel.contentType }}
                 </span>
-              </div>
-            </template>
+              </button>
 
-            <div class="response-content">
-              <div
-                class="schema-layout schema-layout--with-actions schema-layout--response"
-                :class="{
-                  'schema-layout--open':
-                    responseExampleOpen[panel.code] &&
-                    (panel.schema || panel.hasExampleValue),
-                }"
-              >
-                <div class="schema-layout__main">
-                  <SchemaView
-                    v-if="panel.schema"
-                    :data="panel.schema"
-                    mode="response"
-                    @variant-change="
-                      handleResponseSchemaVariantChange(panel.code, $event)
-                    "
-                  />
-                  <div v-else class="empty-hint">暂无可展示的响应结构</div>
-                </div>
-
-                <div class="schema-layout__side">
-                  <div
-                    class="schema-layout__floating-actions schema-layout__floating-actions--response"
-                  >
-                    <div
-                      v-if="
-                        responseExampleOpen[panel.code] &&
-                        panel.exampleOptions.length > 1
-                      "
-                      class="response-content__actions"
-                    >
-                      <ElSelect
-                        :model-value="responseExampleSelection[panel.code]"
-                        size="small"
-                        class="response-example-select"
-                        popper-class="response-example-select__popper"
-                        placeholder="选择示例"
-                        @update:model-value="
-                          handleResponseExampleSelect(panel.code, $event)
-                        "
-                      >
-                        <ElOption
-                          v-for="item in panel.exampleOptions"
-                          :key="item.key"
-                          :label="item.label"
-                          :value="item.key"
-                        />
-                      </ElSelect>
-                    </div>
-
-                    <ElButton
-                      size="small"
-                      class="example-toggle-button"
-                      :class="{
-                        'example-toggle-button--active':
-                          responseExampleOpen[panel.code],
-                      }"
-                      @click.stop="toggleResponseExample(panel.code)"
-                    >
-                      {{
-                        responseExampleOpen[panel.code]
-                          ? '收起示例'
-                          : 'JSON 示例'
-                      }}
-                    </ElButton>
-                  </div>
-
-                  <div
-                    v-if="
-                      responseExampleOpen[panel.code] &&
-                      (panel.schema || panel.hasExampleValue)
-                    "
-                    class="schema-layout__aside"
-                  >
-                    <JsonViewer
-                      class="json-panel app-json-schema-viewer"
-                      :schema="
-                        getResponsePreviewSchema(panel.code, panel.schema)
-                      "
-                      :value="
-                        panel.hasExampleValue ? panel.exampleValue : undefined
-                      "
+              <Transition name="response-expand">
+                <div
+                  v-show="activeResponseCode === panel.code"
+                  class="response-content"
+                >
+                  <div class="schema-layout schema-layout--response">
+                    <SchemaView
+                      v-if="panel.schema"
+                      :data="panel.schema"
                       mode="response"
+                      @variant-change="
+                        handleResponseSchemaVariantChange(panel.code, $event)
+                      "
                     />
+                    <div v-else class="empty-hint">暂无可展示的响应结构</div>
                   </div>
                 </div>
-              </div>
+              </Transition>
             </div>
-          </ElCollapseItem>
-        </ElCollapse>
-        <div v-else class="empty-hint">暂无可展示的响应结构</div>
-      </section>
+          </div>
+          <div v-else class="empty-hint">暂无可展示的响应结构</div>
+        </section>
+      </main>
+
+      <aside v-if="showExampleAside" class="document-detail__aside">
+        <div
+          ref="asideStackRef"
+          class="document-detail__aside-stack"
+          :class="{
+            'document-detail__aside-stack--flow': asideShouldFlow,
+          }"
+        >
+          <section
+            v-if="requestPreviewSchema"
+            class="example-card example-card--request"
+            :class="{ 'example-card--collapsed': !requestExampleOpen }"
+          >
+            <div class="example-card__header">
+              <div class="example-card__meta">
+                <div class="example-card__title">Request Body Example</div>
+                <span class="example-card__content-type">
+                  {{ requestBodyContentType }}
+                </span>
+              </div>
+              <ElButton
+                size="small"
+                class="example-card__toggle"
+                :class="{ 'example-card__toggle--active': requestExampleOpen }"
+                @click="requestExampleOpen = !requestExampleOpen"
+              >
+                {{ requestExampleOpen ? '收起' : '展开' }}
+              </ElButton>
+            </div>
+
+            <Transition name="example-expand">
+              <div v-if="requestExampleOpen" class="example-card__body">
+                <JsonViewer
+                  class="json-panel app-json-schema-viewer"
+                  :schema="requestPreviewSchema"
+                  mode="request"
+                />
+              </div>
+            </Transition>
+          </section>
+
+          <section
+            v-for="panel in responsePanels"
+            :key="`example-${panel.code}`"
+            class="example-card example-card--response"
+            :class="{
+              'example-card--collapsed': !responseExampleOpen[panel.code],
+            }"
+          >
+            <div class="example-card__header">
+              <div class="example-card__meta">
+                <div class="example-card__title">Response Example</div>
+                <div class="example-card__status-line">
+                  <span
+                    class="response-code"
+                    :class="{
+                      'response-code--error':
+                        `${panel.code}`.startsWith('4') ||
+                        `${panel.code}`.startsWith('5'),
+                      'response-code--success': `${panel.code}`.startsWith('2'),
+                    }"
+                  >
+                    {{ panel.code }}
+                  </span>
+                  <span
+                    v-if="panel.contentType"
+                    class="example-card__content-type"
+                  >
+                    {{ panel.contentType }}
+                  </span>
+                </div>
+              </div>
+              <ElButton
+                size="small"
+                class="example-card__toggle"
+                :class="{
+                  'example-card__toggle--active':
+                    responseExampleOpen[panel.code],
+                }"
+                @click="toggleResponseExample(panel.code)"
+              >
+                {{ responseExampleOpen[panel.code] ? '收起' : '展开' }}
+              </ElButton>
+            </div>
+
+            <Transition name="example-expand">
+              <div
+                v-if="responseExampleOpen[panel.code]"
+                class="example-card__body"
+              >
+                <ElSelect
+                  v-if="panel.exampleOptions.length > 1"
+                  :model-value="responseExampleSelection[panel.code]"
+                  size="small"
+                  class="response-example-select"
+                  popper-class="response-example-select__popper"
+                  placeholder="选择示例"
+                  @update:model-value="
+                    handleResponseExampleSelect(panel.code, $event)
+                  "
+                >
+                  <ElOption
+                    v-for="item in panel.exampleOptions"
+                    :key="item.key"
+                    :label="item.label"
+                    :value="item.key"
+                  />
+                </ElSelect>
+
+                <JsonViewer
+                  v-if="panel.schema || panel.hasExampleValue"
+                  class="json-panel app-json-schema-viewer"
+                  :schema="getResponsePreviewSchema(panel.code, panel.schema)"
+                  :value="
+                    panel.hasExampleValue ? panel.exampleValue : undefined
+                  "
+                  mode="response"
+                />
+                <div v-else class="example-card__empty">
+                  暂无可展示的响应示例
+                </div>
+              </div>
+            </Transition>
+          </section>
+        </div>
+      </aside>
     </div>
 
     <!-- 右下角「回到顶部」按钮：随详情滚动容器悬浮 -->
@@ -1769,50 +1871,36 @@ defineExpose({
 </template>
 
 <style scoped lang="scss">
+@supports not (scrollbar-gutter: stable) {
+  .document-detail {
+    overflow-y: scroll;
+  }
+}
+
 .document-detail {
-  --doc-chip-radius: calc(var(--radius) * 0.62);
+  --doc-chip-radius: var(--radius);
   --doc-radius-xs: calc(var(--radius) * 0.56);
   --doc-radius-sm: calc(var(--radius) * 0.72);
   --doc-radius-md: calc(var(--radius) * 0.94);
   --doc-radius-lg: calc(var(--radius) * 1.18);
+  --doc-page-bg: #f8fafc;
+  --doc-panel-bg: #fff;
+  --doc-panel-border: #e2e8f0;
+  --doc-row-border: #f1f5f9;
+  --doc-muted-bg: #f1f5f9;
+  --doc-text-muted: #64748b;
+  --doc-example-bg: #fff;
+  --doc-example-header-bg: #f8fafc;
+  --doc-example-border: #e2e8f0;
+  --doc-example-title: #475569;
+  --doc-example-chip-bg: #f1f5f9;
   --el-border-radius-base: calc(var(--radius) * 0.75);
   --el-border-radius-small: calc(var(--radius) * 0.62);
-  --doc-panel-bg: var(--el-bg-color);
-  --doc-soft-bg: color-mix(
-    in srgb,
-    var(--el-bg-color) 86%,
-    var(--el-fill-color-light) 14%
-  );
-  --doc-soft-bg-alt: color-mix(
-    in srgb,
-    var(--el-bg-color) 82%,
-    var(--el-fill-color-light) 18%
-  );
-  --doc-soft-bg-strong: color-mix(
-    in srgb,
-    var(--el-bg-color) 78%,
-    var(--el-fill-color-light) 22%
-  );
-  --doc-section-outer-bg: color-mix(
-    in srgb,
-    var(--el-bg-color) 74%,
-    var(--el-fill-color-light) 26%
-  );
-  --doc-section-inner-bg: #fff;
-  --doc-panel-border: color-mix(
-    in srgb,
-    var(--el-text-color-primary) 12%,
-    transparent
-  );
-  --doc-sub-panel-border: color-mix(
-    in srgb,
-    var(--el-text-color-primary) 14%,
-    transparent
-  );
 
   height: 100%;
-  padding-right: 2px;
   overflow-y: auto;
+  scrollbar-gutter: stable;
+  background: var(--doc-page-bg);
 
   &::-webkit-scrollbar {
     width: 6px;
@@ -1821,7 +1909,7 @@ defineExpose({
   &::-webkit-scrollbar-thumb {
     background: color-mix(
       in srgb,
-      var(--el-text-color-primary) 10%,
+      var(--el-text-color-primary) 14%,
       transparent
     );
     border-radius: var(--doc-chip-radius);
@@ -1829,138 +1917,119 @@ defineExpose({
 }
 
 .document-detail--dark {
-  --doc-panel-bg: color-mix(
-    in srgb,
-    var(--el-bg-color) 90%,
-    var(--el-fill-color-light) 10%
-  );
-  --doc-soft-bg: color-mix(
-    in srgb,
-    var(--el-bg-color) 86%,
-    var(--el-fill-color-light) 14%
-  );
-  --doc-soft-bg-alt: color-mix(
-    in srgb,
-    var(--el-bg-color) 82%,
-    var(--el-fill-color-light) 18%
-  );
-  --doc-soft-bg-strong: color-mix(
-    in srgb,
-    var(--el-bg-color) 78%,
-    var(--el-fill-color-light) 22%
-  );
-  --doc-section-outer-bg: color-mix(
-    in srgb,
-    var(--el-bg-color) 76%,
-    var(--el-fill-color-light) 24%
-  );
-  --doc-section-inner-bg: color-mix(
-    in srgb,
-    var(--el-bg-color) 95%,
-    var(--el-fill-color-light) 5%
-  );
+  --doc-page-bg: var(--el-bg-color);
+  --doc-panel-bg: color-mix(in srgb, var(--el-bg-color) 92%, #fff 8%);
   --doc-panel-border: color-mix(
     in srgb,
     var(--el-text-color-primary) 22%,
     transparent
   );
-  --doc-sub-panel-border: color-mix(
+  --doc-row-border: color-mix(
     in srgb,
-    var(--el-text-color-primary) 20%,
+    var(--el-text-color-primary) 14%,
     transparent
   );
+  --doc-muted-bg: color-mix(
+    in srgb,
+    var(--el-bg-color) 86%,
+    var(--el-fill-color-light) 14%
+  );
+  --doc-text-muted: var(--el-text-color-secondary);
+  --doc-example-bg: #0d1117;
+  --doc-example-header-bg: #161b22;
+  --doc-example-border: #30363d;
+  --doc-example-title: #94a3b8;
+  --doc-example-chip-bg: #1f2937;
 }
 
-.document-detail__stack {
+.document-detail__layout {
   display: grid;
-  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+  gap: 40px;
+  max-width: 1280px;
+  min-height: 100%;
+  padding: 40px 24px 48px;
+  margin: 0 auto;
 }
 
-.panel {
-  position: relative;
-  overflow: hidden;
-  background: var(--doc-panel-bg);
-  border: 1px solid var(--doc-panel-border);
-  border-radius: var(--doc-radius-lg);
-  box-shadow: 0 8px 18px
-    color-mix(in srgb, var(--el-text-color-primary) 4%, transparent);
+.document-detail__layout--single {
+  grid-template-columns: minmax(0, 1fr);
 }
 
-.hero-panel,
-.section-panel {
-  padding: 16px;
+.document-detail__main,
+.document-detail__aside-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+  min-width: 0;
 }
 
-.section-panel {
-  background: var(--doc-section-outer-bg);
+.document-detail__aside {
+  min-width: 0;
+}
+
+.document-detail__aside-stack {
+  position: sticky;
+  top: 40px;
+  align-self: start;
+  overflow: visible;
+}
+
+.document-detail__aside-stack--flow {
+  position: static;
+  overflow: visible;
+}
+
+.hero-panel {
+  display: grid;
+  gap: 24px;
 }
 
 .hero-panel__top,
 .hero-panel__endpoint,
-.section-panel__header,
-.sub-panel__header,
-.response-content__toolbar,
-.sub-panel__title-wrap {
+.api-section__header,
+.api-section__heading,
+.api-section__meta,
+.response-card__summary,
+.response-collapse__status,
+.example-card__header,
+.example-card__meta,
+.example-card__status-line {
   display: flex;
-  gap: 16px;
   align-items: center;
+  min-width: 0;
+}
+
+.hero-panel__top,
+.api-section__header,
+.response-card__summary,
+.example-card__header {
   justify-content: space-between;
+}
+
+.hero-panel__top {
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.hero-panel__text {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
 }
 
 .hero-panel__tags {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  min-width: 0;
 }
 
 .hero-tag {
-  color: var(--el-text-color-secondary);
-  background: color-mix(
-    in srgb,
-    var(--el-bg-color) 82%,
-    var(--el-fill-color-light) 18%
-  );
-  border: 1px solid var(--el-border-color-light);
-}
-
-.hero-panel__body {
-  display: grid;
-  gap: 10px;
-  margin-top: 12px;
-}
-
-.hero-panel__security {
-  padding: 10px 12px;
-  margin-top: 12px;
-  background: var(--doc-soft-bg-strong);
-  border: 1px solid var(--doc-sub-panel-border);
-  border-radius: var(--doc-radius-sm);
-}
-
-.hero-panel__title {
-  font-size: 24px;
-  font-weight: 800;
-  line-height: 1.16;
-  color: var(--el-text-color-primary);
-}
-
-.hero-panel__description {
-  font-size: 13px;
-  line-height: 1.7;
-  color: var(--el-text-color-regular);
-}
-
-.hero-panel__description :deep(p) {
-  margin: 0;
-}
-
-.hero-panel__debug-button {
-  flex: none;
-  min-width: 108px;
-  height: 36px;
-  padding: 0 14px;
-  font-weight: 700;
-  border: none;
+  max-width: 100%;
+  color: var(--doc-text-muted);
+  background: var(--doc-panel-bg);
+  border-color: var(--doc-panel-border);
 }
 
 .hero-panel__actions {
@@ -1978,31 +2047,18 @@ defineExpose({
   --el-button-hover-border-color: transparent;
   --el-button-active-border-color: transparent;
 
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   width: 36px;
   height: 36px;
   padding: 0;
-  font-weight: 700;
-  color: var(--el-color-primary);
+  color: var(--doc-text-muted);
   background: transparent;
-  border: 1px solid transparent;
+  border: none;
 }
 
-.hero-panel__ai-button:hover {
-  color: var(--el-color-primary);
-  background: color-mix(
-    in srgb,
-    var(--el-color-primary-light-9) 72%,
-    transparent
-  );
-}
-
+.hero-panel__ai-button:hover,
 .hero-panel__ai-button:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px
-    color-mix(in srgb, var(--el-color-primary-light-8) 70%, transparent);
+  color: var(--el-color-primary);
+  background: var(--doc-muted-bg);
 }
 
 .hero-panel__ai-icon {
@@ -2010,26 +2066,57 @@ defineExpose({
   height: 18px;
 }
 
+.hero-panel__debug-button {
+  flex: none;
+  min-width: 112px;
+  height: 40px;
+  padding: 0 18px;
+  font-weight: 700;
+  border: none;
+  box-shadow: 0 8px 18px
+    color-mix(in srgb, var(--el-color-primary) 16%, transparent);
+}
+
+.hero-panel__title {
+  margin: 0;
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 1.2;
+  color: var(--el-text-color-primary);
+  letter-spacing: 0;
+}
+
+.hero-panel__description {
+  max-width: 760px;
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--doc-text-muted);
+}
+
+.hero-panel__description :deep(p) {
+  margin: 0;
+}
+
 .hero-panel__endpoint {
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: flex-start;
+  gap: 10px;
+  min-height: 56px;
   padding: 10px;
-  margin-top: 2px;
-  background: var(--doc-soft-bg-alt);
-  border: 1px solid var(--doc-sub-panel-border);
-  border-radius: var(--doc-radius-sm);
+  background: var(--doc-panel-bg);
+  border: 1px solid var(--doc-panel-border);
+  border-radius: var(--doc-radius-lg);
+  box-shadow: 0 8px 18px rgb(15 23 42 / 5%);
 }
 
 .endpoint-method {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 72px;
-  height: 32px;
+  min-width: 70px;
+  height: 34px;
   padding: 0 12px;
   font-size: 12px;
   font-weight: 800;
+  letter-spacing: 0;
   border-radius: var(--doc-chip-radius);
 }
 
@@ -2043,72 +2130,114 @@ defineExpose({
 
 .endpoint-prefix {
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 34px;
+  height: 34px;
   padding: 0;
-  color: var(--el-text-color-secondary);
+  color: var(--doc-text-muted);
   cursor: pointer;
-  background: transparent;
-  border: none;
   border-radius: var(--doc-chip-radius);
-  box-shadow: none;
-  transition: all 0.16s ease;
+  transition:
+    color 0.16s ease,
+    background-color 0.16s ease;
 }
 
 .endpoint-prefix__icon {
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
 }
 
 .endpoint-path {
   flex: 1;
   min-width: 0;
   padding: 8px 10px;
+  overflow-x: auto;
+  font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
+  font-size: 15px;
+  color: var(--el-text-color-primary);
   cursor: pointer;
-  background: color-mix(
-    in srgb,
-    var(--el-bg-color) 84%,
-    var(--el-fill-color-light) 16%
-  );
-  border-radius: var(--doc-radius-xs);
-  transition: all 0.2s ease;
+  scrollbar-width: none;
+  border-radius: var(--doc-chip-radius);
+  transition:
+    color 0.16s ease,
+    background-color 0.16s ease;
+}
+
+.endpoint-path::-webkit-scrollbar {
+  display: none;
 }
 
 .endpoint-prefix:hover,
 .endpoint-path:hover {
-  background: color-mix(
-    in srgb,
-    var(--el-bg-color) 72%,
-    var(--el-color-primary-light-9) 28%
-  );
-}
-
-.endpoint-prefix:hover {
   color: var(--el-color-primary);
   background: color-mix(
     in srgb,
-    var(--el-color-primary-light-9) 65%,
+    var(--el-color-primary-light-9) 72%,
     transparent
   );
-  transform: none;
 }
 
-.section-panel__header {
-  margin-bottom: 10px;
+.hero-panel__security {
+  padding: 12px;
+  background: var(--doc-muted-bg);
+  border: 1px solid var(--doc-panel-border);
+  border-radius: var(--doc-radius-sm);
 }
 
-.section-panel__actions {
-  display: flex;
+.api-section {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.api-section__header {
+  gap: 16px;
+}
+
+.api-section__heading {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.api-section__title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--el-text-color-primary);
+}
+
+.api-section__badge {
+  display: inline-flex;
   align-items: center;
+  min-height: 24px;
+  padding: 1px 10px;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--doc-text-muted);
+  text-transform: uppercase;
+  background: var(--doc-muted-bg);
+  border: 1px solid var(--doc-panel-border);
+  border-radius: var(--doc-chip-radius);
+}
+
+.api-section__meta {
+  flex: none;
+  flex-wrap: wrap;
+  gap: 10px;
   justify-content: flex-end;
 }
 
-.section-panel__title,
-.sub-panel__title {
-  font-size: 15px;
-  font-weight: 800;
-  line-height: 1.2;
-  color: var(--el-text-color-primary);
+.api-section__content-type,
+.response-content-type,
+.example-card__content-type {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--doc-text-muted);
+  white-space: nowrap;
 }
 
 .section-panel__code-button {
@@ -2116,19 +2245,14 @@ defineExpose({
   align-items: center;
   justify-content: center;
   min-width: 66px;
-  height: 28px;
+  height: 30px;
   padding: 0 10px;
-  font-size: 11.5px;
-  font-weight: 700;
-  color: var(--el-text-color-secondary);
-  letter-spacing: 0.01em;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--doc-text-muted);
   cursor: pointer;
-  background: color-mix(
-    in srgb,
-    var(--el-bg-color) 86%,
-    var(--el-fill-color-light) 14%
-  );
-  border: 1px solid color-mix(in srgb, var(--el-border-color) 92%, transparent);
+  background: var(--doc-panel-bg);
+  border: 1px solid var(--doc-panel-border);
   border-radius: var(--doc-chip-radius);
   transition:
     color 0.16s ease,
@@ -2140,8 +2264,8 @@ defineExpose({
   color: var(--el-color-primary);
   background: color-mix(
     in srgb,
-    var(--el-color-primary-light-9) 72%,
-    var(--el-bg-color) 28%
+    var(--el-color-primary-light-9) 76%,
+    var(--doc-panel-bg) 24%
   );
   border-color: color-mix(
     in srgb,
@@ -2150,204 +2274,38 @@ defineExpose({
   );
 }
 
-.section-panel__stack {
-  display: grid;
-  gap: 12px;
-}
-
-.request-collapse {
-  --el-collapse-border-color: transparent;
-}
-
-.request-collapse__item {
-  margin-bottom: 12px;
-}
-
-.request-collapse__item:last-child {
-  margin-bottom: 0;
-}
-
-.request-collapse :deep(.el-collapse-item__wrap) {
-  background: transparent;
-  border-bottom: none;
-}
-
-.request-collapse :deep(.el-collapse-item__header) {
-  height: auto;
-  padding: 0;
-  line-height: normal;
-  background: transparent;
-  border-bottom: none;
-  border-radius: var(--doc-radius-xs);
-  transition:
-    background-color 0.16s ease,
-    box-shadow 0.16s ease;
-}
-
-.request-collapse :deep(.el-collapse-item__header:hover) {
-  background: color-mix(
-    in srgb,
-    var(--el-color-primary-light-9) 36%,
-    transparent
-  );
-}
-
-.request-collapse :deep(.el-collapse-item__header:focus-visible) {
-  outline: none;
-  box-shadow: 0 0 0 2px
-    color-mix(in srgb, var(--el-color-primary-light-8) 70%, transparent);
-}
-
-.request-collapse :deep(.el-collapse-item__content) {
-  padding: 8px 0 0;
-}
-
-.request-collapse :deep(.el-collapse-item__arrow) {
-  margin: 0 6px 0 10px;
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-}
-
-.request-collapse
-  :deep(.el-collapse-item__header.is-active .el-collapse-item__arrow),
-.request-collapse
-  :deep(.el-collapse-item__header:hover .el-collapse-item__arrow) {
-  color: var(--el-color-primary);
-}
-
-.request-collapse__title {
-  display: flex;
-  flex: 1;
-  align-items: center;
+.api-card,
+.response-card {
   min-width: 0;
-}
-
-.sub-panel {
-  min-width: 0;
-  padding: 12px;
-  background: var(--doc-section-inner-bg);
-  border: 1px solid var(--doc-sub-panel-border);
-  border-radius: var(--doc-radius-sm);
-}
-
-.sub-panel__header {
-  margin-bottom: 6px;
-}
-
-.sub-panel__summary {
-  position: relative;
-  display: flex;
-  align-items: center;
-  padding-right: 28px;
-  margin-bottom: 0;
-  cursor: pointer;
-  user-select: none;
-  list-style: none;
-  border-radius: var(--doc-radius-xs);
-  transition:
-    background-color 0.16s ease,
-    box-shadow 0.16s ease;
-}
-
-.sub-panel__summary::-webkit-details-marker {
-  display: none;
-}
-
-.sub-panel__summary::after {
-  position: absolute;
-  top: 50%;
-  right: 6px;
-  width: 8px;
-  height: 8px;
-  content: '';
-  border-right: 1.5px solid var(--el-text-color-secondary);
-  border-bottom: 1.5px solid var(--el-text-color-secondary);
-  transform: translateY(-68%) rotate(45deg);
-  transition: transform 0.16s ease;
-}
-
-.sub-panel__summary:hover {
-  background: color-mix(
-    in srgb,
-    var(--el-color-primary-light-9) 36%,
-    transparent
-  );
-}
-
-.sub-panel__summary:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px
-    color-mix(in srgb, var(--el-color-primary-light-8) 70%, transparent);
-}
-
-.sub-panel--collapsible[open] > .sub-panel__summary {
-  margin-bottom: 8px;
-}
-
-.sub-panel--collapsible[open] > .sub-panel__summary::after {
-  transform: translateY(-36%) rotate(225deg);
-}
-
-.sub-panel__content {
-  min-width: 0;
-}
-
-.sub-panel__content--schema {
-  padding-top: 2px;
-}
-
-.sub-panel__header--wrap {
-  flex-wrap: wrap;
-}
-
-.sub-panel__count {
-  display: inline-flex;
-  align-items: center;
-  min-height: 24px;
-  padding: 0 10px;
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--el-text-color-secondary);
-  background: var(--el-fill-color-light);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: var(--doc-chip-radius);
-}
-
-.sub-panel__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  justify-content: flex-end;
+  overflow: hidden;
+  background: var(--doc-panel-bg);
+  border: 1px solid var(--doc-panel-border);
+  border-radius: var(--doc-radius-lg);
+  box-shadow: 0 8px 18px rgb(15 23 42 / 4%);
 }
 
 .body-type-switch {
-  display: inline-flex;
-  flex-wrap: nowrap;
-  gap: 6px;
-  align-items: center;
-  min-width: 0;
-  overflow: hidden;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 16px;
+  background: var(--doc-muted-bg);
+  border-bottom: 1px solid var(--doc-row-border);
 }
 
 .body-type-switch__button {
-  min-height: 30px;
+  min-height: 28px;
   padding: 0 10px;
   font-size: 12px;
-  color: var(--el-text-color-secondary);
-  background: color-mix(
-    in srgb,
-    var(--doc-panel-bg) 90%,
-    var(--el-fill-color-light) 10%
-  );
-  border: 1px solid var(--el-border-color-lighter);
+  color: var(--doc-text-muted);
+  background: var(--doc-panel-bg);
+  border: 1px solid var(--doc-panel-border);
   border-radius: var(--doc-chip-radius);
-  transition: all 0.2s ease;
 }
 
 .body-type-switch__button:hover {
   color: var(--el-text-color-primary);
-  border-color: color-mix(in srgb, var(--el-color-primary) 35%, transparent);
+  border-color: color-mix(in srgb, var(--el-color-primary) 32%, transparent);
 }
 
 .body-type-switch__button--active {
@@ -2356,220 +2314,60 @@ defineExpose({
   border-color: var(--el-color-primary-light-7);
 }
 
-.example-toggle-button {
-  min-width: 88px;
-  height: 30px;
-  padding: 0 12px;
-  color: var(--el-color-primary);
-  background: color-mix(
-    in srgb,
-    var(--doc-panel-bg) 88%,
-    var(--el-color-primary-light-9) 12%
-  );
-  border: 1px solid color-mix(in srgb, var(--el-color-primary) 28%, transparent);
-  border-radius: var(--doc-chip-radius);
-  box-shadow: inset 0 0 0 1px
-    color-mix(in srgb, var(--el-color-primary) 8%, transparent);
-  transition: all 0.2s ease;
-}
-
-.example-toggle-button:hover {
-  color: var(--el-color-primary);
-  background: color-mix(
-    in srgb,
-    var(--doc-panel-bg) 74%,
-    var(--el-color-primary-light-9) 26%
-  );
-  border-color: color-mix(in srgb, var(--el-color-primary) 42%, transparent);
-}
-
-.example-toggle-button--active {
-  color: var(--el-color-primary);
-  background: var(--el-color-primary-light-9);
-  border-color: var(--el-color-primary-light-7);
-}
-
 .schema-layout {
-  position: relative;
+  min-width: 0;
+  padding: 6px 16px 8px;
+}
+
+.schema-layout--body,
+.schema-layout--response {
+  background: var(--doc-panel-bg);
+}
+
+.response-stack {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 10px;
-  align-items: start;
-  transition: grid-template-columns 0.24s ease;
+  gap: 12px;
 }
 
-.schema-layout--with-actions {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.schema-layout--with-actions.schema-layout--open {
-  grid-template-columns: minmax(0, 1.12fr) minmax(280px, 0.88fr);
-  column-gap: 12px;
-}
-
-.schema-layout__main {
-  min-width: 0;
-}
-
-.schema-layout__side {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  place-self: start end;
-  min-width: 0;
-}
-
-.schema-layout--with-actions.schema-layout--open .schema-layout__side {
-  position: static;
-  justify-self: stretch;
+.response-card__summary {
+  gap: 12px;
   width: 100%;
-}
-
-.schema-layout__floating-actions {
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 8px;
-  align-items: center;
-  justify-content: flex-end;
-  min-width: 0;
-}
-
-.schema-layout--body:not(.schema-layout--open) .schema-layout__side {
-  position: absolute;
-  top: 0;
-  right: 0;
-  z-index: 1;
-  max-width: min(100%, 720px);
-}
-
-.schema-layout--body:not(.schema-layout--open),
-.schema-layout__floating-actions--body,
-.schema-layout--body:not(.schema-layout--open) .body-type-switch {
-  flex-wrap: nowrap;
-}
-
-.schema-layout--with-actions:not(.schema-layout--open) .schema-layout__main {
-  /* 字段列表占满整列，分割线延伸至内容区最右边界；
-     「JSON 示例」按钮为绝对定位浮层，仅悬浮于右上角，不再用整列右内边距挤压字段，
-     避免字段分割线被截断。 */
-  grid-column: 1 / -1;
-}
-
-.schema-layout--with-actions:not(.schema-layout--open)
-  .schema-layout__floating-actions {
-  justify-content: flex-end;
-}
-
-.schema-layout--response:not(.schema-layout--open) .schema-layout__side {
-  position: absolute;
-  top: 0;
-  right: 0;
-  z-index: 1;
-}
-
-.schema-layout--with-actions.schema-layout--open
-  .schema-layout__floating-actions {
-  width: 100%;
-}
-
-.schema-layout__floating-actions--body {
-  align-items: center;
-}
-
-.schema-layout__floating-actions--response {
-  align-items: center;
-}
-
-.schema-layout__aside {
-  width: 100%;
-  min-width: 0;
-  padding: 0;
-  background: transparent;
-  border: none;
-  border-radius: 0;
-}
-
-.json-panel {
-  background: var(--doc-section-inner-bg);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: var(--doc-radius-xs);
-}
-
-.json-panel :deep(.theme-light),
-.json-panel :deep(.theme-dark) {
-  padding: 10px;
+  padding: 14px 16px;
+  color: inherit;
+  cursor: pointer;
+  list-style: none;
   background: transparent;
   border: none;
 }
 
-.json-panel :deep(.json-node) {
-  margin: 0;
+.response-card__summary::-webkit-details-marker {
+  display: none;
 }
 
-.json-panel :deep(.node-header),
-.json-panel :deep(.node-primitive) {
-  min-height: 20px;
-  font-size: 12px;
+.response-card__summary::after {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  content: '';
+  border-right: 1.5px solid var(--doc-text-muted);
+  border-bottom: 1.5px solid var(--doc-text-muted);
+  transform: rotate(45deg);
+  transition: transform 0.16s ease;
 }
 
-.response-collapse {
-  --el-collapse-border-color: transparent;
-
-  :deep(.el-collapse-item__wrap) {
-    background: transparent;
-    border-bottom: none;
-  }
-
-  :deep(.el-collapse-item__header) {
-    height: auto;
-    padding: 0;
-    background: transparent;
-    border-bottom: none;
-  }
-
-  :deep(.el-collapse-item__content) {
-    padding-bottom: 0;
-  }
-
-  :deep(.el-collapse-item__arrow) {
-    margin: 0 0 0 8px;
-    font-size: 12px;
-  }
-}
-
-.response-collapse__item {
-  padding: 2px 10px;
-  margin-bottom: 6px;
-  background: var(--doc-section-inner-bg);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: var(--doc-radius-sm);
-}
-
-.response-collapse__item:last-child {
-  margin-bottom: 0;
-}
-
-.response-collapse__title {
-  display: flex;
-  flex: 1;
-  gap: 8px;
-  align-items: center;
-  justify-content: space-between;
-  min-width: 0;
+.response-card--open > .response-card__summary::after {
+  transform: rotate(225deg);
 }
 
 .response-collapse__status {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  min-width: 0;
+  gap: 8px;
 }
 
 .response-code {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 42px;
+  min-width: 48px;
   height: 24px;
   padding: 0 8px;
   font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
@@ -2581,69 +2379,227 @@ defineExpose({
   border-radius: var(--doc-chip-radius);
 }
 
+.response-code--success {
+  color: #059669;
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+}
+
+.response-code--error {
+  color: #e11d48;
+  background: #fff1f2;
+  border-color: #fecdd3;
+}
+
+.document-detail--dark .response-code--success {
+  color: #34d399;
+  background: rgb(16 185 129 / 12%);
+  border-color: rgb(16 185 129 / 32%);
+}
+
+.document-detail--dark .response-code--error {
+  color: #fb7185;
+  background: rgb(244 63 94 / 12%);
+  border-color: rgb(244 63 94 / 32%);
+}
+
 .response-desc {
-  font-size: 12px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
   font-weight: 700;
   color: var(--el-text-color-primary);
+  white-space: nowrap;
 }
 
 .response-content-type {
   flex: none;
-  max-width: 40%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 11px;
-  color: var(--el-text-color-secondary);
-  white-space: nowrap;
+  max-width: 42%;
 }
 
 .response-content {
   width: 100%;
-  margin-top: 1px;
+  border-top: 1px solid var(--doc-row-border);
 }
 
-.response-collapse :deep(.el-collapse-item__content),
-.response-collapse :deep(.el-collapse-item__wrap),
-.response-content .schema-layout,
-.response-content .schema-layout__main {
-  width: 100%;
+.response-expand-enter-active,
+.response-expand-leave-active {
+  overflow: hidden;
+  transition:
+    max-height 0.2s ease,
+    opacity 0.16s ease;
 }
 
-.response-content__actions {
-  display: inline-flex;
-  flex: 1;
-  justify-content: flex-end;
+.response-expand-enter-from,
+.response-expand-leave-to {
+  max-height: 0;
+  opacity: 0;
+}
+
+.response-expand-enter-to,
+.response-expand-leave-from {
+  max-height: 2400px;
+  opacity: 1;
+}
+
+.empty-hint {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 12px;
+  font-size: 13px;
+  color: var(--doc-text-muted);
+  background: var(--doc-muted-bg);
+  border-radius: var(--doc-radius-xs);
+}
+
+.example-card {
   min-width: 0;
+  overflow: hidden;
+  background: var(--doc-example-bg);
+  border: 1px solid var(--doc-example-border);
+  border-radius: var(--doc-radius-lg);
+  box-shadow: 0 12px 26px rgb(15 23 42 / 7%);
+}
+
+.example-card__header {
+  gap: 12px;
+  min-height: 44px;
+  padding: 10px 12px;
+  background: var(--doc-example-header-bg);
+  border-bottom: 1px solid var(--doc-example-border);
+}
+
+.example-card--collapsed .example-card__header {
+  border-bottom: none;
+}
+
+.example-expand-enter-active,
+.example-expand-leave-active {
+  overflow: hidden;
+  transition:
+    max-height 0.2s ease,
+    opacity 0.16s ease;
+}
+
+.example-expand-enter-from,
+.example-expand-leave-to {
+  max-height: 0;
+  opacity: 0;
+}
+
+.example-expand-enter-to,
+.example-expand-leave-from {
+  max-height: 1200px;
+  opacity: 1;
+}
+
+.example-card__meta {
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+}
+
+.example-card__title {
+  font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--doc-example-title);
+}
+
+.example-card__status-line {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.example-card__content-type {
+  max-width: 160px;
+  padding: 2px 7px;
+  color: var(--doc-example-title);
+  background: var(--doc-example-chip-bg);
+  border: 1px solid var(--doc-example-border);
+  border-radius: var(--doc-chip-radius);
+}
+
+.example-card__toggle {
+  --el-button-bg-color: transparent;
+  --el-button-border-color: var(--doc-example-border);
+  --el-button-hover-bg-color: var(--doc-example-chip-bg);
+  --el-button-hover-border-color: var(--doc-example-border);
+  --el-button-active-bg-color: var(--doc-example-chip-bg);
+
+  flex: none;
+  min-width: 48px;
+  height: 26px;
+  padding: 0 8px;
+  font-size: 12px;
+  color: var(--doc-example-title);
+  border-radius: var(--doc-chip-radius);
+}
+
+.example-card__toggle--active {
+  color: #93c5fd;
+  border-color: rgb(59 130 246 / 42%);
+}
+
+.example-card__body {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  background: var(--doc-example-bg);
+}
+
+.example-card__empty {
+  min-height: 40px;
+  padding: 10px;
+  font-size: 12px;
+  color: var(--doc-text-muted);
+  background: var(--doc-muted-bg);
+  border: 1px solid var(--doc-example-border);
+  border-radius: var(--doc-radius-sm);
+}
+
+.json-panel {
+  width: 100%;
+  min-width: 0;
+  min-height: 120px;
+  max-height: none;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--doc-example-bg);
+  border: none;
+  border-radius: 0;
+}
+
+.json-panel.app-json-schema-viewer {
+  border: none;
+  border-radius: 0;
 }
 
 .response-example-select {
-  width: min(240px, 100%);
-  min-width: 168px;
+  width: 100%;
 }
 
 .response-example-select :deep(.el-select__wrapper) {
   min-height: 30px;
   padding: 0 10px;
-  background: color-mix(
-    in srgb,
-    var(--doc-panel-bg) 90%,
-    var(--el-fill-color-light) 10%
-  );
+  background: var(--doc-example-bg);
   border-radius: var(--doc-chip-radius);
-  box-shadow: inset 0 0 0 1px var(--el-border-color-lighter);
-  transition: all 0.2s ease;
+  box-shadow: inset 0 0 0 1px var(--doc-example-border);
 }
 
 .response-example-select:hover :deep(.el-select__wrapper),
 .response-example-select :deep(.el-select__wrapper.is-focused) {
-  box-shadow: inset 0 0 0 1px
-    color-mix(in srgb, var(--el-color-primary) 35%, transparent);
+  box-shadow: inset 0 0 0 1px var(--el-color-primary-light-5);
 }
 
 .response-example-select :deep(.el-select__selected-item),
 .response-example-select :deep(.el-select__placeholder) {
   font-size: 12px;
-  color: var(--el-text-color-secondary);
+  color: var(--doc-example-title);
 }
 
 .response-example-select :deep(.el-select__selected-item) {
@@ -2652,18 +2608,6 @@ defineExpose({
 
 :deep(.response-example-select__popper .el-select-dropdown__item) {
   font-size: 12px;
-}
-
-.empty-hint {
-  display: inline-flex;
-  align-items: center;
-  min-height: 40px;
-  padding: 0 12px;
-  font-size: 13px;
-  color: var(--el-text-color-secondary);
-  background: var(--doc-section-inner-bg);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: var(--doc-radius-xs);
 }
 
 .document-detail__backtop {
@@ -2800,10 +2744,29 @@ defineExpose({
   height: 100%;
 }
 
+@media (max-width: 1180px) {
+  .document-detail__layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+    padding: 18px 20px 32px;
+  }
+
+  .document-detail__aside-stack {
+    position: static;
+    max-height: none;
+    padding-right: 0;
+    overflow: visible;
+  }
+
+  .json-panel {
+    max-height: none;
+  }
+}
+
 @media (max-width: 768px) {
-  .hero-panel,
-  .section-panel {
-    padding: 14px;
+  .document-detail__layout {
+    gap: 18px;
+    padding: 24px 14px 32px;
   }
 
   .hero-panel__title {
@@ -2811,56 +2774,34 @@ defineExpose({
   }
 
   .hero-panel__top,
-  .section-panel__header,
-  .response-collapse__title {
+  .api-section__header,
+  .response-card__summary,
+  .example-card__header {
     flex-direction: column;
     align-items: stretch;
   }
 
   .hero-panel__tags,
   .hero-panel__actions,
-  .section-panel__actions,
-  .sub-panel__actions,
-  .sub-panel__title-wrap,
-  .response-content__actions {
+  .api-section__heading,
+  .api-section__meta,
+  .response-collapse__status,
+  .example-card__meta {
     justify-content: flex-start;
   }
 
-  .section-panel__code-button {
-    pointer-events: auto;
-    opacity: 1;
-    transform: none;
+  .hero-panel__endpoint {
+    align-items: stretch;
   }
 
-  .response-example-select {
+  .endpoint-path {
     width: 100%;
   }
 
-  .sub-panel__summary {
-    align-items: center;
-  }
-
-  .schema-layout--with-actions,
-  .schema-layout--with-actions.schema-layout--open {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .schema-layout__side,
-  .schema-layout__floating-actions {
-    position: static;
-    justify-content: flex-start;
-    width: 100%;
-    max-width: none;
-  }
-
-  .schema-layout--body:not(.schema-layout--open)
-    .schema-layout__floating-actions--body,
-  .schema-layout--body:not(.schema-layout--open) .body-type-switch {
-    flex-wrap: wrap;
-  }
-
-  .response-collapse__title,
-  .response-collapse__status {
+  .response-card__summary,
+  .response-collapse__status,
+  .example-card__header,
+  .example-card__meta {
     gap: 8px;
     align-items: flex-start;
   }

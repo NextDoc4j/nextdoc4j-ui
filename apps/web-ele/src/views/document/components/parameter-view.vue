@@ -94,9 +94,9 @@ const formatValue = (value: unknown) => {
           :class="{ 'parameter-item__name--required': parameter.required }"
         >
           {{ parameter.name }}
-          <sup v-if="parameter.required" class="parameter-item__required-star">
-            *
-          </sup>
+          <span v-if="parameter.required" class="parameter-item__required-tag">
+            必填
+          </span>
         </div>
         <div class="parameter-item__type">{{ typeLabel }}</div>
         <div v-if="plainDescription" class="parameter-item__summary">
@@ -172,43 +172,44 @@ const formatValue = (value: unknown) => {
 
 <style scoped>
 .parameter-item {
-  --field-chip-radius: calc(var(--radius, 12px) * 0.82);
+  --field-chip-radius: 8px;
   --field-chip-bg: var(--el-fill-color-light);
   --field-chip-border: var(--el-border-color);
   --field-chip-text: var(--el-text-color-primary);
   --field-chip-value-weight: 600;
   --field-required: var(--el-color-danger);
-  --field-leading-gutter: 26px;
 
-  padding: 10px 12px;
-
-  /* 不向左右负外边距溢出：外层 ElCollapse 的 __wrap 为 overflow:hidden，
-     负 margin 会使行左侧圆角被裁切；贴齐折叠内容区即可完整显示圆角 */
+  padding: 18px 0;
   margin: 0;
-  border-bottom: 1px solid var(--el-border-color-lighter);
-  border-radius: var(--field-chip-radius);
+  border-bottom: 1px solid var(--field-chip-border);
   transition: background-color 0.2s ease;
 }
 
 .parameter-item:hover {
-  background-color: var(--el-fill-color);
+  background-color: color-mix(
+    in srgb,
+    var(--el-fill-color-light) 42%,
+    transparent
+  );
 }
 
 .parameter-item:last-child {
-  padding-bottom: 0;
   border-bottom: none;
 }
 
 .parameter-item__headline {
   min-width: 0;
-  padding-left: var(--field-leading-gutter);
+  padding: 0 20px;
 }
 
 .parameter-item__title-line {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 10px;
-  align-items: baseline;
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(120px, 1fr) minmax(
+      180px,
+      2fr
+    );
+  gap: 16px;
+  align-items: center;
   min-width: 0;
 }
 
@@ -216,7 +217,9 @@ const formatValue = (value: unknown) => {
   position: relative;
   display: inline-flex;
   flex: 0 1 auto;
-  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
   min-width: 0;
   max-width: 100%;
   font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
@@ -229,34 +232,52 @@ const formatValue = (value: unknown) => {
 }
 
 .parameter-item__name--required {
-  color: var(--field-required);
+  color: var(--el-text-color-primary);
 }
 
-.parameter-item__required-star {
-  position: absolute;
-  top: 0;
-  left: -10px;
+.parameter-item__required-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 0 6px;
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
   font-size: 10px;
-  font-style: normal;
   font-weight: 700;
-  line-height: 1;
+  line-height: 18px;
   color: var(--field-required);
-  transform: translate(0, -32%);
+  background: color-mix(
+    in srgb,
+    var(--el-color-danger-light-9) 88%,
+    transparent
+  );
+  border: 1px solid
+    color-mix(in srgb, var(--el-color-danger-light-7) 86%, transparent);
+  border-radius: 6px;
 }
 
 .parameter-item__type {
   display: inline-flex;
   flex: 0 1 auto;
-  align-items: baseline;
+  align-items: center;
+  width: fit-content;
   min-width: 0;
   max-width: 100%;
+  min-height: 24px;
+  padding: 2px 8px;
   font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
   line-height: 1.5;
-  color: var(--el-text-color-secondary);
+  color: var(--el-color-primary);
   overflow-wrap: anywhere;
   white-space: normal;
+  background: var(--el-color-primary-light-9);
+  border-radius: 7px;
 }
 
 .parameter-item__summary,
@@ -268,21 +289,20 @@ const formatValue = (value: unknown) => {
 }
 
 .parameter-item__summary {
-  flex: 1 1 240px;
   min-width: 0;
 }
 
 .parameter-item__description {
-  padding-left: var(--field-leading-gutter);
-  margin-top: 6px;
+  padding: 0 20px;
+  margin-top: 8px;
 }
 
 .parameter-item__details {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
   gap: 6px 8px;
-  padding-left: var(--field-leading-gutter);
-  margin-top: 8px;
+  padding: 0 20px;
+  margin-top: 10px;
 }
 
 .parameter-item__detail-row {
@@ -353,6 +373,11 @@ const formatValue = (value: unknown) => {
 }
 
 @media (max-width: 768px) {
+  .parameter-item__title-line {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
   .parameter-item__details {
     grid-template-columns: 1fr;
     row-gap: 4px;
@@ -362,14 +387,6 @@ const formatValue = (value: unknown) => {
     display: grid;
     grid-template-columns: 1fr;
     gap: 2px;
-  }
-
-  .parameter-item__title-line {
-    gap: 6px 8px;
-  }
-
-  .parameter-item__summary {
-    flex-basis: 240px;
   }
 
   .parameter-item__detail-label {

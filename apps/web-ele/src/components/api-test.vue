@@ -3424,6 +3424,7 @@ onBeforeUnmount(() => {
 }
 
 .debug-layout {
+  position: relative;
   display: grid;
   grid-template-rows: minmax(0, 1fr) 10px minmax(0, 1fr);
   grid-template-columns: minmax(0, 1fr);

@@ -255,10 +255,13 @@ const editorTeleportTarget = ref<HTMLElement | null>(null);
 function openValueEditor(row: ParamItem) {
   valueEditorRow.value = row;
   valueEditorDraft.value = `${row.value ?? ''}`;
-  // 覆盖层挂到「请求参数」内容区（.debug-tabs-wrap），使其填满整个请求参数面板而非
-  // 单个小表格；找不到时 target 为 null，Teleport 被禁用，回退到组件根节点。
+  const debugLayout = wrapRef.value?.closest<HTMLElement>('.debug-layout');
+  const tabsWrap = wrapRef.value?.closest<HTMLElement>('.debug-tabs-wrap');
+  // 覆盖层默认挂到「请求参数」内容区；上下布局时挂到整个调试布局，避免被响应面板遮挡。
   editorTeleportTarget.value =
-    wrapRef.value?.closest<HTMLElement>('.debug-tabs-wrap') ?? null;
+    debugLayout && !debugLayout.classList.contains('debug-layout--horizontal')
+      ? debugLayout
+      : (tabsWrap ?? null);
   valueEditorVisible.value = true;
 }
 
@@ -780,8 +783,7 @@ watch(
       </div>
     </div>
 
-    <!-- 参数值编辑覆盖层：Teleport 到「请求参数」内容区，覆盖层填满该区域、
-         编辑框不超出面板；目标不存在时回退到组件根节点。 -->
+    <!-- 参数值编辑覆盖层：上下布局时覆盖整个调试区，左右布局时覆盖请求参数区。 -->
     <Teleport :to="editorTeleportTarget" :disabled="!editorTeleportTarget">
       <div v-if="valueEditorVisible" class="param-editor-overlay">
         <div class="param-editor">

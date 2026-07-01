@@ -449,9 +449,11 @@ const showSchemaStack = computed(() => {
   <div v-if="showSchemaStack" class="schema-stack">
     <div v-for="(value, key) in rootChildren" :key="key" class="schema-item">
       <div class="schema-item__top">
-        <div class="schema-item__control">
+        <div
+          v-if="isExpandable(value, getNodePath(String(key)))"
+          class="schema-item__control"
+        >
           <button
-            v-if="isExpandable(value, getNodePath(String(key)))"
             type="button"
             class="schema-item__toggle"
             :class="{
@@ -465,11 +467,6 @@ const showSchemaStack = computed(() => {
               :class="{ 'rotate-90': !foldState[getNodePath(String(key))] }"
             />
           </button>
-          <span
-            v-else
-            class="schema-item__control-spacer"
-            aria-hidden="true"
-          ></span>
         </div>
 
         <div class="schema-item__content">
@@ -514,14 +511,14 @@ const showSchemaStack = computed(() => {
                 }"
               >
                 {{ key }}
-                <sup
+                <span
                   v-if="
                     isRequired(resolvedRootObjectSchema, String(key), value)
                   "
-                  class="schema-item__required-star"
+                  class="schema-item__required-tag"
                 >
-                  *
-                </sup>
+                  必填
+                </span>
               </div>
               <div class="schema-item__type">
                 {{ getTypeLabel(value, getNodePath(String(key))) }}
@@ -719,35 +716,6 @@ const showSchemaStack = computed(() => {
 </template>
 
 <style scoped>
-@media (max-width: 768px) {
-  .schema-item__details {
-    grid-template-columns: 1fr;
-    row-gap: 4px;
-  }
-
-  .schema-item__detail-row {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 2px;
-  }
-
-  .schema-item__headline {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .schema-item__headline-main {
-    gap: 6px 8px;
-  }
-
-  .schema-item__summary {
-    flex-basis: 240px;
-  }
-
-  .schema-item__detail-label {
-    min-width: 0;
-  }
-}
-
 .schema-root-pill,
 .schema-stack {
   --field-chip-radius: calc(var(--radius, 12px) * 0.82);
@@ -796,6 +764,10 @@ const showSchemaStack = computed(() => {
   border-top: 1px solid var(--el-border-color-lighter);
 }
 
+.schema-stack .schema-stack {
+  padding-left: 6px;
+}
+
 .composition-switch__buttons {
   display: flex;
   flex-wrap: wrap;
@@ -807,15 +779,15 @@ const showSchemaStack = computed(() => {
 .schema-item {
   box-sizing: border-box;
   width: 100%;
-  padding: 10px 0;
+  padding: 8px 0;
 }
 
 .schema-item__top {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   align-items: flex-start;
   width: 100%;
-  padding: 4px 8px;
+  padding: 5px 0;
 
   /* 不向左右负外边距溢出：外层 ElCollapse 的 __wrap 为 overflow:hidden，
      负 margin 会使行左侧圆角被裁切；贴齐折叠内容区即可完整显示圆角 */
@@ -833,8 +805,8 @@ const showSchemaStack = computed(() => {
   flex: none;
   align-items: flex-start;
   justify-content: center;
-  width: 18px;
-  min-width: 18px;
+  width: 16px;
+  min-width: 16px;
   padding-top: 2px;
 }
 
@@ -888,7 +860,7 @@ const showSchemaStack = computed(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
+  width: 16px;
   height: 18px;
 }
 
@@ -907,10 +879,13 @@ const showSchemaStack = computed(() => {
 }
 
 .schema-item__headline-main {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 10px;
-  align-items: baseline;
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(120px, 1fr) minmax(
+      180px,
+      2fr
+    );
+  gap: 12px;
+  align-items: center;
   min-width: 0;
 }
 
@@ -948,7 +923,9 @@ const showSchemaStack = computed(() => {
   position: relative;
   display: inline-flex;
   flex: 0 1 auto;
-  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
   min-width: 0;
   max-width: 100%;
   font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
@@ -961,34 +938,52 @@ const showSchemaStack = computed(() => {
 }
 
 .schema-item__name--required {
-  color: var(--field-required);
+  color: var(--el-text-color-primary);
 }
 
-.schema-item__required-star {
-  position: absolute;
-  top: 0;
-  left: -10px;
+.schema-item__required-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 0 6px;
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
   font-size: 10px;
-  font-style: normal;
   font-weight: 700;
-  line-height: 1;
+  line-height: 18px;
   color: var(--field-required);
-  transform: translate(0, -32%);
+  background: color-mix(
+    in srgb,
+    var(--el-color-danger-light-9) 88%,
+    transparent
+  );
+  border: 1px solid
+    color-mix(in srgb, var(--el-color-danger-light-7) 86%, transparent);
+  border-radius: 6px;
 }
 
 .schema-item__type {
   display: inline-flex;
   flex: 0 1 auto;
-  align-items: baseline;
+  align-items: center;
+  width: fit-content;
   min-width: 0;
   max-width: 100%;
+  min-height: 24px;
+  padding: 2px 8px;
   font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
   line-height: 1.5;
-  color: var(--el-text-color-secondary);
+  color: var(--el-color-primary);
   overflow-wrap: anywhere;
   white-space: normal;
+  background: var(--el-color-primary-light-9);
+  border-radius: 7px;
 }
 
 .schema-item__summary,
@@ -1000,7 +995,6 @@ const showSchemaStack = computed(() => {
 }
 
 .schema-item__summary {
-  flex: 1 1 240px;
   min-width: 0;
 }
 
@@ -1019,7 +1013,7 @@ const showSchemaStack = computed(() => {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
   gap: 6px 8px;
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
 .schema-item__detail-row {
@@ -1124,11 +1118,41 @@ const showSchemaStack = computed(() => {
 
 .schema-item__children {
   box-sizing: border-box;
-  width: calc(100% - 36px);
-  padding-left: 12px;
-  margin-top: 10px;
-  margin-left: 30px;
+  width: calc(100% - 18px);
+  padding: 0 0 0 10px;
+  margin-top: 2px;
+  margin-left: 18px;
   border-left: 1px solid
-    color-mix(in srgb, var(--el-border-color-lighter) 88%, transparent);
+    color-mix(in srgb, var(--el-color-primary-light-7) 48%, transparent);
+}
+
+@media (max-width: 768px) {
+  .schema-item__details {
+    grid-template-columns: 1fr;
+    row-gap: 4px;
+  }
+
+  .schema-item__detail-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
+  .schema-item__headline {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .schema-item__headline-main {
+    grid-template-columns: 1fr;
+    gap: 6px 8px;
+  }
+
+  .schema-item__summary {
+    min-width: 0;
+  }
+
+  .schema-item__detail-label {
+    min-width: 0;
+  }
 }
 </style>

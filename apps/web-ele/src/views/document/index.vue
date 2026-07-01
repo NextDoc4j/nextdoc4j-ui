@@ -291,21 +291,17 @@ onBeforeUnmount(() => {
   --doc-radius-lg: calc(var(--radius) * 1.18);
   --doc-radius-md: calc(var(--radius) * 0.94);
   --doc-radius-sm: calc(var(--radius) * 0.72);
-  --doc-page-bg: var(--el-bg-color);
+  --doc-page-bg: #f8fafc;
   --doc-overview-bg: var(--el-fill-color-light);
   --el-border-radius-base: calc(var(--radius) * 0.75);
   --el-border-radius-small: calc(var(--radius) * 0.62);
 
-  padding: 20px;
+  padding: 0;
   background: var(--doc-page-bg);
 }
 
 .document-page--dark {
-  --doc-page-bg: color-mix(
-    in srgb,
-    var(--el-bg-color) 90%,
-    var(--el-fill-color-light) 10%
-  );
+  --doc-page-bg: var(--el-bg-color);
 }
 
 .document-page--overview {
