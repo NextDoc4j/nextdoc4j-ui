@@ -388,7 +388,7 @@ const applyCurrentServiceTemplate = () => {
       </div>
     </template>
 
-    <ElForm label-width="90px" class="mb-4 mt-2">
+    <ElForm label-width="110px" label-position="left" class="mb-4 mt-2">
       <ElFormItem label="作用域">
         <ElSelect v-model="activeScope" style="width: 360px">
           <ElOption
@@ -608,6 +608,8 @@ const applyCurrentServiceTemplate = () => {
   display: inline-flex;
   gap: 8px;
   align-items: center;
+  font-size: 14px;
+  color: var(--el-text-color-primary);
 }
 
 .config-card__help {

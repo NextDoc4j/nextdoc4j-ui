@@ -138,7 +138,7 @@ onBeforeUnmount(() => {
           </div>
         </template>
 
-        <ElForm label-width="110px">
+        <ElForm label-width="110px" label-position="left">
           <ElFormItem label="调试缓存开关" class="config-switch-item">
             <ElSwitch
               v-model="debugCacheEnabled"
@@ -178,8 +178,8 @@ onBeforeUnmount(() => {
           </div>
         </template>
 
-        <ElForm label-width="110px">
-          <ElFormItem label="分组概览" class="config-switch-item">
+        <ElForm label-width="110px" label-position="left">
+          <ElFormItem label="分组概览开关" class="config-switch-item">
             <ElSwitch
               v-model="groupOverviewEnabled"
               active-text="开启"
@@ -221,6 +221,8 @@ onBeforeUnmount(() => {
   display: inline-flex;
   gap: 8px;
   align-items: center;
+  font-size: 14px;
+  color: var(--el-text-color-primary);
 }
 
 .config-card__help {
