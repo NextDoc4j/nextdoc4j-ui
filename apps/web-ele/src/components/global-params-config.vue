@@ -4,7 +4,6 @@ import type { GlobalParamItem } from '#/store';
 import { computed, nextTick, ref, watch } from 'vue';
 
 import {
-  ElAlert,
   ElButton,
   ElCard,
   ElForm,
@@ -19,6 +18,7 @@ import {
   ElTableColumn,
   ElTabPane,
   ElTabs,
+  ElTooltip,
 } from 'element-plus';
 import { storeToRefs } from 'pinia';
 
@@ -82,17 +82,76 @@ const currentServiceScopeKey = computed(() => {
   return docManageStore.toScopeKey(currentService.value?.url);
 });
 
+const normalizeHeaderName = (name: string) => name.trim().toLowerCase();
+
+const activeQueryParams = computed(() => {
+  const map = new Map<string, GlobalParamItem>();
+  const allScopeData =
+    activeScope.value === docManageStore.ALL_SCOPE_KEY
+      ? { queryParams: queryParams.value }
+      : docManageStore.getScopeParams(docManageStore.ALL_SCOPE_KEY);
+  allScopeData.queryParams.forEach((item) => {
+    if (!item.name) return;
+    map.set(item.name, item);
+  });
+
+  if (activeScope.value === currentServiceScopeKey.value) {
+    queryParams.value.forEach((item) => {
+      if (!item.name) return;
+      map.set(item.name, item);
+    });
+  } else if (currentService.value?.url) {
+    docManageStore
+      .getScopeParams(currentServiceScopeKey.value)
+      .queryParams.forEach((item) => {
+        if (!item.name) return;
+        map.set(item.name, item);
+      });
+  }
+
+  return [...map.values()];
+});
+
+const activeHeaderParams = computed(() => {
+  const map = new Map<string, GlobalParamItem>();
+  const allScopeData =
+    activeScope.value === docManageStore.ALL_SCOPE_KEY
+      ? { headerParams: headerParams.value }
+      : docManageStore.getScopeParams(docManageStore.ALL_SCOPE_KEY);
+  allScopeData.headerParams.forEach((item) => {
+    if (!item.name) return;
+    map.set(normalizeHeaderName(item.name), item);
+  });
+
+  if (activeScope.value === currentServiceScopeKey.value) {
+    headerParams.value.forEach((item) => {
+      if (!item.name) return;
+      map.set(normalizeHeaderName(item.name), item);
+    });
+  } else if (currentService.value?.url) {
+    docManageStore
+      .getScopeParams(currentServiceScopeKey.value)
+      .headerParams.forEach((item) => {
+        if (!item.name) return;
+        map.set(normalizeHeaderName(item.name), item);
+      });
+  }
+
+  return [...map.values()];
+});
+
 const mergedActiveQueryCount = computed(() => {
-  return docManageStore
-    .getMergedQueryParams(currentService.value?.url)
-    .filter((item) => item.enabled && item.name).length;
+  return activeQueryParams.value.filter((item) => item.enabled && item.name)
+    .length;
 });
 
 const mergedActiveHeaderCount = computed(() => {
-  return docManageStore
-    .getMergedHeaderParams(currentService.value?.url)
-    .filter((item) => item.enabled && item.name).length;
+  return activeHeaderParams.value.filter((item) => item.enabled && item.name)
+    .length;
 });
+
+const configDescription =
+  '调试请求会自动注入全局参数。若调试页填写了同名参数，调试页参数优先。当前为实时生效，无需手动保存。';
 
 const createParamRow = (): GlobalParamItem => ({
   id: Math.random().toString(36).slice(2, 10),
@@ -291,24 +350,43 @@ const applyCurrentServiceTemplate = () => {
   <ElCard ref="configCardRef" shadow="never" class="config-card">
     <template #header>
       <div class="flex items-center justify-between">
-        <span class="font-medium">全局参数配置</span>
+        <div class="config-card__title">
+          <span class="font-medium">全局参数配置</span>
+          <ElTooltip :content="configDescription" placement="top">
+            <button
+              type="button"
+              class="config-card__help"
+              aria-label="查看全局参数配置说明"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 16v-4" />
+                <path d="M12 8h.01" />
+              </svg>
+            </button>
+          </ElTooltip>
+        </div>
         <ElSpace>
           <ElButton v-if="isAggregation" @click="applyCurrentServiceTemplate">
             切换到当前服务作用域
           </ElButton>
+          <span class="config-card__inject-stat">
+            <span>生效注入</span>
+            <b>Query {{ mergedActiveQueryCount }}</b>
+            <b>Header {{ mergedActiveHeaderCount }}</b>
+          </span>
           <ElButton @click="resetScope">清空当前作用域</ElButton>
         </ElSpace>
       </div>
     </template>
-
-    <ElAlert class="mb-4" type="info" show-icon :closable="false">
-      <template #default>
-        调试请求会自动注入全局参数。若调试页填写了同名参数，调试页参数优先。
-        当前为实时生效，无需手动保存。 当前有效注入：Query
-        {{ mergedActiveQueryCount }} 项，Header
-        {{ mergedActiveHeaderCount }} 项。
-      </template>
-    </ElAlert>
 
     <ElForm label-width="90px" class="mb-4 mt-2">
       <ElFormItem label="作用域">
@@ -524,6 +602,58 @@ const applyCurrentServiceTemplate = () => {
   box-shadow:
     0 4px 14px color-mix(in srgb, var(--el-text-color-primary) 8%, transparent),
     0 10px 30px color-mix(in srgb, var(--el-text-color-primary) 7%, transparent);
+}
+
+.config-card__title {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.config-card__help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--radius);
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.config-card__help:hover {
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+  border-color: color-mix(in srgb, var(--el-color-primary) 30%, transparent);
+}
+
+.config-card__help svg {
+  width: 14px;
+  height: 14px;
+}
+
+.config-card__inject-stat {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 10px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--radius);
+}
+
+.config-card__inject-stat b {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--el-color-primary);
 }
 
 :deep(.el-table__row:last-child) {

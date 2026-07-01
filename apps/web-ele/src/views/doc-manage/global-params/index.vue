@@ -5,7 +5,6 @@ import { useRouter } from 'vue-router';
 import { useAccessStore } from '@vben/stores';
 
 import {
-  ElAlert,
   ElButton,
   ElCard,
   ElForm,
@@ -13,6 +12,7 @@ import {
   ElMessage,
   ElSpace,
   ElSwitch,
+  ElTooltip,
 } from 'element-plus';
 import { storeToRefs } from 'pinia';
 
@@ -29,6 +29,11 @@ const router = useRouter();
 
 const { debugCacheEnabled, groupOverviewEnabled } =
   storeToRefs(apiTestCacheStore);
+
+const debugCacheDescription =
+  '开启后会缓存在线调试的请求数据（刷新页面后仍保留）。关闭后回到当前默认行为，不读取也不写入调试缓存。';
+const groupOverviewDescription =
+  '开启后，点击左侧菜单的接口分组会在右侧展示该分组下全部接口的概览页；关闭后点击分组仅展开或收起子菜单，需点击具体接口才进入对应详情。';
 
 const clearAllDebugRequestCache = () => {
   apiTestCacheStore.clearAllRequestCache();
@@ -101,7 +106,30 @@ onBeforeUnmount(() => {
       <ElCard shadow="never" class="config-card">
         <template #header>
           <div class="flex items-center justify-between">
-            <span class="font-medium">全局调试缓存</span>
+            <div class="config-card__title">
+              <span class="font-medium">全局调试缓存</span>
+              <ElTooltip :content="debugCacheDescription" placement="top">
+                <button
+                  type="button"
+                  class="config-card__help"
+                  aria-label="查看全局调试缓存说明"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M12 16v-4" />
+                    <path d="M12 8h.01" />
+                  </svg>
+                </button>
+              </ElTooltip>
+            </div>
             <ElSpace>
               <ElButton text type="danger" @click="clearAllDebugRequestCache">
                 清理全部缓存
@@ -109,12 +137,6 @@ onBeforeUnmount(() => {
             </ElSpace>
           </div>
         </template>
-
-        <ElAlert class="mb-4" type="info" show-icon :closable="false">
-          <template #default>
-            开启后会缓存在线调试的请求数据（刷新页面后仍保留）。关闭后回到当前默认行为，不读取也不写入调试缓存。
-          </template>
-        </ElAlert>
 
         <ElForm label-width="110px">
           <ElFormItem label="调试缓存开关" class="config-switch-item">
@@ -130,14 +152,31 @@ onBeforeUnmount(() => {
 
       <ElCard shadow="never" class="config-card">
         <template #header>
-          <span class="font-medium">分组概览</span>
+          <div class="config-card__title">
+            <span class="font-medium">分组概览</span>
+            <ElTooltip :content="groupOverviewDescription" placement="top">
+              <button
+                type="button"
+                class="config-card__help"
+                aria-label="查看分组概览说明"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M12 16v-4" />
+                  <path d="M12 8h.01" />
+                </svg>
+              </button>
+            </ElTooltip>
+          </div>
         </template>
-
-        <ElAlert class="mb-4" type="info" show-icon :closable="false">
-          <template #default>
-            开启后，点击左侧菜单的接口分组会在右侧展示该分组下全部接口的概览页；关闭后点击分组仅展开或收起子菜单，需点击具体接口才进入对应详情。
-          </template>
-        </ElAlert>
 
         <ElForm label-width="110px">
           <ElFormItem label="分组概览" class="config-switch-item">
@@ -176,6 +215,40 @@ onBeforeUnmount(() => {
   box-shadow:
     0 4px 14px color-mix(in srgb, var(--el-text-color-primary) 8%, transparent),
     0 10px 30px color-mix(in srgb, var(--el-text-color-primary) 7%, transparent);
+}
+
+.config-card__title {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.config-card__help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--radius);
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.config-card__help:hover {
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+  border-color: color-mix(in srgb, var(--el-color-primary) 30%, transparent);
+}
+
+.config-card__help svg {
+  width: 14px;
+  height: 14px;
 }
 
 /* 全局调试缓存 / 分组概览 两卡片并列，各占一半 */

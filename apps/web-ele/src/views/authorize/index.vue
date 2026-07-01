@@ -25,6 +25,15 @@ const securitySchemes = ref<
   Record<string, SecuritySchemeObject & { fold?: boolean }>
 >({});
 
+const securitySchemeEntries = computed(() =>
+  Object.entries(securitySchemes.value),
+);
+
+const allFolded = computed(() => {
+  const entries = securitySchemeEntries.value;
+  return entries.length > 0 && entries.every(([, item]) => item.fold);
+});
+
 // 监听 apiStore.openApi 变化，更新 securitySchemes
 watch(
   () => [
@@ -39,14 +48,16 @@ watch(
     const serviceSchemes = apiStore.openApi?.components?.securitySchemes ?? {};
     const authType = isAggregation.value ? gatewaySchemes : serviceSchemes;
     securitySchemes.value = Object.fromEntries(
-      Object.entries(authType).map(([key, value]) => [
-        key,
-        {
-          ...value,
-          fold:
-            (value as SecuritySchemeObject & { fold?: boolean }).fold ?? false,
-        },
-      ]),
+      Object.entries(authType).map(([key, value], index) => {
+        const scheme = value as SecuritySchemeObject & { fold?: boolean };
+        return [
+          key,
+          {
+            ...value,
+            fold: scheme.fold ?? index === 0,
+          },
+        ];
+      }),
     );
   },
   { immediate: true, deep: true },
@@ -81,6 +92,13 @@ const handleToken = (value: null | string, key: string) => {
 
 const handleFold = (data: SecuritySchemeObject & { fold?: boolean }) => {
   data.fold = !data.fold;
+};
+
+const toggleAllFold = () => {
+  const nextFold = !allFolded.value;
+  securitySchemeEntries.value.forEach(([, item]) => {
+    item.fold = nextFold;
+  });
 };
 
 const tokenNumber = computed(() => {
@@ -133,14 +151,23 @@ onMounted(() => {});
           ></span>
           已选择 {{ tokenNumber }} 个认证方式
         </div>
-        <ElButton
-          class="text-sm transition-colors"
-          plain
-          type="danger"
-          @click="clearAllToken"
-        >
-          清除全部认证
-        </ElButton>
+        <div class="flex items-center gap-2">
+          <ElButton
+            class="text-sm transition-colors"
+            plain
+            type="danger"
+            @click="clearAllToken"
+          >
+            清除全部认证
+          </ElButton>
+          <ElButton
+            class="text-sm transition-colors"
+            plain
+            @click="toggleAllFold"
+          >
+            {{ allFolded ? '全部折叠' : '全部展开' }}
+          </ElButton>
+        </div>
       </div>
 
       <!-- 认证方式卡片网格 -->
