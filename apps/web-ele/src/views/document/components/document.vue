@@ -1718,13 +1718,24 @@ defineExpose({
               </ElButton>
             </div>
 
-            <Transition name="example-expand">
-              <div v-if="requestExampleOpen" class="example-card__body">
-                <JsonViewer
-                  class="json-panel app-json-schema-viewer"
-                  :schema="requestPreviewSchema"
-                  mode="request"
-                />
+            <Transition
+              name="example-expand"
+              @after-enter="scheduleAsideFlowUpdate"
+              @after-leave="scheduleAsideFlowUpdate"
+            >
+              <div v-show="requestExampleOpen" class="example-card__body-wrap">
+                <div class="example-card__body-clip">
+                  <div class="example-card__body">
+                    <JsonViewer
+                      class="json-panel app-json-schema-viewer"
+                      :schema="requestPreviewSchema"
+                      mode="request"
+                      :enable-chunked-render="true"
+                      :initial-render-count="60"
+                      :render-chunk-size="60"
+                    />
+                  </div>
+                </div>
               </div>
             </Transition>
           </section>
@@ -1773,41 +1784,54 @@ defineExpose({
               </ElButton>
             </div>
 
-            <Transition name="example-expand">
+            <Transition
+              name="example-expand"
+              @after-enter="scheduleAsideFlowUpdate"
+              @after-leave="scheduleAsideFlowUpdate"
+            >
               <div
-                v-if="responseExampleOpen[panel.code]"
-                class="example-card__body"
+                v-show="responseExampleOpen[panel.code]"
+                class="example-card__body-wrap"
               >
-                <ElSelect
-                  v-if="panel.exampleOptions.length > 1"
-                  :model-value="responseExampleSelection[panel.code]"
-                  size="small"
-                  class="response-example-select"
-                  popper-class="response-example-select__popper"
-                  placeholder="选择示例"
-                  @update:model-value="
-                    handleResponseExampleSelect(panel.code, $event)
-                  "
-                >
-                  <ElOption
-                    v-for="item in panel.exampleOptions"
-                    :key="item.key"
-                    :label="item.label"
-                    :value="item.key"
-                  />
-                </ElSelect>
+                <div class="example-card__body-clip">
+                  <div class="example-card__body">
+                    <ElSelect
+                      v-if="panel.exampleOptions.length > 1"
+                      :model-value="responseExampleSelection[panel.code]"
+                      size="small"
+                      class="response-example-select"
+                      popper-class="response-example-select__popper"
+                      placeholder="选择示例"
+                      @update:model-value="
+                        handleResponseExampleSelect(panel.code, $event)
+                      "
+                    >
+                      <ElOption
+                        v-for="item in panel.exampleOptions"
+                        :key="item.key"
+                        :label="item.label"
+                        :value="item.key"
+                      />
+                    </ElSelect>
 
-                <JsonViewer
-                  v-if="panel.schema || panel.hasExampleValue"
-                  class="json-panel app-json-schema-viewer"
-                  :schema="getResponsePreviewSchema(panel.code, panel.schema)"
-                  :value="
-                    panel.hasExampleValue ? panel.exampleValue : undefined
-                  "
-                  mode="response"
-                />
-                <div v-else class="example-card__empty">
-                  暂无可展示的响应示例
+                    <JsonViewer
+                      v-if="panel.schema || panel.hasExampleValue"
+                      class="json-panel app-json-schema-viewer"
+                      :schema="
+                        getResponsePreviewSchema(panel.code, panel.schema)
+                      "
+                      :value="
+                        panel.hasExampleValue ? panel.exampleValue : undefined
+                      "
+                      mode="response"
+                      :enable-chunked-render="true"
+                      :initial-render-count="60"
+                      :render-chunk-size="60"
+                    />
+                    <div v-else class="example-card__empty">
+                      暂无可展示的响应示例
+                    </div>
+                  </div>
                 </div>
               </div>
             </Transition>
@@ -2476,23 +2500,34 @@ defineExpose({
   border-bottom: none;
 }
 
+.example-card__body-wrap {
+  display: grid;
+  grid-template-rows: 1fr;
+  overflow: hidden;
+}
+
+.example-card__body-clip {
+  min-height: 0;
+  overflow: hidden;
+}
+
 .example-expand-enter-active,
 .example-expand-leave-active {
-  overflow: hidden;
   transition:
-    max-height 0.2s ease,
+    grid-template-rows 0.22s ease,
     opacity 0.16s ease;
+  will-change: grid-template-rows, opacity;
 }
 
 .example-expand-enter-from,
 .example-expand-leave-to {
-  max-height: 0;
+  grid-template-rows: 0fr;
   opacity: 0;
 }
 
 .example-expand-enter-to,
 .example-expand-leave-from {
-  max-height: 1200px;
+  grid-template-rows: 1fr;
   opacity: 1;
 }
 
@@ -2568,7 +2603,7 @@ defineExpose({
   min-height: 120px;
   max-height: none;
   overflow: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior: contain auto;
   background: var(--doc-example-bg);
   border: none;
   border-radius: 0;
