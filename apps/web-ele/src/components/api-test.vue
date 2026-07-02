@@ -4237,18 +4237,76 @@ onBeforeUnmount(() => {
   color: var(--el-text-color-secondary);
 }
 
-:deep(.document-page--dark .debug-console),
-:deep(html.dark .debug-console) {
+:global(.document-page--dark .debug-console),
+:global(html.dark .debug-console) {
   --debug-page-bg: var(--el-bg-color);
-  --debug-surface: #1c1e23;
-  --debug-soft-bg: #1c1e23;
-  --debug-soft-bg-strong: #23272e;
-  --debug-border: color-mix(in srgb, #fff 6%, transparent);
-  --debug-border-strong: color-mix(in srgb, #fff 9%, transparent);
+  --debug-surface: color-mix(in srgb, var(--el-bg-color) 92%, #fff 8%);
+  --debug-soft-bg: color-mix(
+    in srgb,
+    var(--el-bg-color) 86%,
+    var(--el-fill-color-light) 14%
+  );
+  --debug-soft-bg-strong: color-mix(
+    in srgb,
+    var(--el-bg-color) 76%,
+    var(--el-fill-color-light) 24%
+  );
+  --debug-border: color-mix(
+    in srgb,
+    var(--el-text-color-primary) 16%,
+    transparent
+  );
+  --debug-border-strong: color-mix(
+    in srgb,
+    var(--el-text-color-primary) 24%,
+    transparent
+  );
   --debug-text-muted: var(--el-text-color-secondary);
-  --debug-request-shell-bg: #20242b;
+  --debug-request-shell-bg: color-mix(
+    in srgb,
+    var(--el-bg-color) 88%,
+    #fff 12%
+  );
   --debug-shadow: 0 8px 20px color-mix(in srgb, #000 45%, transparent);
   --debug-shadow-strong: 0 12px 26px color-mix(in srgb, #000 52%, transparent);
+}
+
+:global(.document-page--dark .debug-base-url:hover),
+:global(html.dark .debug-base-url:hover),
+:global(.document-page--dark .debug-back-button:hover),
+:global(html.dark .debug-back-button:hover) {
+  background: color-mix(in srgb, var(--el-color-primary) 14%, transparent);
+}
+
+:global(.document-page--dark .debug-status-chip--success),
+:global(html.dark .debug-status-chip--success) {
+  color: #34d399;
+  background: rgb(16 185 129 / 12%);
+  border-color: rgb(16 185 129 / 32%);
+}
+
+:global(.document-page--dark .debug-status-chip--error),
+:global(html.dark .debug-status-chip--error) {
+  color: #fb7185;
+  background: rgb(244 63 94 / 12%);
+  border-color: rgb(244 63 94 / 32%);
+}
+
+:global(.document-page--dark .debug-status-chip--metric),
+:global(html.dark .debug-status-chip--metric),
+:global(.document-page--dark .actual-request__code),
+:global(html.dark .actual-request__code) {
+  color: var(--el-text-color-primary);
+}
+
+:global(.document-page--dark .debug-base64-card__preview-stage),
+:global(html.dark .debug-base64-card__preview-stage) {
+  background-color: color-mix(in srgb, var(--el-bg-color) 78%, #fff 10%);
+  background-image:
+    linear-gradient(45deg, rgb(255 255 255 / 7%) 25%, transparent 25%),
+    linear-gradient(-45deg, rgb(255 255 255 / 7%) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgb(255 255 255 / 7%) 75%),
+    linear-gradient(-45deg, transparent 75%, rgb(255 255 255 / 7%) 75%);
 }
 
 /* 全局配置弹窗样式：弹窗固定高度，整体不滚动；参数表格约 8 行后在右侧卡片内滚动 */
