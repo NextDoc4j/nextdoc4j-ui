@@ -1,7 +1,19 @@
 <script lang="ts" setup>
-import { computed, nextTick } from 'vue';
+import { computed } from 'vue';
 
 import { VbenButton } from '@vben-core/shadcn-ui';
+
+interface ViewTransition {
+  finished: Promise<void>;
+  ready: Promise<void>;
+  skipTransition: () => void;
+}
+
+interface ViewTransitionDocument {
+  startViewTransition?: (
+    callback: () => Promise<void> | void,
+  ) => ViewTransition;
+}
 
 interface Props {
   /**
@@ -17,6 +29,8 @@ defineOptions({
 const props = withDefaults(defineProps<Props>(), {
   type: 'normal',
 });
+
+const THEME_VIEW_TRANSITION_CLASS = 'vben-theme-view-transition';
 
 const isDark = defineModel<boolean>();
 
@@ -40,12 +54,14 @@ const bindProps = computed(() => {
 });
 
 function toggleTheme(event: MouseEvent) {
-  const isAppearanceTransition =
-    // @ts-expect-error
-    document.startViewTransition &&
-    !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  if (!isAppearanceTransition || !event) {
-    isDark.value = !isDark.value;
+  const targetDark = !isDark.value;
+  const transitionDocument = document as Document & ViewTransitionDocument;
+  const startViewTransition = transitionDocument.startViewTransition;
+  if (
+    !startViewTransition ||
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  ) {
+    isDark.value = targetDark;
     return;
   }
   const x = event.clientX;
@@ -54,33 +70,41 @@ function toggleTheme(event: MouseEvent) {
     Math.max(x, innerWidth - x),
     Math.max(y, innerHeight - y),
   );
-  // @ts-ignore startViewTransition
-  const transition = document.startViewTransition(async () => {
-    isDark.value = !isDark.value;
-    await nextTick();
+  const root = document.documentElement;
+  root.classList.add(THEME_VIEW_TRANSITION_CLASS);
+  const transition = startViewTransition.call(document, () => {
+    isDark.value = targetDark;
   });
-  transition.ready.then(() => {
-    const clipPath = [
-      `circle(0px at ${x}px ${y}px)`,
-      `circle(${endRadius}px at ${x}px ${y}px)`,
-    ];
+  const removeTransitionClass = () => {
+    root.classList.remove(THEME_VIEW_TRANSITION_CLASS);
+  };
 
-    const animate = document.documentElement.animate(
-      {
-        clipPath: isDark.value ? [...clipPath].reverse() : clipPath,
-      },
-      {
-        duration: 450,
-        easing: 'ease-in',
-        pseudoElement: isDark.value
-          ? '::view-transition-old(root)'
-          : '::view-transition-new(root)',
-      },
-    );
-    animate.onfinish = () => {
-      transition.skipTransition();
-    };
-  });
+  void transition.ready
+    .then(() => {
+      const clipPath = [
+        `circle(0px at ${x}px ${y}px)`,
+        `circle(${endRadius}px at ${x}px ${y}px)`,
+      ];
+
+      const animate = document.documentElement.animate(
+        {
+          clipPath: targetDark ? [...clipPath].reverse() : clipPath,
+        },
+        {
+          duration: 450,
+          easing: 'ease-in',
+          pseudoElement: targetDark
+            ? '::view-transition-old(root)'
+            : '::view-transition-new(root)',
+        },
+      );
+      animate.onfinish = () => {
+        transition.skipTransition();
+      };
+    })
+    .catch(removeTransitionClass);
+
+  void transition.finished.finally(removeTransitionClass).catch(() => {});
 }
 </script>
 

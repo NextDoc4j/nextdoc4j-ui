@@ -77,6 +77,18 @@
     @apply z-[1];
   }
 
+  html.vben-theme-view-transition [id='__vben_main_content'] {
+    contain: layout paint;
+  }
+
+  html.vben-theme-view-transition *,
+  html.vben-theme-view-transition ::after,
+  html.vben-theme-view-transition ::before {
+    transition-duration: 0s !important;
+    transition-property: none !important;
+    animation-play-state: paused !important;
+  }
+
   input::placeholder,
   textarea::placeholder {
     @apply opacity-100;

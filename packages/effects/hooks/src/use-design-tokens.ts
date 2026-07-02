@@ -66,7 +66,7 @@ export function useAntdDesignTokens() {
       tokens.colorBgLayout = getCssVariableValue('--background-deep');
       tokens.colorBgMask = getCssVariableValue('--overlay');
     },
-    { immediate: true },
+    { flush: 'sync', immediate: true },
   );
 
   return {
@@ -153,7 +153,7 @@ export function useNaiveDesignTokens() {
 
       commonTokens.borderRadius = getCssVariableValue('--radius', false);
     },
-    { immediate: true },
+    { flush: 'sync', immediate: true },
   );
   return {
     commonTokens,
@@ -316,6 +316,6 @@ export function useElementPlusDesignTokens() {
 
       updateCSSVariables(variables, `__vben_design_styles__`);
     },
-    { immediate: true },
+    { flush: 'sync', immediate: true },
   );
 }
