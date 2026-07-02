@@ -244,7 +244,7 @@ const valueEditorDraft = ref('');
 const valueEditorRow = ref<null | ParamItem>(null);
 // 组件根节点引用，用于向上查找「请求参数」内容区作为覆盖层挂载点
 const wrapRef = ref<HTMLElement | null>(null);
-// 覆盖层 Teleport 目标：「请求参数」内容区容器，未找到时为 null（回退到根节点）
+// 覆盖层 Teleport 目标：优先挂到整个调试布局，未找到时回退到「请求参数」内容区
 const editorTeleportTarget = ref<HTMLElement | null>(null);
 
 /**
@@ -257,11 +257,7 @@ function openValueEditor(row: ParamItem) {
   valueEditorDraft.value = `${row.value ?? ''}`;
   const debugLayout = wrapRef.value?.closest<HTMLElement>('.debug-layout');
   const tabsWrap = wrapRef.value?.closest<HTMLElement>('.debug-tabs-wrap');
-  // 覆盖层默认挂到「请求参数」内容区；上下布局时挂到整个调试布局，避免被响应面板遮挡。
-  editorTeleportTarget.value =
-    debugLayout && !debugLayout.classList.contains('debug-layout--horizontal')
-      ? debugLayout
-      : (tabsWrap ?? null);
+  editorTeleportTarget.value = debugLayout ?? tabsWrap ?? null;
   valueEditorVisible.value = true;
 }
 
@@ -783,7 +779,7 @@ watch(
       </div>
     </div>
 
-    <!-- 参数值编辑覆盖层：上下布局时覆盖整个调试区，左右布局时覆盖请求参数区。 -->
+    <!-- 参数值编辑覆盖层：覆盖整个在线调试区，避免请求参数面板过窄时挤压编辑器。 -->
     <Teleport :to="editorTeleportTarget" :disabled="!editorTeleportTarget">
       <div v-if="valueEditorVisible" class="param-editor-overlay">
         <div class="param-editor">
