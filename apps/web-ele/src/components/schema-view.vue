@@ -3,7 +3,7 @@ import { computed, ref } from 'vue';
 
 import { SvgCaretRightIcon } from '@vben/icons';
 
-import { ElButton, ElTooltip } from 'element-plus';
+import { ElTooltip } from 'element-plus';
 
 import { getEnumItems } from '#/utils/enumexpand';
 import { getSchemaTypeLabel } from '#/utils/schema';
@@ -364,13 +364,36 @@ const getVariantOptions = (item: any) => {
   return getCompositionItems(item, keyword);
 };
 
-const getVariantOptionLabel = (option: any, index: number) => {
-  const title = option?.title || '';
-  const type = option?.type ? ` · ${option.type}` : '';
-  if (title) {
-    return `${index + 1}. ${title}${type}`;
-  }
-  return `方案 ${index + 1}${type}`;
+/**
+ * 获取 oneOf/anyOf 分支的显示标题
+ * 用于分段选择器按钮文本
+ */
+const getVariantButtonLabel = (option: any, index: number) => {
+  return option?.title || `方案 ${index + 1}`;
+};
+
+/**
+ * 获取组合关键字的显示标签（英文）
+ */
+const getCompositionLabel = (keyword: CompositionKeyword) => {
+  const labels: Record<CompositionKeyword, string> = {
+    oneOf: 'oneOf',
+    anyOf: 'anyOf',
+    allOf: 'allOf',
+  };
+  return labels[keyword] || '';
+};
+
+/**
+ * 获取组合关键字的中文说明（用于 tooltip）
+ */
+const getCompositionTooltip = (keyword: CompositionKeyword) => {
+  const tooltips: Record<CompositionKeyword, string> = {
+    oneOf: '选择其中之一',
+    anyOf: '可能是以下之一',
+    allOf: '合并所有',
+  };
+  return tooltips[keyword] || '';
 };
 
 const resolvedRootSchema = computed(() => {
@@ -424,24 +447,40 @@ const showSchemaStack = computed(() => {
     <span class="schema-root-pill__value">
       {{ getTypeLabel(resolvedRootSchema, rootPath) }}
     </span>
-    <div v-if="rootHasVariantSelector" class="composition-switch__buttons">
+  </div>
+
+  <div v-if="rootHasVariantSelector" class="schema-root-variant">
+    <ElTooltip
+      :content="getCompositionTooltip(getCompositionKeyword(data))"
+      placement="top"
+    >
+      <span class="schema-root-variant__label">
+        {{ getCompositionLabel(getCompositionKeyword(data)) }}:
+      </span>
+    </ElTooltip>
+    <div class="schema-root-variant__tabs">
       <ElTooltip
         v-for="(option, index) in getVariantOptions(data)"
         :key="`${rootPath}-${index}`"
-        :content="getVariantOptionLabel(option, index)"
+        :content="option?.description || ''"
         placement="top"
       >
-        <ElButton
-          size="small"
-          class="variant-switch-button"
+        <button
+          type="button"
+          class="variant-tab"
           :class="{
-            'variant-switch-button--active':
+            'variant-tab--active':
               getSelectedVariantIndex(data, rootPath) === index,
           }"
           @click="updateVariant(rootPath, index)"
         >
-          {{ index + 1 }}
-        </ElButton>
+          <span class="variant-tab__title">
+            {{ getVariantButtonLabel(option, index) }}
+          </span>
+          <span v-if="option?.type" class="variant-tab__type">
+            {{ option.type }}
+          </span>
+        </button>
       </ElTooltip>
     </div>
   </div>
@@ -529,33 +568,6 @@ const showSchemaStack = computed(() => {
               >
                 {{ getPlainDescription(value, getNodePath(String(key))) }}
               </div>
-            </div>
-
-            <div
-              v-if="hasVariantSelector(value)"
-              class="schema-item__meta-variant"
-            >
-              <ElTooltip
-                v-for="(option, index) in getVariantOptions(value)"
-                :key="`${getNodePath(String(key))}-${index}`"
-                :content="getVariantOptionLabel(option, index)"
-                placement="top"
-              >
-                <ElButton
-                  size="small"
-                  class="variant-switch-button"
-                  :class="{
-                    'variant-switch-button--active':
-                      getSelectedVariantIndex(
-                        value,
-                        getNodePath(String(key)),
-                      ) === index,
-                  }"
-                  @click="updateVariant(getNodePath(String(key)), index)"
-                >
-                  {{ index + 1 }}
-                </ElButton>
-              </ElTooltip>
             </div>
           </div>
 
@@ -704,6 +716,45 @@ const showSchemaStack = computed(() => {
         "
         class="schema-item__children"
       >
+        <div
+          v-if="hasVariantSelector(value)"
+          class="schema-item__variant-selector"
+        >
+          <ElTooltip
+            :content="getCompositionTooltip(getCompositionKeyword(value))"
+            placement="top"
+          >
+            <span class="schema-item__variant-label">
+              {{ getCompositionLabel(getCompositionKeyword(value)) }}:
+            </span>
+          </ElTooltip>
+          <div class="schema-item__variant-tabs">
+            <ElTooltip
+              v-for="(option, index) in getVariantOptions(value)"
+              :key="`${getNodePath(String(key))}-${index}`"
+              :content="option?.description || ''"
+              placement="top"
+            >
+              <button
+                type="button"
+                class="variant-tab"
+                :class="{
+                  'variant-tab--active':
+                    getSelectedVariantIndex(value, getNodePath(String(key))) ===
+                    index,
+                }"
+                @click="updateVariant(getNodePath(String(key)), index)"
+              >
+                <span class="variant-tab__title">
+                  {{ getVariantButtonLabel(option, index) }}
+                </span>
+                <span v-if="option?.type" class="variant-tab__type">
+                  {{ option.type }}
+                </span>
+              </button>
+            </ElTooltip>
+          </div>
+        </div>
         <SchemaView
           :data="getDisplaySchema(value, getNodePath(String(key)))"
           :mode="mode"
@@ -716,6 +767,51 @@ const showSchemaStack = computed(() => {
 </template>
 
 <style scoped>
+@media (max-width: 768px) {
+  .schema-item__details {
+    grid-template-columns: 1fr;
+    row-gap: 4px;
+  }
+
+  .schema-item__detail-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
+  .schema-item__headline {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .schema-item__headline-main {
+    grid-template-columns: 1fr;
+    gap: 6px 8px;
+  }
+
+  .schema-item__summary {
+    min-width: 0;
+  }
+
+  .schema-item__detail-label {
+    min-width: 0;
+  }
+
+  .schema-root-variant {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .schema-root-variant__tabs,
+  .schema-item__variant-tabs {
+    width: 100%;
+  }
+
+  .variant-tab {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
 .schema-root-pill,
 .schema-stack {
   --field-chip-radius: calc(var(--radius, 12px) * 0.82);
@@ -768,12 +864,115 @@ const showSchemaStack = computed(() => {
   padding-left: 6px;
 }
 
-.composition-switch__buttons {
+/* 根级别分支选择器 */
+.schema-root-variant {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
   align-items: center;
-  margin-left: auto;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color-light);
+  border-radius: calc(var(--radius, 12px) * 0.92);
+}
+
+.schema-root-variant__label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+  cursor: help;
+}
+
+.schema-root-variant__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+/* 字段级别分支选择器 */
+.schema-item__variant-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 6px;
+}
+
+.schema-item__variant-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+  cursor: help;
+}
+
+.schema-item__variant-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+/* 通用分段选择器样式 */
+.variant-tab {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  min-height: 28px;
+  padding: 4px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--el-text-color-regular);
+  cursor: pointer;
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color);
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.variant-tab:hover {
+  color: var(--el-color-primary);
+  background: var(--el-fill-color-light);
+  border-color: var(--el-color-primary-light-5);
+}
+
+.variant-tab:active {
+  transform: scale(0.98);
+}
+
+.variant-tab--active {
+  font-weight: 600;
+  color: var(--el-color-primary);
+  background: color-mix(
+    in srgb,
+    var(--el-color-primary-light-9) 85%,
+    transparent
+  );
+  border-color: var(--el-color-primary);
+}
+
+.variant-tab__title {
+  font-size: 12px;
+  font-weight: inherit;
+  line-height: 1.4;
+}
+
+.variant-tab__type {
+  font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--el-text-color-secondary);
+  opacity: 0.8;
 }
 
 .schema-item {
@@ -785,7 +984,7 @@ const showSchemaStack = computed(() => {
 .schema-item__top {
   display: flex;
   gap: 6px;
-  align-items: flex-start;
+  align-items: center;
   width: 100%;
   padding: 5px 0;
 
@@ -803,11 +1002,10 @@ const showSchemaStack = computed(() => {
 .schema-item__control {
   display: flex;
   flex: none;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
   width: 16px;
   min-width: 16px;
-  padding-top: 2px;
 }
 
 .schema-item__toggle {
@@ -872,7 +1070,7 @@ const showSchemaStack = computed(() => {
 
 .schema-item__headline {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px 12px;
   align-items: start;
   min-width: 0;
@@ -1038,14 +1236,6 @@ const showSchemaStack = computed(() => {
   min-width: 0;
 }
 
-.schema-item__meta-variant {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-  justify-content: flex-end;
-}
-
 .meta-chip {
   display: inline-flex;
   align-items: center;
@@ -1091,31 +1281,6 @@ const showSchemaStack = computed(() => {
   white-space: normal;
 }
 
-.variant-switch-button {
-  min-width: 28px;
-  height: 24px;
-  padding: 0 8px;
-  font-size: 11px;
-  color: var(--el-text-color-secondary);
-  background: var(--field-chip-bg);
-  border: 1px solid var(--field-chip-border);
-  border-radius: var(--field-chip-radius);
-}
-
-.variant-switch-button--active {
-  color: var(--el-color-primary);
-  background: color-mix(
-    in srgb,
-    var(--el-color-primary-light-9) 78%,
-    var(--el-bg-color) 22%
-  );
-  border-color: color-mix(
-    in srgb,
-    var(--el-color-primary-light-7) 86%,
-    transparent
-  );
-}
-
 .schema-item__children {
   box-sizing: border-box;
   width: calc(100% - 18px);
@@ -1124,35 +1289,5 @@ const showSchemaStack = computed(() => {
   margin-left: 18px;
   border-left: 1px solid
     color-mix(in srgb, var(--el-color-primary-light-7) 48%, transparent);
-}
-
-@media (max-width: 768px) {
-  .schema-item__details {
-    grid-template-columns: 1fr;
-    row-gap: 4px;
-  }
-
-  .schema-item__detail-row {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 2px;
-  }
-
-  .schema-item__headline {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .schema-item__headline-main {
-    grid-template-columns: 1fr;
-    gap: 6px 8px;
-  }
-
-  .schema-item__summary {
-    min-width: 0;
-  }
-
-  .schema-item__detail-label {
-    min-width: 0;
-  }
 }
 </style>
