@@ -488,11 +488,9 @@ const showSchemaStack = computed(() => {
   <div v-if="showSchemaStack" class="schema-stack">
     <div v-for="(value, key) in rootChildren" :key="key" class="schema-item">
       <div class="schema-item__top">
-        <div
-          v-if="isExpandable(value, getNodePath(String(key)))"
-          class="schema-item__control"
-        >
+        <div class="schema-item__control">
           <button
+            v-if="isExpandable(value, getNodePath(String(key)))"
             type="button"
             class="schema-item__toggle"
             :class="{
@@ -506,6 +504,7 @@ const showSchemaStack = computed(() => {
               :class="{ 'rotate-90': !foldState[getNodePath(String(key))] }"
             />
           </button>
+          <span v-else class="schema-item__leaf-indicator"></span>
         </div>
 
         <div class="schema-item__content">
@@ -1004,8 +1003,17 @@ const showSchemaStack = computed(() => {
   flex: none;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  min-width: 16px;
+  width: 18px;
+  min-width: 18px;
+}
+
+.schema-item__leaf-indicator {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  background: var(--el-border-color-lighter);
+  border-radius: 50%;
+  opacity: 0.6;
 }
 
 .schema-item__toggle {
