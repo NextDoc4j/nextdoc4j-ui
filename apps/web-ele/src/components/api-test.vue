@@ -21,6 +21,7 @@ import {
 
 import { useAppConfig } from '@vben/hooks';
 import {
+  ApiTestRun,
   SvgAiCopyIcon,
   SvgApiPrefixIcon,
   SvgDocumentLayoutIcon,
@@ -169,6 +170,7 @@ const realtimeResponseScrollTop = ref(0);
 const paneLayout = ref<'horizontal' | 'vertical'>('horizontal');
 const paneRatio = ref(0.52);
 const debugLayoutRef = ref<HTMLElement>();
+const isNarrowLayout = ref(false);
 const isPaneResizing = ref(false);
 const actualRequestSnapshot = ref<DebugActualRequestSnapshot | null>(null);
 let removePaneResizeListeners: (() => void) | null = null;
@@ -200,6 +202,7 @@ const methodPillStyle = computed(() => {
 const normalizeParamName = (name: string) => name.trim();
 const normalizeHeaderName = (name: string) => name.trim().toLowerCase();
 const PATH_PLACEHOLDER_SEGMENT_RE = /^\{[^/{}]+\}$/;
+const DEBUG_STACKED_BREAKPOINT = 720;
 let tableRowKeySeed = 0;
 
 const createTableRowKey = () => `api-test-row-${tableRowKeySeed++}`;
@@ -1027,8 +1030,13 @@ watch([() => requestTabsHostRef.value, () => responseTabsHostRef.value], () => {
   scheduleTabOverflowUpdate();
 });
 
-const isStackedLayout = computed(() => paneLayout.value === 'vertical');
+const isStackedLayout = computed(
+  () => isNarrowLayout.value || paneLayout.value === 'vertical',
+);
 const layoutTooltipText = computed(() => {
+  if (isNarrowLayout.value) {
+    return '窄屏固定上下布局';
+  }
   return isStackedLayout.value ? '切换为左右布局' : '切换为上下布局';
 });
 const responseStatusTone = computed(() => {
@@ -1118,6 +1126,19 @@ const clearPaneResizeListeners = () => {
     removePaneResizeListeners = null;
   }
 };
+
+/**
+ * 用途：根据当前视口宽度同步调试面板是否强制上下布局。
+ * 参数说明：无参数，方法内部读取浏览器窗口宽度。
+ * 返回值说明：无返回值，仅更新窄屏布局状态。
+ */
+function syncNarrowLayoutState() {
+  if (typeof window === 'undefined') {
+    isNarrowLayout.value = false;
+    return;
+  }
+  isNarrowLayout.value = window.innerWidth <= DEBUG_STACKED_BREAKPOINT;
+}
 
 const startPaneResize = (event: PointerEvent) => {
   if (!debugLayoutRef.value) return;
@@ -1486,6 +1507,9 @@ const handleRestoreDefault = async () => {
 };
 
 const togglePaneLayout = () => {
+  if (isNarrowLayout.value) {
+    return;
+  }
   paneLayout.value = isStackedLayout.value ? 'horizontal' : 'vertical';
 };
 
@@ -2186,7 +2210,9 @@ const urlEncodedParams = ref<Array<ParamsType>>([]);
 onMounted(async () => {
   const openApi = apiStore.openApi;
   baseUrl.value = openApi?.servers?.[0]?.url;
+  syncNarrowLayoutState();
   window.addEventListener('pagehide', handlePageHide);
+  window.addEventListener('resize', syncNarrowLayoutState);
   syncSecurityParamsToDebugTable();
   syncGlobalParamsToDebugTable();
   await captureDefaultRequestState();
@@ -2282,6 +2308,7 @@ watch(
 
 onBeforeUnmount(() => {
   window.removeEventListener('pagehide', handlePageHide);
+  window.removeEventListener('resize', syncNarrowLayoutState);
   flushPersistCache();
   clearPaneResizeListeners();
   tabOverflowObserver?.disconnect();
@@ -2326,13 +2353,14 @@ onBeforeUnmount(() => {
                 {{ method?.toUpperCase() }}
               </span>
               <ElTooltip v-if="baseUrl" placement="top" :content="baseUrl">
-                <ElButton
-                  text
-                  class="debug-prefix-button"
+                <button
+                  type="button"
+                  class="debug-base-url"
                   @click="handleCopyBaseUrl"
                 >
-                  <SvgApiPrefixIcon class="debug-prefix-button__icon" />
-                </ElButton>
+                  <SvgApiPrefixIcon class="debug-base-url__icon" />
+                  <span class="debug-base-url__text">{{ baseUrl }}</span>
+                </button>
               </ElTooltip>
             </template>
           </ElInput>
@@ -2343,7 +2371,8 @@ onBeforeUnmount(() => {
               :loading="loading"
               @click="sendRequest"
             >
-              发送
+              <ApiTestRun v-if="!loading" class="debug-send-button__icon" />
+              <span>发送</span>
             </ElButton>
             <div class="debug-console__icon-group">
               <ElTooltip content="全局配置管理" placement="top">
@@ -3039,6 +3068,10 @@ onBeforeUnmount(() => {
   .debug-send-button {
     min-width: 64px;
   }
+
+  .debug-base-url {
+    max-width: 160px;
+  }
 }
 
 @media (max-width: 720px) {
@@ -3076,6 +3109,16 @@ onBeforeUnmount(() => {
     flex: 0 0 auto;
   }
 
+  .debug-base-url {
+    justify-content: center;
+    width: 30px;
+    padding: 0;
+  }
+
+  .debug-base-url__text {
+    display: none;
+  }
+
   .debug-status-list {
     justify-content: flex-start;
   }
@@ -3091,65 +3134,31 @@ onBeforeUnmount(() => {
 
 .debug-console {
   --debug-chip-radius: var(--radius);
-  --debug-radius-xs: var(--radius);
-  --debug-radius-sm: calc(var(--radius) * 1.08);
-  --debug-radius-md: calc(var(--radius) * 1.16);
-  --debug-radius-lg: calc(var(--radius) * 1.24);
+  --debug-radius-xs: calc(var(--radius) * 0.56);
+  --debug-radius-sm: calc(var(--radius) * 0.72);
+  --debug-radius-md: calc(var(--radius) * 0.94);
+  --debug-radius-lg: calc(var(--radius) * 1.18);
   --debug-count-radius: var(--radius);
   --debug-menu-radius: calc(var(--radius) * 1.12);
-  --el-border-radius-base: var(--radius);
-  --el-border-radius-small: var(--radius);
-  --debug-surface: var(--el-bg-color);
-  --debug-soft-bg: color-mix(
-    in srgb,
-    var(--el-bg-color) 92%,
-    var(--el-fill-color-light) 8%
-  );
-  --debug-soft-bg-strong: color-mix(
-    in srgb,
-    var(--el-bg-color) 86%,
-    var(--el-fill-color-light) 14%
-  );
-  --debug-border: color-mix(
-    in srgb,
-    var(--el-text-color-primary) 12%,
-    transparent
-  );
-  --debug-border-strong: color-mix(
-    in srgb,
-    var(--el-text-color-primary) 22%,
-    transparent
-  );
-  --debug-request-shell-bg: color-mix(
-    in srgb,
-    var(--debug-surface) 88%,
-    var(--el-fill-color-light) 12%
-  );
-  --debug-request-shell-top-line: color-mix(in srgb, #8d97a7 34%, transparent);
-  --debug-request-shell-bottom-line: color-mix(
-    in srgb,
-    #8d97a7 20%,
-    transparent
-  );
-  --debug-request-shell-shadow:
-    inset 0 1px 0 var(--debug-request-shell-top-line),
-    inset 0 -1px 0 var(--debug-request-shell-bottom-line),
-    0 0 0 1px color-mix(in srgb, #9aa3b2 20%, transparent),
-    0 9px 18px -15px color-mix(in srgb, #7f8899 42%, transparent),
-    0 -9px 18px -15px color-mix(in srgb, #8e97a6 44%, transparent);
-  --debug-request-shell-shadow-hover:
-    inset 0 1px 0 color-mix(in srgb, #8692a5 42%, transparent),
-    inset 0 -1px 0 color-mix(in srgb, #8692a5 24%, transparent),
-    0 0 0 1px color-mix(in srgb, #8d97a7 24%, transparent),
-    0 11px 22px -15px color-mix(in srgb, #738093 48%, transparent),
-    0 -11px 22px -15px color-mix(in srgb, #8d97a7 50%, transparent);
-  --debug-shadow: 0 6px 14px
-    color-mix(in srgb, var(--el-text-color-primary) 3%, transparent);
+  --el-border-radius-base: calc(var(--radius) * 0.75);
+  --el-border-radius-small: calc(var(--radius) * 0.62);
+  --debug-page-bg: #f8fafc;
+  --debug-surface: #fff;
+  --debug-soft-bg: #f8fafc;
+  --debug-soft-bg-strong: #f1f5f9;
+  --debug-border: #e2e8f0;
+  --debug-border-strong: #cbd5e1;
+  --debug-text-muted: #64748b;
+  --debug-request-shell-bg: #fff;
+  --debug-shadow: 0 8px 18px rgb(15 23 42 / 4%);
+  --debug-shadow-strong: 0 12px 26px rgb(15 23 42 / 7%);
 
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  padding: 16px;
+  background: var(--debug-page-bg);
 }
 
 /* --- Base64 图片抽屉增强样式 --- */
@@ -3339,9 +3348,9 @@ onBeforeUnmount(() => {
 .debug-console__top {
   display: grid;
   flex: none;
-  gap: 9px;
+  gap: 10px;
   padding: 0;
-  margin-bottom: 10px;
+  margin-bottom: 14px;
   background: transparent;
   border: none;
   box-shadow: none;
@@ -3349,10 +3358,10 @@ onBeforeUnmount(() => {
 
 .debug-console__toolbar {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
   min-width: 0;
-  margin: 0 2px;
+  margin: 0;
 }
 
 .debug-console__request-row {
@@ -3361,12 +3370,16 @@ onBeforeUnmount(() => {
   gap: 10px;
   align-items: center;
   min-width: 0;
-  padding: 7px 10px;
+  min-height: 52px;
+  padding: 8px 10px;
   margin: 0;
   background: var(--debug-request-shell-bg);
+  border: 1px solid var(--debug-border);
   border-radius: var(--debug-radius-md);
-  box-shadow: var(--debug-request-shell-shadow);
-  transition: box-shadow 0.16s ease;
+  box-shadow: var(--debug-shadow);
+  transition:
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
 }
 
 .debug-back-button-wrap {
@@ -3378,7 +3391,8 @@ onBeforeUnmount(() => {
 
 .debug-console__request-row:hover,
 .debug-console__request-row:focus-within {
-  box-shadow: var(--debug-request-shell-shadow-hover);
+  border-color: color-mix(in srgb, var(--el-color-primary) 34%, transparent);
+  box-shadow: var(--debug-shadow-strong);
 }
 
 .debug-console__hint {
@@ -3386,10 +3400,10 @@ onBeforeUnmount(() => {
   align-items: center;
   min-height: 22px;
   padding: 0 10px;
-  margin: 0 2px;
+  margin: 0;
   font-size: 11px;
   font-weight: 500;
-  color: var(--el-text-color-secondary);
+  color: var(--debug-text-muted);
   background: var(--debug-soft-bg-strong);
   border: 1px solid var(--debug-border);
   border-radius: var(--debug-chip-radius);
@@ -3499,7 +3513,7 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   min-height: 42px;
   padding: 0 14px;
-  background: var(--debug-soft-bg);
+  background: var(--debug-surface);
   border-bottom: 1px solid var(--debug-border);
 }
 
@@ -3527,36 +3541,48 @@ onBeforeUnmount(() => {
 .debug-pane__meta {
   font-size: 11px;
   font-weight: 500;
-  color: var(--el-text-color-secondary);
+  color: var(--debug-text-muted);
 }
 
 .debug-inline-tabs {
   display: inline-flex;
   flex: 1;
   flex-wrap: nowrap;
-  gap: 4px;
+  gap: 14px;
   align-items: center;
   min-width: 0;
   overflow: hidden;
 }
 
 .debug-inline-tab {
+  position: relative;
   display: inline-flex;
   flex: none;
-  gap: 3px;
+  gap: 5px;
   align-items: center;
   justify-content: center;
   max-width: 146px;
-  min-height: 23px;
-  padding: 0 7px;
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--el-text-color-secondary);
+  min-height: 42px;
+  padding: 0 1px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--debug-text-muted);
   cursor: pointer;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: var(--debug-radius-xs);
+  border-radius: 0;
   transition: all 0.14s ease;
+}
+
+.debug-inline-tab::after {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  content: '';
+  background: transparent;
+  border-radius: 999px 999px 0 0;
 }
 
 .debug-inline-tab__label {
@@ -3567,18 +3593,26 @@ onBeforeUnmount(() => {
 
 .debug-inline-tab:hover {
   color: var(--el-text-color-primary);
-  background: var(--debug-soft-bg-strong);
-  border-color: var(--debug-border);
+  background: transparent;
+  border-color: transparent;
 }
 
 .debug-inline-tab--active {
+  color: var(--el-text-color-primary);
+  background: transparent;
+  border-color: transparent;
+}
+
+.debug-inline-tab--active::after {
+  background: var(--el-text-color-primary);
+}
+
+.debug-pane--response .debug-inline-tab--active {
   color: var(--el-color-primary);
-  background: color-mix(
-    in srgb,
-    var(--el-color-primary-light-9) 70%,
-    var(--debug-surface) 30%
-  );
-  border-color: color-mix(in srgb, var(--el-color-primary) 28%, transparent);
+}
+
+.debug-pane--response .debug-inline-tab--active::after {
+  background: var(--el-color-primary);
 }
 
 .debug-inline-tab__count {
@@ -3591,17 +3625,25 @@ onBeforeUnmount(() => {
   padding: 0 3px;
   font-size: 9.5px;
   font-weight: 700;
-  color: #fff;
-  background: var(--el-color-primary);
+  color: var(--debug-text-muted);
+  background: var(--debug-soft-bg-strong);
+  border: 1px solid var(--debug-border);
   border-radius: var(--radius);
 }
 
 .debug-inline-tab--image {
   flex: none;
   max-width: none;
+  min-height: 24px;
+  padding: 0 8px;
   margin-left: 4px;
   border-color: var(--debug-border);
   border-radius: var(--radius);
+}
+
+.debug-inline-tab--image::after,
+.debug-inline-tab--more::after {
+  display: none;
 }
 
 .debug-inline-tab--image:disabled {
@@ -3619,6 +3661,7 @@ onBeforeUnmount(() => {
 .debug-inline-tab--more {
   width: 22px;
   min-width: 22px;
+  min-height: 24px;
   padding: 0;
   background: transparent;
   border: none;
@@ -3785,6 +3828,7 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 8px;
   align-items: center;
+  min-width: 0;
 }
 
 .method-pill {
@@ -3799,29 +3843,55 @@ onBeforeUnmount(() => {
   border-radius: var(--debug-chip-radius);
 }
 
-.debug-prefix-button {
-  width: 26px;
-  height: 26px;
-  color: var(--el-text-color-secondary);
+.debug-base-url {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  max-width: clamp(120px, 22vw, 280px);
+  height: 30px;
+  padding: 0 8px;
+  color: var(--debug-text-muted);
+  cursor: pointer;
+  background: var(--debug-soft-bg);
+  border: 1px solid var(--debug-border);
   border-radius: var(--debug-chip-radius);
-  transition: all 0.16s ease;
+  transition:
+    color 0.16s ease,
+    background-color 0.16s ease,
+    border-color 0.16s ease;
 }
 
-.debug-prefix-button__icon {
+.debug-base-url__icon {
+  flex: none;
   width: 12px;
   height: 12px;
 }
 
-.debug-prefix-button:hover {
+.debug-base-url__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.debug-base-url:hover {
   color: var(--el-color-primary);
   background: color-mix(
     in srgb,
-    var(--el-color-primary-light-9) 65%,
-    transparent
+    var(--el-color-primary-light-9) 76%,
+    var(--debug-surface) 24%
   );
+  border-color: color-mix(in srgb, var(--el-color-primary) 32%, transparent);
 }
 
 .debug-send-button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
   min-width: 78px;
   height: 32px;
   padding: 0 14px;
@@ -3835,6 +3905,11 @@ onBeforeUnmount(() => {
 
 .debug-send-button:hover {
   transform: translateY(-1px);
+}
+
+.debug-send-button__icon {
+  width: 14px;
+  height: 14px;
 }
 
 .debug-back-button {
@@ -3903,7 +3978,7 @@ onBeforeUnmount(() => {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: var(--debug-soft-bg);
+  background: var(--debug-surface);
 }
 
 /* 作为参数值编辑覆盖层（Teleport 自 params-table）的定位上下文，使其填满请求参数区 */
@@ -3929,15 +4004,15 @@ onBeforeUnmount(() => {
 
 .params-tab-sections {
   display: grid;
-  gap: 12px;
+  gap: 14px;
 }
 
 .params-table-block__header {
   display: flex;
   align-items: center;
   min-height: 36px;
-  padding: 8px 12px;
-  background: var(--debug-soft-bg-strong);
+  padding: 8px 12px 7px;
+  background: var(--debug-soft-bg);
   border-bottom: 1px solid var(--debug-border);
 }
 
@@ -3946,7 +4021,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 8px;
   min-width: 0;
-  padding: 8px 12px 10px;
+  padding: 10px 12px 12px;
   overflow: hidden;
 }
 
@@ -3963,6 +4038,8 @@ onBeforeUnmount(() => {
 :deep(.response-body.theme-dark) {
   height: 100%;
   min-height: 0;
+  border: none;
+  border-radius: 0;
 }
 
 .debug-status-list {
@@ -4012,17 +4089,17 @@ onBeforeUnmount(() => {
 
 .actual-request {
   display: grid;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
 }
 
 .actual-request__block {
   min-width: 0;
-  padding: 10px;
+  padding: 12px;
   overflow-x: auto;
   background: var(--debug-surface);
   border: 1px solid var(--debug-border);
-  border-radius: var(--debug-radius-xs);
+  border-radius: var(--debug-radius-sm);
 }
 
 .actual-request__block.params-table-block {
@@ -4034,16 +4111,20 @@ onBeforeUnmount(() => {
   margin-bottom: 8px;
   font-size: 12px;
   font-weight: 700;
-  color: var(--el-text-color-primary);
+  color: var(--debug-text-muted);
 }
 
 .actual-request__code {
+  padding: 10px;
   margin: 0;
   font-size: 12px;
   line-height: 1.6;
-  color: var(--el-text-color-regular);
+  color: var(--el-text-color-primary);
   word-break: break-all;
   white-space: pre-wrap;
+  background: var(--debug-soft-bg);
+  border: 1px solid var(--debug-border);
+  border-radius: var(--debug-radius-xs);
 }
 
 :deep(.actual-request__block .el-table) {
@@ -4158,25 +4239,16 @@ onBeforeUnmount(() => {
 
 :deep(.document-page--dark .debug-console),
 :deep(html.dark .debug-console) {
+  --debug-page-bg: var(--el-bg-color);
   --debug-surface: #1c1e23;
   --debug-soft-bg: #1c1e23;
   --debug-soft-bg-strong: #23272e;
   --debug-border: color-mix(in srgb, #fff 6%, transparent);
   --debug-border-strong: color-mix(in srgb, #fff 9%, transparent);
+  --debug-text-muted: var(--el-text-color-secondary);
   --debug-request-shell-bg: #20242b;
-  --debug-request-shell-top-line: color-mix(in srgb, #fff 18%, transparent);
-  --debug-request-shell-bottom-line: color-mix(in srgb, #fff 10%, transparent);
-  --debug-request-shell-shadow:
-    inset 0 1px 0 var(--debug-request-shell-top-line),
-    inset 0 -1px 0 var(--debug-request-shell-bottom-line),
-    0 8px 18px -14px color-mix(in srgb, #000 58%, transparent),
-    0 -8px 18px -14px color-mix(in srgb, #fff 12%, transparent);
-  --debug-request-shell-shadow-hover:
-    inset 0 1px 0 color-mix(in srgb, #fff 24%, transparent),
-    inset 0 -1px 0 color-mix(in srgb, #fff 14%, transparent),
-    0 10px 22px -14px color-mix(in srgb, #000 62%, transparent),
-    0 -10px 22px -14px color-mix(in srgb, #fff 16%, transparent);
   --debug-shadow: 0 8px 20px color-mix(in srgb, #000 45%, transparent);
+  --debug-shadow-strong: 0 12px 26px color-mix(in srgb, #000 52%, transparent);
 }
 
 /* 全局配置弹窗样式：弹窗固定高度，整体不滚动；参数表格约 8 行后在右侧卡片内滚动 */
