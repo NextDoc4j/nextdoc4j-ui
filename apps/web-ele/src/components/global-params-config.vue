@@ -585,13 +585,25 @@ const applyCurrentServiceTemplate = () => {
 <style scoped>
 /* 卡片观感与首页保持一致：更大的圆角、柔和边框与悬浮阴影 */
 .config-card {
-  --config-radius: calc(var(--radius) * 1.18);
-
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: var(--config-radius);
-  box-shadow:
+  --config-radius: var(--doc-manage-radius, calc(var(--radius) * 1.18));
+  --config-radius-sm: var(--doc-manage-radius-sm, calc(var(--radius) * 0.94));
+  --config-line: var(--doc-manage-line, var(--el-border-color-lighter));
+  --config-panel: var(--doc-manage-panel, var(--el-bg-color));
+  --config-shadow-sm: var(
+    --doc-manage-shadow-sm,
     0 1px 2px color-mix(in srgb, var(--el-text-color-primary) 6%, transparent),
-    0 2px 8px color-mix(in srgb, var(--el-text-color-primary) 5%, transparent);
+    0 2px 8px color-mix(in srgb, var(--el-text-color-primary) 5%, transparent)
+  );
+  --config-shadow-md: var(
+    --doc-manage-shadow-md,
+    0 4px 14px color-mix(in srgb, var(--el-text-color-primary) 8%, transparent),
+    0 10px 30px color-mix(in srgb, var(--el-text-color-primary) 7%, transparent)
+  );
+
+  background: var(--config-panel);
+  border: 1px solid var(--config-line);
+  border-radius: var(--config-radius);
+  box-shadow: var(--config-shadow-sm);
   transition:
     box-shadow 0.18s ease,
     border-color 0.18s ease;
@@ -599,9 +611,20 @@ const applyCurrentServiceTemplate = () => {
 
 .config-card:hover {
   border-color: color-mix(in srgb, var(--el-color-primary) 25%, transparent);
-  box-shadow:
-    0 4px 14px color-mix(in srgb, var(--el-text-color-primary) 8%, transparent),
-    0 10px 30px color-mix(in srgb, var(--el-text-color-primary) 7%, transparent);
+  box-shadow: var(--config-shadow-md);
+}
+
+.config-card :deep(.el-card__header) {
+  border-bottom-color: var(--config-line);
+}
+
+.config-card :deep(.el-card__body) {
+  background: linear-gradient(
+    180deg,
+    var(--config-panel) 0%,
+    color-mix(in srgb, var(--el-fill-color-lighter) 32%, var(--config-panel))
+      100%
+  );
 }
 
 .config-card__title {
@@ -621,8 +644,8 @@ const applyCurrentServiceTemplate = () => {
   color: var(--el-text-color-secondary);
   cursor: pointer;
   background: var(--el-fill-color-light);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: var(--radius);
+  border: 1px solid var(--config-line);
+  border-radius: var(--config-radius-sm);
   transition:
     color 0.15s ease,
     background-color 0.15s ease,
@@ -648,8 +671,8 @@ const applyCurrentServiceTemplate = () => {
   font-size: 12px;
   color: var(--el-text-color-secondary);
   background: var(--el-fill-color-light);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: var(--radius);
+  border: 1px solid var(--config-line);
+  border-radius: var(--config-radius-sm);
 }
 
 .config-card__inject-stat b {
@@ -660,6 +683,16 @@ const applyCurrentServiceTemplate = () => {
 
 :deep(.el-table__row:last-child) {
   background: color-mix(in srgb, var(--el-fill-color-light) 50%, transparent);
+}
+
+:deep(.el-tabs__nav-wrap::after) {
+  background-color: var(--config-line);
+}
+
+:deep(.el-table) {
+  --el-table-border-color: var(--config-line);
+
+  border-radius: var(--config-radius-sm);
 }
 
 :deep(.el-table__row:last-child .el-input__inner::placeholder) {

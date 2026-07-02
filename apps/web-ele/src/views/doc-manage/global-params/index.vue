@@ -100,7 +100,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="h-full overflow-auto p-5">
+  <div class="doc-manage-config-page h-full overflow-auto">
     <!-- 全局调试缓存 与 分组概览 两张卡片并列，各占一半宽度 -->
     <div class="config-card-row mb-4">
       <ElCard shadow="never" class="config-card">
@@ -196,15 +196,38 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-/* 卡片观感与首页保持一致：更大的圆角、柔和边框与悬浮阴影 */
-.config-card {
-  --config-radius: calc(var(--radius) * 1.18);
+@media (max-width: 900px) {
+  .config-card-row {
+    flex-direction: column;
+  }
+}
 
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: var(--config-radius);
-  box-shadow:
+.doc-manage-config-page {
+  --doc-manage-radius: calc(var(--radius) * 1.18);
+  --doc-manage-radius-sm: calc(var(--radius) * 0.94);
+  --doc-manage-line: var(--el-border-color-lighter);
+  --doc-manage-panel: var(--el-bg-color);
+  --doc-manage-shadow-sm:
     0 1px 2px color-mix(in srgb, var(--el-text-color-primary) 6%, transparent),
     0 2px 8px color-mix(in srgb, var(--el-text-color-primary) 5%, transparent);
+  --doc-manage-shadow-md:
+    0 4px 14px color-mix(in srgb, var(--el-text-color-primary) 8%, transparent),
+    0 10px 30px color-mix(in srgb, var(--el-text-color-primary) 7%, transparent);
+
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  padding: 20px;
+  background: var(--el-fill-color-light);
+}
+
+/* 卡片观感与首页保持一致：更大的圆角、柔和边框与悬浮阴影 */
+.config-card {
+  background: var(--doc-manage-panel);
+  border: 1px solid var(--doc-manage-line);
+  border-radius: var(--doc-manage-radius);
+  box-shadow: var(--doc-manage-shadow-sm);
   transition:
     box-shadow 0.18s ease,
     border-color 0.18s ease;
@@ -212,9 +235,24 @@ onBeforeUnmount(() => {
 
 .config-card:hover {
   border-color: color-mix(in srgb, var(--el-color-primary) 25%, transparent);
-  box-shadow:
-    0 4px 14px color-mix(in srgb, var(--el-text-color-primary) 8%, transparent),
-    0 10px 30px color-mix(in srgb, var(--el-text-color-primary) 7%, transparent);
+  box-shadow: var(--doc-manage-shadow-md);
+}
+
+.config-card :deep(.el-card__header) {
+  border-bottom-color: var(--doc-manage-line);
+}
+
+.config-card :deep(.el-card__body) {
+  background: linear-gradient(
+    180deg,
+    var(--doc-manage-panel) 0%,
+    color-mix(
+        in srgb,
+        var(--el-fill-color-lighter) 32%,
+        var(--doc-manage-panel)
+      )
+      100%
+  );
 }
 
 .config-card__title {
@@ -234,8 +272,8 @@ onBeforeUnmount(() => {
   color: var(--el-text-color-secondary);
   cursor: pointer;
   background: var(--el-fill-color-light);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: var(--radius);
+  border: 1px solid var(--doc-manage-line);
+  border-radius: var(--doc-manage-radius-sm);
   transition:
     color 0.15s ease,
     background-color 0.15s ease,

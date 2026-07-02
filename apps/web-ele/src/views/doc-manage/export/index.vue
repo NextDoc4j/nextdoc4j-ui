@@ -4574,7 +4574,7 @@ onBeforeUnmount(() => {
 
 <style scoped lang="scss">
 @supports not (scrollbar-gutter: stable) {
-  .scope-tree-panel {
+  .doc-export-page .scope-tree-panel {
     overflow-y: scroll;
   }
 }
@@ -4588,22 +4588,44 @@ onBeforeUnmount(() => {
   }
 }
 
+@media (max-width: 1080px) {
+  .doc-export-page.doc-export-page {
+    overflow: auto;
+  }
+
+  .doc-export-page .doc-export-layout {
+    flex-direction: column;
+    overflow: visible;
+  }
+
+  .doc-export-page .doc-export-col {
+    flex: 0 0 auto;
+    max-width: 100%;
+    height: auto;
+    min-height: 360px;
+  }
+
+  .doc-export-page .doc-preview-card {
+    min-height: 520px;
+  }
+}
+
 @media (max-width: 920px) {
-  .export-format-grid {
+  .export-format-grid.export-format-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 768px) {
-  :deep(.doc-export-dialog .el-dialog__header) {
+  :deep(.doc-export-dialog.doc-export-dialog .el-dialog__header) {
     padding: 20px 20px 0;
   }
 
-  :deep(.doc-export-dialog .el-dialog__body) {
+  :deep(.doc-export-dialog.doc-export-dialog .el-dialog__body) {
     padding: 16px 20px 8px;
   }
 
-  :deep(.doc-export-dialog .el-dialog__footer) {
+  :deep(.doc-export-dialog.doc-export-dialog .el-dialog__footer) {
     padding: 0 20px 20px;
   }
 
@@ -4611,28 +4633,42 @@ onBeforeUnmount(() => {
     font-size: 18px;
   }
 
-  .export-format-grid {
+  .export-format-grid.export-format-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .export-format-card {
+  .export-format-card.export-format-card {
     min-height: 168px;
   }
 }
 
 @media (max-width: 520px) {
-  .export-format-grid {
+  .export-format-grid.export-format-grid {
     grid-template-columns: 1fr;
   }
 }
 
 .doc-export-page {
+  --doc-export-radius: calc(var(--radius) * 1.18);
+  --doc-export-radius-sm: calc(var(--radius) * 0.94);
+  --doc-export-radius-chip: var(--radius);
+  --doc-export-line: var(--el-border-color-lighter);
+  --doc-export-panel: var(--el-bg-color);
+  --doc-export-shadow-sm:
+    0 1px 2px color-mix(in srgb, var(--el-text-color-primary) 6%, transparent),
+    0 2px 8px color-mix(in srgb, var(--el-text-color-primary) 5%, transparent);
+  --doc-export-shadow-md:
+    0 4px 14px color-mix(in srgb, var(--el-text-color-primary) 8%, transparent),
+    0 10px 30px color-mix(in srgb, var(--el-text-color-primary) 7%, transparent);
+
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
   min-width: 0;
   height: 100%;
   min-height: 0;
+  padding-bottom: 20px;
+  background: var(--el-fill-color-light);
 
   :deep(.doc-range-card .el-card__body),
   :deep(.doc-preview-card .el-card__body) {
@@ -4679,11 +4715,10 @@ onBeforeUnmount(() => {
 .doc-range-card,
 .doc-other-card,
 .doc-preview-card {
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: calc(var(--radius) * 1.18);
-  box-shadow:
-    0 1px 2px color-mix(in srgb, var(--el-text-color-primary) 6%, transparent),
-    0 2px 8px color-mix(in srgb, var(--el-text-color-primary) 5%, transparent);
+  background: var(--doc-export-panel);
+  border: 1px solid var(--doc-export-line);
+  border-radius: var(--doc-export-radius);
+  box-shadow: var(--doc-export-shadow-sm);
   transition:
     box-shadow 0.18s ease,
     border-color 0.18s ease;
@@ -4693,9 +4728,28 @@ onBeforeUnmount(() => {
 .doc-other-card:hover,
 .doc-preview-card:hover {
   border-color: color-mix(in srgb, var(--el-color-primary) 25%, transparent);
-  box-shadow:
-    0 4px 14px color-mix(in srgb, var(--el-text-color-primary) 8%, transparent),
-    0 10px 30px color-mix(in srgb, var(--el-text-color-primary) 7%, transparent);
+  box-shadow: var(--doc-export-shadow-md);
+}
+
+.doc-range-card :deep(.el-card__header),
+.doc-other-card :deep(.el-card__header),
+.doc-preview-card :deep(.el-card__header) {
+  border-bottom-color: var(--doc-export-line);
+}
+
+.doc-range-card :deep(.el-card__body),
+.doc-other-card :deep(.el-card__body),
+.doc-preview-card :deep(.el-card__body) {
+  background: linear-gradient(
+    180deg,
+    var(--doc-export-panel) 0%,
+    color-mix(
+        in srgb,
+        var(--el-fill-color-lighter) 32%,
+        var(--doc-export-panel)
+      )
+      100%
+  );
 }
 
 .doc-range-card,
@@ -4728,6 +4782,9 @@ onBeforeUnmount(() => {
 
 .doc-all-selected-tip {
   margin-top: 8px;
+  background: var(--doc-export-panel);
+  border-color: var(--doc-export-line);
+  border-radius: var(--doc-export-radius-sm);
 }
 
 :deep(.doc-export-dialog) {
@@ -4921,6 +4978,9 @@ onBeforeUnmount(() => {
   min-height: 0;
   overflow: hidden auto;
   scrollbar-gutter: stable;
+  background: var(--doc-export-panel);
+  border-color: var(--doc-export-line);
+  border-radius: var(--doc-export-radius-sm);
 }
 
 .group-toggle-area {
@@ -4935,7 +4995,7 @@ onBeforeUnmount(() => {
   color: var(--el-text-color-secondary);
   cursor: pointer;
   user-select: none;
-  border-radius: 8px;
+  border-radius: var(--doc-export-radius-chip);
 }
 
 .group-toggle-area:hover,
@@ -4953,15 +5013,15 @@ onBeforeUnmount(() => {
 .group-header {
   padding: 4px 8px;
   background: var(--el-fill-color-light);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
+  border: 1px solid var(--doc-export-line);
+  border-radius: var(--doc-export-radius-sm);
 }
 
 .service-header {
   padding: 4px 8px;
   background: var(--el-fill-color-light);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
+  border: 1px solid var(--doc-export-line);
+  border-radius: var(--doc-export-radius-sm);
 }
 
 .group-header.group-node--checked,
