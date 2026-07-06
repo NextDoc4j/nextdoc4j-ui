@@ -3734,7 +3734,7 @@ onBeforeUnmount(() => {
   font-weight: 700;
   color: #fff;
   background: var(--el-color-primary);
-  border-radius: var(--debug-count-radius);
+  border-radius: var(--radius, var(--el-border-radius-base, 4px));
 }
 
 .debug-icon-button {
