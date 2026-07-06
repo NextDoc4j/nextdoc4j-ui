@@ -2512,36 +2512,27 @@ onBeforeUnmount(() => {
               <ElTabs v-model="activeTab" class="debug-tabs debug-tabs--inline">
                 <ElTabPane name="Params" label="Params">
                   <div class="params-tab-sections">
-                    <div v-if="pathParams.length > 0">
-                      <div class="actual-request__block params-table-block">
-                        <div class="params-table-block__header">
-                          <h3 class="actual-request__title">Path 参数</h3>
-                        </div>
-                        <div class="params-table-block__body">
-                          <params-table
-                            :table-data="pathParams"
-                            :allow-delete="false"
-                            :show-add-button="false"
-                            :show-selection-column="false"
-                            show-description-column
-                          />
-                        </div>
-                      </div>
+                    <div
+                      v-if="pathParams.length > 0"
+                      class="actual-request__block"
+                    >
+                      <h3 class="actual-request__title">Path 参数</h3>
+                      <params-table
+                        :table-data="pathParams"
+                        :allow-delete="false"
+                        :show-add-button="false"
+                        :show-selection-column="false"
+                        show-description-column
+                      />
                     </div>
 
-                    <div>
-                      <div class="actual-request__block params-table-block">
-                        <div class="params-table-block__header">
-                          <h3 class="actual-request__title">Query 参数</h3>
-                        </div>
-                        <div class="params-table-block__body">
-                          <params-table
-                            :table-data="queryParams"
-                            show-description-column
-                            show-delete-in-description
-                          />
-                        </div>
-                      </div>
+                    <div class="actual-request__block">
+                      <h3 class="actual-request__title">Query 参数</h3>
+                      <params-table
+                        :table-data="queryParams"
+                        show-description-column
+                        show-delete-in-description
+                      />
                     </div>
                   </div>
                 </ElTabPane>
@@ -2559,32 +2550,18 @@ onBeforeUnmount(() => {
                 />
 
                 <ElTabPane name="Headers" label="Headers">
-                  <div class="actual-request__block params-table-block">
-                    <div class="params-table-block__header">
-                      <h3 class="actual-request__title">Headers</h3>
-                    </div>
-                    <div class="params-table-block__body">
-                      <params-table
-                        :table-data="headers"
-                        show-description-column
-                        show-delete-in-description
-                      />
-                    </div>
-                  </div>
+                  <params-table
+                    :table-data="headers"
+                    show-description-column
+                    show-delete-in-description
+                  />
                 </ElTabPane>
                 <ElTabPane name="Cookies" label="Cookies">
-                  <div class="actual-request__block params-table-block">
-                    <div class="params-table-block__header">
-                      <h3 class="actual-request__title">Cookies</h3>
-                    </div>
-                    <div class="params-table-block__body">
-                      <params-table
-                        :table-data="cookies"
-                        show-description-column
-                        show-delete-in-description
-                      />
-                    </div>
-                  </div>
+                  <params-table
+                    :table-data="cookies"
+                    show-description-column
+                    show-delete-in-description
+                  />
                 </ElTabPane>
               </ElTabs>
             </div>
@@ -3994,39 +3971,9 @@ onBeforeUnmount(() => {
   color: var(--el-text-color-secondary);
 }
 
-.params-table-block {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  padding: 0;
-  overflow: hidden;
-}
-
 .params-tab-sections {
   display: grid;
-  gap: 14px;
-}
-
-.params-table-block__header {
-  display: flex;
-  align-items: center;
-  min-height: 36px;
-  padding: 8px 12px 7px;
-  background: var(--debug-soft-bg);
-  border-bottom: 1px solid var(--debug-border);
-}
-
-.params-table-block__body {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-  padding: 10px 12px 12px;
-  overflow: hidden;
-}
-
-.params-table-block__header .actual-request__title {
-  margin-bottom: 0;
+  gap: 16px;
 }
 
 .response-body {
@@ -4095,23 +4042,19 @@ onBeforeUnmount(() => {
 
 .actual-request__block {
   min-width: 0;
-  padding: 12px;
-  overflow-x: auto;
-  background: var(--debug-surface);
-  border: 1px solid var(--debug-border);
-  border-radius: var(--debug-radius-sm);
 }
 
-.actual-request__block.params-table-block {
-  padding: 0;
-  overflow: hidden;
-}
-
+/* 去掉外层包裹框，仅以左侧强调条 + 标签区分分组，内部表格/代码块自带唯一边框 */
 .actual-request__title {
-  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  padding-left: 8px;
+  margin: 0 0 8px;
   font-size: 12px;
   font-weight: 700;
+  line-height: 1.3;
   color: var(--debug-text-muted);
+  border-left: 3px solid var(--el-color-primary);
 }
 
 .actual-request__code {
