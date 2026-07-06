@@ -786,11 +786,11 @@ const requestTabsHostRef = ref<HTMLElement>();
 const responseTabsHostRef = ref<HTMLElement>();
 const requestMoreMeasureRef = ref<HTMLElement>();
 const responseMoreMeasureRef = ref<HTMLElement>();
-const requestVisibleTabKeys = ref<string[]>([]);
-const responseVisibleTabKeys = ref<string[]>([]);
+const requestVisibleTabKeys = ref<null | string[]>(null);
+const responseVisibleTabKeys = ref<null | string[]>(null);
 const requestTabMeasureRefs = new Map<string, HTMLElement>();
 const responseTabMeasureRefs = new Map<string, HTMLElement>();
-const TAB_OVERFLOW_GAP = 4;
+const TAB_OVERFLOW_GAP = 6;
 let tabOverflowObserver: null | ResizeObserver = null;
 let overflowRaf: null | number = null;
 
@@ -810,6 +810,11 @@ const setResponseTabMeasureRef = (key: string, el: null | unknown) => {
   }
 };
 
+/**
+ * 用途：计算内联 Tab 在当前容器宽度下可直接展示的 key。
+ * 参数说明：options 包含激活项、容器元素、测量节点、更多按钮节点和完整 Tab 列表。
+ * 返回值说明：返回可直接展示的 Tab key；空数组表示当前宽度仅展示更多按钮。
+ */
 const resolveOverflowVisibleKeys = (options: {
   activeKey: string;
   hostElement?: HTMLElement;
@@ -879,7 +884,7 @@ const resolveOverflowVisibleKeys = (options: {
     if (canFitWithMoreButton([...adjustedKeys, activeKey])) {
       adjustedKeys.push(activeKey);
     } else {
-      adjustedKeys.splice(0, adjustedKeys.length, activeKey);
+      return [];
     }
 
     const keyIndexMap = new Map(keys.map((key, index) => [key, index]));
@@ -893,11 +898,11 @@ const resolveOverflowVisibleKeys = (options: {
 };
 
 const requestVisibleTabs = computed(() => {
-  const visibleKeySet = new Set(requestVisibleTabKeys.value);
   const tabs = requestInlineTabs.value;
-  if (visibleKeySet.size === 0) {
+  if (!requestVisibleTabKeys.value) {
     return tabs;
   }
+  const visibleKeySet = new Set(requestVisibleTabKeys.value);
   return tabs.filter((tab) => visibleKeySet.has(tab.key));
 });
 
@@ -907,11 +912,11 @@ const requestHiddenTabs = computed(() => {
 });
 
 const responseVisibleTabs = computed(() => {
-  const visibleKeySet = new Set(responseVisibleTabKeys.value);
   const tabs = responseInlineTabs.value;
-  if (visibleKeySet.size === 0) {
+  if (!responseVisibleTabKeys.value) {
     return tabs;
   }
+  const visibleKeySet = new Set(responseVisibleTabKeys.value);
   return tabs.filter((tab) => visibleKeySet.has(tab.key));
 });
 
@@ -1033,6 +1038,9 @@ watch([() => requestTabsHostRef.value, () => responseTabsHostRef.value], () => {
 const isStackedLayout = computed(
   () => isNarrowLayout.value || paneLayout.value === 'vertical',
 );
+watch([paneRatio, isStackedLayout], () => {
+  scheduleTabOverflowUpdate();
+});
 const layoutTooltipText = computed(() => {
   if (isNarrowLayout.value) {
     return '窄屏固定上下布局';
@@ -2352,16 +2360,15 @@ onBeforeUnmount(() => {
               <span class="method-pill" :style="methodPillStyle">
                 {{ method?.toUpperCase() }}
               </span>
-              <ElTooltip v-if="baseUrl" placement="top" :content="baseUrl">
-                <button
-                  type="button"
-                  class="debug-base-url"
-                  @click="handleCopyBaseUrl"
-                >
-                  <SvgApiPrefixIcon class="debug-base-url__icon" />
-                  <span class="debug-base-url__text">{{ baseUrl }}</span>
-                </button>
-              </ElTooltip>
+              <button
+                v-if="baseUrl"
+                type="button"
+                class="debug-base-url"
+                @click="handleCopyBaseUrl"
+              >
+                <SvgApiPrefixIcon class="debug-base-url__icon" />
+                <span class="debug-base-url__text">{{ baseUrl }}</span>
+              </button>
             </template>
           </ElInput>
           <div class="debug-console__request-actions">
@@ -3509,6 +3516,17 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 
+.debug-pane--response .debug-pane__header--inline-tabs {
+  flex-wrap: wrap;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.debug-pane--response .debug-pane__header-main {
+  flex: 1 1 220px;
+  max-width: 100%;
+}
+
 .debug-pane__title {
   font-size: 13px;
   font-weight: 800;
@@ -3525,7 +3543,7 @@ onBeforeUnmount(() => {
   display: inline-flex;
   flex: 1;
   flex-wrap: nowrap;
-  gap: 14px;
+  gap: 6px;
   align-items: center;
   min-width: 0;
   overflow: hidden;
@@ -3991,16 +4009,24 @@ onBeforeUnmount(() => {
 
 .debug-status-list {
   display: flex;
+  flex: 0 1 auto;
   flex-wrap: wrap;
   gap: 6px;
+  align-items: center;
   justify-content: flex-end;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .debug-status-chip {
   display: inline-flex;
   align-items: center;
+  min-width: 0;
+  max-width: 100%;
   min-height: 22px;
   padding: 0 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 10.5px;
   font-weight: 600;
   color: var(--el-text-color-secondary);
