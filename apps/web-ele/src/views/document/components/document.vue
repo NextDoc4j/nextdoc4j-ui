@@ -1116,7 +1116,24 @@ const measureDesiredHeight = (card: HTMLElement | null) => {
   const panel = card.querySelector<HTMLElement>('.json-panel');
   const content = panel?.querySelector<HTMLElement>('.json-viewer-content');
   if (!panel || !content) {
-    return card.scrollHeight;
+    // 空态（暂无可展示的响应示例）：卡片被锁定高度时 scrollHeight 恒等于旧高度而留白，
+    // 改为按提示框自身自然高度 + 卡片固定部分测量，仅保留够放提示框的高度。
+    const body = card.querySelector<HTMLElement>('.example-card__body');
+    const empty = card.querySelector<HTMLElement>('.example-card__empty');
+    if (!body || !empty) {
+      return card.scrollHeight;
+    }
+    const bodyStyle = getComputedStyle(body);
+    const bodyPadding =
+      Number.parseFloat(bodyStyle.paddingTop) +
+      Number.parseFloat(bodyStyle.paddingBottom);
+    return Math.ceil(
+      card.clientHeight -
+        body.clientHeight +
+        bodyPadding +
+        empty.getBoundingClientRect().height +
+        ASIDE_CONTENT_BUFFER,
+    );
   }
   // 卡片除滚动面板外的固定部分（标题栏、tab、示例选择器、内边距），锁定高度下依旧稳定
   const chrome = card.clientHeight - panel.clientHeight;
