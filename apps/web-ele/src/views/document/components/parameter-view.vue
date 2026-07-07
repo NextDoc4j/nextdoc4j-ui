@@ -203,12 +203,11 @@ const formatValue = (value: unknown) => {
 }
 
 .parameter-item__title-line {
-  display: grid;
-  grid-template-columns: minmax(140px, 1fr) minmax(120px, 1fr) minmax(
-      180px,
-      2fr
-    );
-  gap: 16px;
+  /* 流式布局：与请求体/响应参数（SchemaView）保持一致，
+     字段名与类型 chip 同行按自然宽度排列，描述另起一行占满整行 */
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
   align-items: center;
   min-width: 0;
 }
@@ -285,11 +284,17 @@ const formatValue = (value: unknown) => {
   min-width: 0;
   font-size: 12px;
   line-height: 1.5;
-  color: var(--el-text-color-secondary);
+
+  /* 描述用 regular 色：与请求体/响应参数（SchemaView）一致，
+     浅色模式近黑、深色模式近白，比 secondary 灰色更清晰 */
+  color: var(--el-text-color-regular);
 }
 
 .parameter-item__summary {
+  /* 流式布局中占满整行，稳定换到字段名/类型下一行显示 */
+  flex: 0 0 100%;
   min-width: 0;
+  margin-top: 2px;
 }
 
 .parameter-item__description {
@@ -374,8 +379,7 @@ const formatValue = (value: unknown) => {
 
 @media (max-width: 768px) {
   .parameter-item__title-line {
-    grid-template-columns: 1fr;
-    gap: 8px;
+    gap: 6px 8px;
   }
 
   .parameter-item__details {
