@@ -549,18 +549,16 @@ const showSchemaStack = computed(() => {
                 }"
               >
                 {{ key }}
-                <span
-                  v-if="
-                    isRequired(resolvedRootObjectSchema, String(key), value)
-                  "
-                  class="schema-item__required-tag"
-                >
-                  必填
-                </span>
               </div>
               <div class="schema-item__type">
                 {{ getTypeLabel(value, getNodePath(String(key))) }}
               </div>
+              <span
+                v-if="isRequired(resolvedRootObjectSchema, String(key), value)"
+                class="schema-item__required-tag"
+              >
+                必填
+              </span>
               <div
                 v-if="getPlainDescription(value, getNodePath(String(key)))"
                 class="schema-item__summary"
@@ -783,7 +781,6 @@ const showSchemaStack = computed(() => {
   }
 
   .schema-item__headline-main {
-    grid-template-columns: 1fr;
     gap: 6px 8px;
   }
 
@@ -982,7 +979,9 @@ const showSchemaStack = computed(() => {
 .schema-item__top {
   display: flex;
   gap: 6px;
-  align-items: center;
+
+  /* 顶部对齐：描述换行后内容块变高，箭头需与第一行（字段名/类型）对齐而非整块居中 */
+  align-items: flex-start;
   width: 100%;
   padding: 5px 0;
 
@@ -1004,6 +1003,9 @@ const showSchemaStack = computed(() => {
   justify-content: center;
   width: 18px;
   min-width: 18px;
+
+  /* 与第一行（字段名/类型 chip）等高，使箭头与字段行居中对齐 */
+  height: 24px;
 }
 
 .schema-item__leaf-indicator {
@@ -1084,12 +1086,12 @@ const showSchemaStack = computed(() => {
 }
 
 .schema-item__headline-main {
-  display: grid;
-  grid-template-columns: minmax(140px, 1fr) minmax(120px, 1fr) minmax(
-      180px,
-      2fr
-    );
-  gap: 12px;
+  /* 流式布局（对齐主流 API 文档 Redoc / Stoplight / Scalar 的做法）：
+     字段名与类型 chip 在同一行按自然宽度排列，描述另起一行占满整行；
+     避免严格等宽列被 object<LoginOperateContentReq> 等长泛型撑坏或错位 */
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
   align-items: center;
   min-width: 0;
 }
@@ -1148,6 +1150,7 @@ const showSchemaStack = computed(() => {
 
 .schema-item__required-tag {
   display: inline-flex;
+  flex: none;
   align-items: center;
   min-height: 18px;
   padding: 0 6px;
@@ -1200,7 +1203,10 @@ const showSchemaStack = computed(() => {
 }
 
 .schema-item__summary {
+  /* 流式布局中占满整行，稳定换到字段名/类型下一行显示 */
+  flex: 0 0 100%;
   min-width: 0;
+  margin-top: 2px;
 }
 
 .schema-item__description {
