@@ -1879,6 +1879,73 @@ defineExpose({
 </template>
 
 <style scoped lang="scss">
+@media (max-width: 1180px) {
+  .document-detail__layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+    padding: 18px 20px 32px;
+  }
+
+  .document-detail__aside-stack {
+    position: static;
+    max-height: none;
+    padding-right: 0;
+    overflow: visible;
+  }
+
+  .json-panel {
+    max-height: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .document-detail__layout {
+    gap: 18px;
+    padding: 24px 14px 32px;
+  }
+
+  .hero-panel__title {
+    font-size: 22px;
+  }
+
+  .hero-panel__top,
+  .api-section__header,
+  .response-card__summary,
+  .example-card__header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .hero-panel__tags,
+  .hero-panel__actions,
+  .api-section__heading,
+  .api-section__meta,
+  .response-collapse__status,
+  .example-card__meta {
+    justify-content: flex-start;
+  }
+
+  .hero-panel__endpoint {
+    align-items: stretch;
+  }
+
+  .endpoint-path {
+    width: 100%;
+  }
+
+  .response-card__summary,
+  .response-collapse__status,
+  .example-card__header,
+  .example-card__meta {
+    gap: 8px;
+    align-items: flex-start;
+  }
+
+  .response-content-type {
+    max-width: 100%;
+  }
+}
+
 .document-detail {
   --doc-chip-radius: var(--radius);
   --doc-radius-xs: calc(var(--radius) * 0.56);
@@ -2752,72 +2819,5 @@ defineExpose({
 .type-code-dialog__body :deep(.markdown-code-block),
 .type-code-dialog__body :deep(.markdown-code-block__scroller) {
   height: 100%;
-}
-
-@media (max-width: 1180px) {
-  .document-detail__layout {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 24px;
-    padding: 18px 20px 32px;
-  }
-
-  .document-detail__aside-stack {
-    position: static;
-    max-height: none;
-    padding-right: 0;
-    overflow: visible;
-  }
-
-  .json-panel {
-    max-height: none;
-  }
-}
-
-@media (max-width: 768px) {
-  .document-detail__layout {
-    gap: 18px;
-    padding: 24px 14px 32px;
-  }
-
-  .hero-panel__title {
-    font-size: 22px;
-  }
-
-  .hero-panel__top,
-  .api-section__header,
-  .response-card__summary,
-  .example-card__header {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .hero-panel__tags,
-  .hero-panel__actions,
-  .api-section__heading,
-  .api-section__meta,
-  .response-collapse__status,
-  .example-card__meta {
-    justify-content: flex-start;
-  }
-
-  .hero-panel__endpoint {
-    align-items: stretch;
-  }
-
-  .endpoint-path {
-    width: 100%;
-  }
-
-  .response-card__summary,
-  .response-collapse__status,
-  .example-card__header,
-  .example-card__meta {
-    gap: 8px;
-    align-items: flex-start;
-  }
-
-  .response-content-type {
-    max-width: 100%;
-  }
 }
 </style>
