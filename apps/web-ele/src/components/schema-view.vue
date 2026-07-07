@@ -949,7 +949,6 @@ const showSchemaStack = computed(() => {
 }
 
 .variant-tab--active {
-  font-weight: 600;
   color: var(--el-color-primary);
   background: color-mix(
     in srgb,

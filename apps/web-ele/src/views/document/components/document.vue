@@ -2384,6 +2384,7 @@ defineExpose({
 }
 
 .response-collapse__status {
+  flex: 1 1 auto;
   gap: 8px;
 }
 
@@ -2397,6 +2398,7 @@ defineExpose({
   font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
   font-size: 12px;
   font-weight: 800;
+  line-height: 1;
   color: var(--el-color-primary);
   background: var(--el-color-primary-light-9);
   border: 1px solid var(--el-color-primary-light-7);
@@ -2428,7 +2430,7 @@ defineExpose({
 }
 
 .response-desc {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2441,6 +2443,11 @@ defineExpose({
 .response-content-type {
   flex: none;
   max-width: 42%;
+  padding: 2px 7px;
+  color: var(--doc-example-title);
+  background: var(--doc-example-chip-bg);
+  border: 1px solid var(--doc-example-border);
+  border-radius: var(--doc-chip-radius);
 }
 
 .response-content {
