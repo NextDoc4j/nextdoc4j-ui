@@ -818,6 +818,14 @@ const showSchemaStack = computed(() => {
   --field-required: var(--el-color-danger);
 }
 
+/* 深色模式下 --el-border-color 与填充背景对比不足，chip 外框不明显；
+   改用对比更强的边框色并加深背景，保证约束/枚举值/示例等值 chip 的边框清晰 */
+:global(html.dark) .schema-root-pill,
+:global(html.dark) .schema-stack {
+  --field-chip-bg: var(--el-fill-color-darker);
+  --field-chip-border: var(--el-border-color-dark);
+}
+
 .schema-root-pill {
   display: flex;
   flex-wrap: wrap;
