@@ -102,6 +102,8 @@ const activeRequestSections = ref<string[]>([]);
 const requestBodyType = ref('');
 const requestBodyVariantState = ref<Record<string, number>>({});
 const responseExampleSelection = ref<Record<string, string>>({});
+// 右侧响应示例卡片当前选中的状态码 tab（与左侧响应参数手风琴的选中态互相独立）
+const activeExampleCode = ref('');
 const responseVariantState = ref<Record<string, Record<string, number>>>({});
 const codeDialogVisible = ref(false);
 const codeDialogScope = ref<CodeDialogScope>('request');
@@ -1023,6 +1025,27 @@ const responsePanels = computed(() => {
   });
 });
 
+// 当前选中 tab 对应的响应示例面板；选中态失效时回退到首个面板
+const activeExamplePanel = computed(() => {
+  const panels = responsePanels.value;
+  return (
+    panels.find((panel) => panel.code === activeExampleCode.value) ||
+    panels[0] ||
+    null
+  );
+});
+
+// 响应示例面板变化时，保证选中的 tab 始终指向存在的状态码
+watch(
+  responsePanels,
+  (panels) => {
+    if (!panels.some((panel) => panel.code === activeExampleCode.value)) {
+      activeExampleCode.value = panels[0]?.code || '';
+    }
+  },
+  { immediate: true },
+);
+
 const showExampleAside = computed(() => {
   return Boolean(requestPreviewSchema.value || responsePanels.value.length > 0);
 });
@@ -1727,49 +1750,44 @@ defineExpose({
           </section>
 
           <section
-            v-for="panel in responsePanels"
-            :key="`example-${panel.code}`"
+            v-if="activeExamplePanel"
             class="example-card example-card--response"
           >
-            <div class="example-card__header">
-              <div class="example-card__meta">
-                <div class="example-card__title">Response Example</div>
-                <div class="example-card__status-line">
-                  <span
-                    class="response-code"
-                    :class="{
-                      'response-code--error':
-                        `${panel.code}`.startsWith('4') ||
-                        `${panel.code}`.startsWith('5'),
-                      'response-code--success': `${panel.code}`.startsWith('2'),
-                    }"
-                  >
-                    {{ panel.code }}
-                  </span>
-                  <span
-                    v-if="panel.contentType"
-                    class="example-card__content-type"
-                  >
-                    {{ panel.contentType }}
-                  </span>
-                </div>
-              </div>
+            <div class="example-card__tabs" role="tablist">
+              <button
+                v-for="panel in responsePanels"
+                :key="`tab-${panel.code}`"
+                type="button"
+                role="tab"
+                class="example-card__tab"
+                :class="{
+                  'example-card__tab--active': activeExampleCode === panel.code,
+                  'example-card__tab--error':
+                    `${panel.code}`.startsWith('4') ||
+                    `${panel.code}`.startsWith('5'),
+                  'example-card__tab--success': `${panel.code}`.startsWith('2'),
+                }"
+                :aria-selected="activeExampleCode === panel.code"
+                @click="activeExampleCode = panel.code"
+              >
+                {{ panel.code }}
+              </button>
             </div>
 
             <div class="example-card__body">
               <ElSelect
-                v-if="panel.exampleOptions.length > 1"
-                :model-value="responseExampleSelection[panel.code]"
+                v-if="activeExamplePanel.exampleOptions.length > 1"
+                :model-value="responseExampleSelection[activeExamplePanel.code]"
                 size="small"
                 class="response-example-select"
                 popper-class="response-example-select__popper"
                 placeholder="选择示例"
                 @update:model-value="
-                  handleResponseExampleSelect(panel.code, $event)
+                  handleResponseExampleSelect(activeExamplePanel.code, $event)
                 "
               >
                 <ElOption
-                  v-for="item in panel.exampleOptions"
+                  v-for="item in activeExamplePanel.exampleOptions"
                   :key="item.key"
                   :label="item.label"
                   :value="item.key"
@@ -1777,10 +1795,23 @@ defineExpose({
               </ElSelect>
 
               <JsonViewer
-                v-if="panel.schema || panel.hasExampleValue"
+                v-if="
+                  activeExamplePanel.schema ||
+                  activeExamplePanel.hasExampleValue
+                "
+                :key="`example-json-${activeExamplePanel.code}`"
                 class="json-panel app-json-schema-viewer"
-                :schema="getResponsePreviewSchema(panel.code, panel.schema)"
-                :value="panel.hasExampleValue ? panel.exampleValue : undefined"
+                :schema="
+                  getResponsePreviewSchema(
+                    activeExamplePanel.code,
+                    activeExamplePanel.schema,
+                  )
+                "
+                :value="
+                  activeExamplePanel.hasExampleValue
+                    ? activeExamplePanel.exampleValue
+                    : undefined
+                "
                 mode="response"
                 :enable-chunked-render="true"
                 :initial-render-count="60"
@@ -2439,6 +2470,61 @@ defineExpose({
   padding: 10px 12px;
   background: var(--doc-example-header-bg);
   border-bottom: 1px solid var(--doc-example-border);
+}
+
+/* 响应示例状态码 tab 切换栏 */
+.example-card__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--doc-example-header-bg);
+  border-bottom: 1px solid var(--doc-example-border);
+}
+
+.example-card__tab {
+  padding: 3px 10px;
+  font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--doc-text-muted);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--doc-chip-radius);
+  transition:
+    color 0.15s ease,
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.example-card__tab:hover {
+  background: var(--doc-example-chip-bg);
+}
+
+.example-card__tab--active {
+  background: var(--doc-example-chip-bg);
+  border-color: var(--doc-example-border);
+}
+
+.example-card__tab--active.example-card__tab--success {
+  color: #059669;
+  border-color: #a7f3d0;
+}
+
+.example-card__tab--active.example-card__tab--error {
+  color: #e11d48;
+  border-color: #fecdd3;
+}
+
+.document-detail--dark .example-card__tab--active.example-card__tab--success {
+  color: #34d399;
+  border-color: rgb(16 185 129 / 32%);
+}
+
+.document-detail--dark .example-card__tab--active.example-card__tab--error {
+  color: #fb7185;
+  border-color: rgb(244 63 94 / 32%);
 }
 
 .example-card__meta {
