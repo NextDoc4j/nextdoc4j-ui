@@ -371,7 +371,7 @@ const pickRequestBodySchema = () => {
   );
   if (hit) {
     const [contentType, body] = hit;
-    return { contentType, schema: (body as any)?.schema };
+    return { body, contentType, schema: (body as any)?.schema };
   }
 
   const first = entries[0];
@@ -379,7 +379,7 @@ const pickRequestBodySchema = () => {
     return null;
   }
   const [contentType, body] = first;
-  return { contentType, schema: (body as any)?.schema ?? null };
+  return { body, contentType, schema: (body as any)?.schema ?? null };
 };
 
 const requestBody = computed(() => {
@@ -601,6 +601,23 @@ const requestPreviewSchema = computed(() => {
     return null;
   }
   return applyRequestBodyVariantState(source, requestBodyVariantState.value);
+});
+
+const requestBodyExampleDescription = computed(() => {
+  const picked = pickRequestBodySchema();
+  const candidates = [
+    apiInfo.value.requestBody?.description,
+    currentRequestBody.value?.description,
+    requestPreviewSchema.value?.description,
+    (picked?.body as any)?.description,
+    picked?.schema?.description,
+  ];
+
+  return candidates.map((item) => `${item || ''}`.trim()).find(Boolean) || '';
+});
+
+const requestBodyExampleTitle = computed(() => {
+  return requestBodyExampleDescription.value || 'Request Body Example';
 });
 
 watch(
@@ -1703,8 +1720,13 @@ defineExpose({
           >
             <div class="example-card__header">
               <div class="example-card__meta">
-                <div class="example-card__title">Request Body Example</div>
-                <span class="example-card__content-type">
+                <div class="example-card__title">
+                  {{ requestBodyExampleTitle }}
+                </div>
+                <span
+                  v-if="!requestBodyExampleDescription"
+                  class="example-card__content-type"
+                >
                   {{ requestBodyContentType }}
                 </span>
               </div>
@@ -1895,12 +1917,6 @@ defineExpose({
 </template>
 
 <style scoped lang="scss">
-@supports not (scrollbar-gutter: stable) {
-  .document-detail {
-    overflow-y: scroll;
-  }
-}
-
 .document-detail {
   --doc-chip-radius: var(--radius);
   --doc-radius-xs: calc(var(--radius) * 0.56);
@@ -1923,20 +1939,11 @@ defineExpose({
 
   height: 100%;
   overflow-y: auto;
-  scrollbar-gutter: stable;
+  scrollbar-width: none;
   background: var(--doc-page-bg);
 
   &::-webkit-scrollbar {
-    width: 6px;
-  }
-
-  &::-webkit-scrollbar-thumb {
-    background: color-mix(
-      in srgb,
-      var(--el-text-color-primary) 14%,
-      transparent
-    );
-    border-radius: var(--doc-chip-radius);
+    display: none;
   }
 }
 
