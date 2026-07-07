@@ -665,8 +665,13 @@ watch(
   { deep: true },
 );
 
-watch(activeResponseCode, () => {
+watch(activeResponseCode, (code) => {
   persistDocumentUiState();
+  // 左→右单向联动：左侧展开某状态码时，右侧响应示例 tab 同步切到该码；
+  // 左侧折叠（空值）时保持右侧不动，右侧手动切换也不会反向影响左侧。
+  if (code && responsePanels.value.some((panel) => panel.code === code)) {
+    activeExampleCode.value = code;
+  }
 });
 
 const pickContentSchema = (content?: Record<string, any>) => {
@@ -1084,30 +1089,52 @@ const showExampleAside = computed(() => {
   return Boolean(requestPreviewSchema.value || responsePanels.value.length > 0);
 });
 
-// 右侧示例面板固定高度布局的关键尺寸（与样式中的 sticky top、卡片间距保持一致）
+// 右侧示例面板固定高度布局的关键尺寸（与样式中的 sticky top、layout padding 保持一致）
 const ASIDE_FLOW_BREAKPOINT = 1180;
 const ASIDE_TOP_OFFSET = 40;
-const ASIDE_BOTTOM_OFFSET = 24;
+// 底部预留需与 .document-detail__layout 的 padding-bottom 相等，
+// 否则 sticky 滚到底时会因差值被顶部对齐而上移
+const ASIDE_BOTTOM_OFFSET = 48;
 const ASIDE_CARD_GAP = 32;
 const ASIDE_MIN_STACK_HEIGHT = 160;
+// 内容完全放得下时预留的少量缓冲，规避子像素取整导致的多余滚动条
+const ASIDE_CONTENT_BUFFER = 6;
 
 let asideLayoutRaf: null | number = null;
 
 /**
  * 读取示例区块内容完全展开时所需的「期望高度」。
- * 借助内部 json 面板的 scrollHeight 还原完整内容高度，无需临时撤销高度约束。
+ *
+ * 直接测量内部 JSON 内容元素的真实高度，而非依赖滚动面板的 scrollHeight：
+ * 当卡片被锁定得比内容更高时 scrollHeight 恒等于 clientHeight，无法反映真实内容高度，
+ * 会导致「切到短内容后仍占满、下方留白」以及内容放得下却仍出现滚动条的问题。
  */
 const measureDesiredHeight = (card: HTMLElement | null) => {
   if (!card) {
     return 0;
   }
   const panel = card.querySelector<HTMLElement>('.json-panel');
-  if (!panel) {
+  const content = panel?.querySelector<HTMLElement>('.json-viewer-content');
+  if (!panel || !content) {
     return card.scrollHeight;
   }
-  // 卡片除滚动面板外的固定部分（标题栏、示例选择器、内边距）
+  // 卡片除滚动面板外的固定部分（标题栏、tab、示例选择器、内边距），锁定高度下依旧稳定
   const chrome = card.clientHeight - panel.clientHeight;
-  return Math.ceil(chrome + panel.scrollHeight);
+  // 滚动面板自身的上下内边距（内容元素在其内边距盒之内）
+  const panelStyle = getComputedStyle(panel);
+  const panelPadding =
+    Number.parseFloat(panelStyle.paddingTop) +
+    Number.parseFloat(panelStyle.paddingBottom);
+  const contentHeight = content.getBoundingClientRect().height;
+  // 内容横向溢出时会出现横向滚动条，需补偿其占用的高度，避免挤出多余纵向滚动条
+  const horizontalScrollbar = panel.offsetHeight - panel.clientHeight;
+  return Math.ceil(
+    chrome +
+      panelPadding +
+      contentHeight +
+      horizontalScrollbar +
+      ASIDE_CONTENT_BUFFER,
+  );
 };
 
 /**
