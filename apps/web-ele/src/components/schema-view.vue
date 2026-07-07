@@ -1199,7 +1199,9 @@ const showSchemaStack = computed(() => {
   min-width: 0;
   font-size: 12px;
   line-height: 1.5;
-  color: var(--el-text-color-secondary);
+
+  /* 描述用 regular 色：比 secondary 更清晰、又比 primary 柔和；随主题自动适配深浅模式 */
+  color: var(--el-text-color-regular);
 }
 
 .schema-item__summary {
