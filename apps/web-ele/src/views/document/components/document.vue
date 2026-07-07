@@ -108,8 +108,42 @@ const responseVariantState = ref<Record<string, Record<string, number>>>({});
 const codeDialogVisible = ref(false);
 const codeDialogScope = ref<CodeDialogScope>('request');
 const asideStackRef = ref<HTMLElement | null>(null);
-const asideShouldFlow = ref(false);
+const requestCardRef = ref<HTMLElement | null>(null);
+const responseCardRef = ref<HTMLElement | null>(null);
+// 右侧示例面板固定高度模式下的布局状态（面板可用高度、两个区块各自高度）
+const asideStackHeight = ref<null | number>(null);
+const requestCardHeight = ref<null | number>(null);
+const responseCardHeight = ref<null | number>(null);
+// 窄屏时右侧示例面板降级为普通文档流，不再固定高度与智能分配
+const asideFlowMode = ref(false);
 let asideResizeObserver: null | ResizeObserver = null;
+let asideMediaQuery: MediaQueryList | null = null;
+
+/**
+ * 构建示例区块的内联高度样式。
+ * 固定高度模式下锁定高度并禁用 flex 伸缩；窄屏文档流模式返回空样式，交还自然堆叠。
+ */
+const buildExampleCardStyle = (height: null | number) => {
+  if (asideFlowMode.value || height === null) {
+    return {};
+  }
+  return { height: `${height}px`, flexGrow: 0, flexShrink: 0 };
+};
+
+const asideStackStyle = computed(() => {
+  if (asideFlowMode.value || asideStackHeight.value === null) {
+    return {};
+  }
+  return { maxHeight: `${asideStackHeight.value}px` };
+});
+
+const requestCardStyle = computed(() =>
+  buildExampleCardStyle(requestCardHeight.value),
+);
+
+const responseCardStyle = computed(() =>
+  buildExampleCardStyle(responseCardHeight.value),
+);
 
 const displayTags = computed(() => {
   const tags = apiInfo.value?.tags?.filter(Boolean) ?? [];
@@ -1050,38 +1084,152 @@ const showExampleAside = computed(() => {
   return Boolean(requestPreviewSchema.value || responsePanels.value.length > 0);
 });
 
+// 右侧示例面板固定高度布局的关键尺寸（与样式中的 sticky top、卡片间距保持一致）
+const ASIDE_FLOW_BREAKPOINT = 1180;
+const ASIDE_TOP_OFFSET = 40;
+const ASIDE_BOTTOM_OFFSET = 24;
+const ASIDE_CARD_GAP = 32;
+const ASIDE_MIN_STACK_HEIGHT = 160;
+
+let asideLayoutRaf: null | number = null;
+
 /**
- * 更新右侧示例区是否需要退出 sticky 布局。
- *
- * 参数：无。
- * 返回值：无，仅根据当前内容高度更新展示状态。
+ * 读取示例区块内容完全展开时所需的「期望高度」。
+ * 借助内部 json 面板的 scrollHeight 还原完整内容高度，无需临时撤销高度约束。
  */
-const updateAsideFlowState = () => {
-  const el = asideStackRef.value;
-  if (!el) {
-    asideShouldFlow.value = false;
+const measureDesiredHeight = (card: HTMLElement | null) => {
+  if (!card) {
+    return 0;
+  }
+  const panel = card.querySelector<HTMLElement>('.json-panel');
+  if (!panel) {
+    return card.scrollHeight;
+  }
+  // 卡片除滚动面板外的固定部分（标题栏、示例选择器、内边距）
+  const chrome = card.clientHeight - panel.clientHeight;
+  return Math.ceil(chrome + panel.scrollHeight);
+};
+
+/**
+ * 计算固定高度模式下请求 / 响应两个示例区块的高度分配。
+ * 期望高度之和不超出可用高度时各自按内容显示；超出时短的一方按内容、长的一方占满剩余；两者都长则 5:5 均分。
+ */
+const allocateExampleHeights = (
+  requestDesired: number,
+  responseDesired: number,
+  total: number,
+) => {
+  if (requestDesired + responseDesired <= total) {
+    return { request: requestDesired, response: responseDesired };
+  }
+  const half = Math.floor(total / 2);
+  if (requestDesired <= half) {
+    return { request: requestDesired, response: total - requestDesired };
+  }
+  if (responseDesired <= half) {
+    return { request: total - responseDesired, response: responseDesired };
+  }
+  return { request: half, response: total - half };
+};
+
+/**
+ * 重新计算右侧示例面板的固定高度分配。
+ * 窄屏文档流模式或无示例区块时清空高度锁定，交还普通文档流自然堆叠。
+ */
+const updateAsideLayout = () => {
+  const hasRequest = Boolean(requestCardRef.value);
+  const hasResponse = Boolean(responseCardRef.value);
+
+  if (asideFlowMode.value || (!hasRequest && !hasResponse)) {
+    asideStackHeight.value = null;
+    requestCardHeight.value = null;
+    responseCardHeight.value = null;
     return;
   }
 
-  asideShouldFlow.value = el.scrollHeight > window.innerHeight - 48;
+  const viewportHeight =
+    scrollContainerRef.value?.clientHeight || window.innerHeight;
+  const stackHeight = Math.max(
+    ASIDE_MIN_STACK_HEIGHT,
+    viewportHeight - ASIDE_TOP_OFFSET - ASIDE_BOTTOM_OFFSET,
+  );
+  asideStackHeight.value = stackHeight;
+
+  // 仅存在单个区块时独占可用高度，内容超出则自身内部滚动
+  if (!hasRequest || !hasResponse) {
+    const only = hasRequest ? requestCardRef.value : responseCardRef.value;
+    const height = Math.min(measureDesiredHeight(only), stackHeight);
+    requestCardHeight.value = hasRequest ? height : null;
+    responseCardHeight.value = hasResponse ? height : null;
+    return;
+  }
+
+  const totalForCards = stackHeight - ASIDE_CARD_GAP;
+  const allocated = allocateExampleHeights(
+    measureDesiredHeight(requestCardRef.value),
+    measureDesiredHeight(responseCardRef.value),
+    totalForCards,
+  );
+  requestCardHeight.value = allocated.request;
+  responseCardHeight.value = allocated.response;
 };
 
 /**
- * 在 DOM 更新后重新计算右侧示例区高度。
- *
- * 参数：无。
- * 返回值：无，仅延迟触发右侧示例区布局状态计算。
+ * 在 DOM 更新后重新计算右侧示例面板布局，使用 rAF 合并高频触发，避免 ResizeObserver 抖动。
  */
-const scheduleAsideFlowUpdate = () => {
-  void nextTick(() => {
-    updateAsideFlowState();
+const scheduleAsideLayoutUpdate = () => {
+  if (typeof window === 'undefined') {
+    updateAsideLayout();
+    return;
+  }
+  if (asideLayoutRaf !== null) {
+    return;
+  }
+  asideLayoutRaf = window.requestAnimationFrame(() => {
+    asideLayoutRaf = null;
+    updateAsideLayout();
   });
 };
 
-watch([requestPreviewSchema, responsePanels], scheduleAsideFlowUpdate, {
-  deep: true,
-  flush: 'post',
-});
+/**
+ * 重新绑定示例面板内容的尺寸观察目标，使 JSON 展开 / 折叠后能重新分配高度。
+ */
+const observeAsideContent = () => {
+  if (!asideResizeObserver) {
+    return;
+  }
+  asideResizeObserver.disconnect();
+  [requestCardRef.value, responseCardRef.value].forEach((card) => {
+    const content = card?.querySelector('.json-viewer-content');
+    if (content) {
+      asideResizeObserver?.observe(content);
+    }
+  });
+};
+
+const scheduleAsideRefresh = () => {
+  void nextTick(() => {
+    observeAsideContent();
+    scheduleAsideLayoutUpdate();
+  });
+};
+
+/**
+ * 响应容器宽度断点变化：窄屏切换为文档流模式，宽屏恢复固定高度智能分配。
+ */
+const handleAsideMediaChange = (event: MediaQueryListEvent) => {
+  asideFlowMode.value = event.matches;
+  scheduleAsideRefresh();
+};
+
+watch(
+  [requestPreviewSchema, responsePanels, activeExampleCode],
+  scheduleAsideRefresh,
+  {
+    deep: true,
+    flush: 'post',
+  },
+);
 
 const hasAnyParameters = computed(() => {
   return (
@@ -1224,19 +1372,29 @@ onMounted(() => {
   scrollContainerRef.value?.addEventListener('scroll', handleDetailScroll, {
     passive: true,
   });
-  asideResizeObserver = new ResizeObserver(scheduleAsideFlowUpdate);
-  if (asideStackRef.value) {
-    asideResizeObserver.observe(asideStackRef.value);
-  }
-  window.addEventListener('resize', scheduleAsideFlowUpdate, { passive: true });
-  scheduleAsideFlowUpdate();
+  asideResizeObserver = new ResizeObserver(scheduleAsideLayoutUpdate);
+  asideMediaQuery = window.matchMedia(
+    `(max-width: ${ASIDE_FLOW_BREAKPOINT}px)`,
+  );
+  asideFlowMode.value = asideMediaQuery.matches;
+  asideMediaQuery.addEventListener('change', handleAsideMediaChange);
+  window.addEventListener('resize', scheduleAsideLayoutUpdate, {
+    passive: true,
+  });
+  scheduleAsideRefresh();
 });
 
 onBeforeUnmount(() => {
   scrollContainerRef.value?.removeEventListener('scroll', handleDetailScroll);
   asideResizeObserver?.disconnect();
   asideResizeObserver = null;
-  window.removeEventListener('resize', scheduleAsideFlowUpdate);
+  asideMediaQuery?.removeEventListener('change', handleAsideMediaChange);
+  asideMediaQuery = null;
+  window.removeEventListener('resize', scheduleAsideLayoutUpdate);
+  if (asideLayoutRaf !== null) {
+    window.cancelAnimationFrame(asideLayoutRaf);
+    asideLayoutRaf = null;
+  }
 });
 
 /**
@@ -1716,12 +1874,15 @@ defineExpose({
           ref="asideStackRef"
           class="document-detail__aside-stack"
           :class="{
-            'document-detail__aside-stack--flow': asideShouldFlow,
+            'document-detail__aside-stack--flow': asideFlowMode,
           }"
+          :style="asideStackStyle"
         >
           <section
             v-if="requestPreviewSchema"
+            ref="requestCardRef"
             class="example-card example-card--request"
+            :style="requestCardStyle"
           >
             <div class="example-card__header">
               <div class="example-card__meta">
@@ -1751,7 +1912,9 @@ defineExpose({
 
           <section
             v-if="activeExamplePanel"
+            ref="responseCardRef"
             class="example-card example-card--response"
+            :style="responseCardStyle"
           >
             <div class="example-card__tabs" role="tablist">
               <button
@@ -2032,11 +2195,13 @@ defineExpose({
   position: sticky;
   top: 40px;
   align-self: start;
-  overflow: visible;
+  overflow: hidden;
 }
 
+/* 窄屏文档流模式：解除固定高度，交还普通文档流自然堆叠 */
 .document-detail__aside-stack--flow {
   position: static;
+  max-height: none;
   overflow: visible;
 }
 
@@ -2523,7 +2688,10 @@ defineExpose({
 }
 
 .example-card {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
   overflow: hidden;
   background: var(--doc-example-bg);
   border: 1px solid var(--doc-example-border);
@@ -2532,6 +2700,7 @@ defineExpose({
 }
 
 .example-card__header {
+  flex: none;
   gap: 12px;
   min-height: 44px;
   padding: 10px 12px;
@@ -2542,6 +2711,7 @@ defineExpose({
 /* 响应示例状态码 tab 切换栏 */
 .example-card__tabs {
   display: flex;
+  flex: none;
   flex-wrap: wrap;
   gap: 6px;
   padding: 8px 12px;
@@ -2622,9 +2792,12 @@ defineExpose({
 }
 
 .example-card__body {
-  display: grid;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
   gap: 10px;
   min-width: 0;
+  min-height: 0;
   padding: 12px;
   background: var(--doc-example-bg);
 }
@@ -2640,9 +2813,10 @@ defineExpose({
 }
 
 .json-panel {
+  flex: 1;
   width: 100%;
   min-width: 0;
-  min-height: 120px;
+  min-height: 0;
   max-height: none;
   overflow: auto;
   overscroll-behavior: contain auto;
@@ -2651,12 +2825,19 @@ defineExpose({
   border-radius: 0;
 }
 
+/* 窄屏文档流模式：示例区块回归自然高度，内部 JSON 面板按内容撑开 */
+.document-detail__aside-stack--flow .json-panel {
+  flex: none;
+  min-height: 120px;
+}
+
 .json-panel.app-json-schema-viewer {
   border: none;
   border-radius: 0;
 }
 
 .response-example-select {
+  flex: none;
   width: 100%;
 }
 
