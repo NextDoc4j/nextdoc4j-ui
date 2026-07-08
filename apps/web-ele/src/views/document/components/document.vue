@@ -2549,17 +2549,24 @@ defineExpose({
   flex-wrap: wrap;
   gap: 8px;
   padding: 12px 16px;
-  background: var(--doc-muted-bg);
+  background: var(--doc-example-header-bg);
   border-bottom: 1px solid var(--doc-row-border);
 }
 
 .body-type-switch__button {
+  --el-button-bg-color: transparent;
+  --el-button-border-color: transparent;
+  --el-button-hover-bg-color: var(--doc-control-hover-bg);
+  --el-button-hover-border-color: var(--doc-active-border);
+  --el-button-active-bg-color: var(--doc-control-active-bg);
+  --el-button-active-border-color: var(--doc-active-border);
+
   min-height: 28px;
   padding: 0 10px;
   font-size: 12px;
   color: var(--doc-text-muted);
-  background: var(--doc-panel-bg);
-  border: 1px solid var(--doc-panel-border);
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: var(--doc-chip-radius);
 }
 
