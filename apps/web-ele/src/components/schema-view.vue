@@ -811,19 +811,11 @@ const showSchemaStack = computed(() => {
 .schema-root-pill,
 .schema-stack {
   --field-chip-radius: calc(var(--radius, 12px) * 0.82);
-  --field-chip-bg: var(--el-fill-color-light);
-  --field-chip-border: var(--el-border-color);
+  --field-chip-bg: var(--doc-field-chip-bg, var(--el-fill-color-light));
+  --field-chip-border: var(--doc-field-chip-border, var(--el-border-color));
   --field-chip-text: var(--el-text-color-primary);
   --field-chip-value-weight: 600;
   --field-required: var(--el-color-danger);
-}
-
-/* 深色模式下 --el-border-color 与填充背景对比不足，chip 外框不明显；
-   改用对比更强的边框色并加深背景，保证约束/枚举值/示例等值 chip 的边框清晰 */
-:global(html.dark) .schema-root-pill,
-:global(html.dark) .schema-stack {
-  --field-chip-bg: var(--el-fill-color-darker);
-  --field-chip-border: var(--el-border-color-dark);
 }
 
 .schema-root-pill {
@@ -861,7 +853,7 @@ const showSchemaStack = computed(() => {
 }
 
 .schema-stack > .schema-item + .schema-item {
-  border-top: 1px solid var(--el-border-color-lighter);
+  border-top: 1px solid var(--doc-row-border, var(--el-border-color-lighter));
 }
 
 .schema-stack .schema-stack {
@@ -876,8 +868,8 @@ const showSchemaStack = computed(() => {
   align-items: center;
   padding: 10px 12px;
   margin-bottom: 10px;
-  background: var(--el-fill-color-blank);
-  border: 1px solid var(--el-border-color-light);
+  background: var(--doc-control-bg, var(--el-bg-color));
+  border: 1px solid var(--doc-panel-border, var(--el-border-color-light));
   border-radius: calc(var(--radius, 12px) * 0.92);
 }
 
@@ -904,8 +896,8 @@ const showSchemaStack = computed(() => {
   align-items: center;
   padding: 8px 10px;
   margin-bottom: 8px;
-  background: var(--el-fill-color-blank);
-  border: 1px solid var(--el-border-color-light);
+  background: var(--doc-control-bg, var(--el-bg-color));
+  border: 1px solid var(--doc-panel-border, var(--el-border-color-light));
   border-radius: 6px;
 }
 
@@ -937,16 +929,15 @@ const showSchemaStack = computed(() => {
   line-height: 1.4;
   color: var(--el-text-color-regular);
   cursor: pointer;
-  background: var(--el-fill-color-blank);
-  border: 1px solid var(--el-border-color);
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: 6px;
   transition: all 0.2s ease;
 }
 
 .variant-tab:hover {
   color: var(--el-color-primary);
-  background: var(--el-fill-color-light);
-  border-color: var(--el-color-primary-light-5);
+  background: var(--doc-control-hover-bg, var(--el-fill-color-light));
 }
 
 .variant-tab:active {
@@ -955,12 +946,12 @@ const showSchemaStack = computed(() => {
 
 .variant-tab--active {
   color: var(--el-color-primary);
-  background: color-mix(
-    in srgb,
-    var(--el-color-primary-light-9) 85%,
-    transparent
+  background: var(--doc-control-active-bg, var(--el-color-primary-light-9));
+  border-color: var(--doc-active-border, var(--el-color-primary));
+  box-shadow: var(
+    --doc-active-shadow,
+    0 0 0 2px color-mix(in srgb, var(--el-color-primary) 10%, transparent)
   );
-  border-color: var(--el-color-primary);
 }
 
 .variant-tab__title {
@@ -1001,7 +992,7 @@ const showSchemaStack = computed(() => {
 }
 
 .schema-item__top:hover {
-  background-color: var(--el-fill-color);
+  background-color: var(--doc-row-hover-bg, var(--el-fill-color));
 }
 
 .schema-item__control {
@@ -1045,26 +1036,20 @@ const showSchemaStack = computed(() => {
 
 .schema-item__toggle:hover {
   color: var(--el-color-primary);
-  background: color-mix(
-    in srgb,
-    var(--el-color-primary-light-9) 82%,
-    transparent
-  );
+  background: var(--doc-control-hover-bg, var(--el-fill-color-light));
 }
 
 .schema-item__toggle:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px
-    color-mix(in srgb, var(--el-color-primary-light-8) 75%, transparent);
+  box-shadow: var(
+    --doc-active-shadow,
+    0 0 0 2px color-mix(in srgb, var(--el-color-primary) 10%, transparent)
+  );
 }
 
 .schema-item__toggle--expanded {
   color: var(--el-color-primary);
-  background: color-mix(
-    in srgb,
-    var(--el-color-primary-light-9) 88%,
-    transparent
-  );
+  background: var(--doc-control-active-bg, var(--el-color-primary-light-9));
 }
 
 .schema-item__toggle:active {
@@ -1120,18 +1105,16 @@ const showSchemaStack = computed(() => {
 
 .schema-item__headline-main--interactive:hover,
 .schema-item__description--interactive:hover {
-  background: color-mix(
-    in srgb,
-    var(--el-color-primary-light-9) 56%,
-    transparent
-  );
+  background: var(--doc-row-hover-bg, var(--el-fill-color-light));
 }
 
 .schema-item__headline-main--interactive:focus-visible,
 .schema-item__description--interactive:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px
-    color-mix(in srgb, var(--el-color-primary-light-8) 70%, transparent);
+  box-shadow: var(
+    --doc-active-shadow,
+    0 0 0 2px color-mix(in srgb, var(--el-color-primary) 10%, transparent)
+  );
 }
 
 .schema-item__name {

@@ -129,9 +129,13 @@ const isArray = (item: Schema) => {
   @apply mt-6 w-full border;
 
   table-layout: fixed;
+  background: var(--doc-panel-bg, var(--el-bg-color));
+  border-color: var(--doc-panel-border, var(--el-border-color-lighter));
 
   tr {
     @apply border-t;
+
+    border-color: var(--doc-row-border, var(--el-border-color-lighter));
 
     &:first-child {
       @apply border-none;
@@ -139,7 +143,7 @@ const isArray = (item: Schema) => {
 
     /* 鼠标悬停整行高亮，便于定位当前查看的字段 */
     &:hover {
-      background-color: var(--el-fill-color-light);
+      background-color: var(--doc-row-hover-bg, var(--el-fill-color-light));
     }
   }
 

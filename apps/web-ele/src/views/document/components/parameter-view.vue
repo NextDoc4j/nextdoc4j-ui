@@ -173,8 +173,8 @@ const formatValue = (value: unknown) => {
 <style scoped>
 .parameter-item {
   --field-chip-radius: 8px;
-  --field-chip-bg: var(--el-fill-color-light);
-  --field-chip-border: var(--el-border-color);
+  --field-chip-bg: var(--doc-field-chip-bg, var(--el-fill-color-light));
+  --field-chip-border: var(--doc-field-chip-border, var(--el-border-color));
   --field-chip-text: var(--el-text-color-primary);
   --field-chip-value-weight: 600;
   --field-required: var(--el-color-danger);
@@ -186,10 +186,9 @@ const formatValue = (value: unknown) => {
 }
 
 .parameter-item:hover {
-  background-color: color-mix(
-    in srgb,
-    var(--el-fill-color-light) 42%,
-    transparent
+  background-color: var(
+    --doc-row-hover-bg,
+    color-mix(in srgb, var(--el-fill-color-light) 42%, transparent)
   );
 }
 

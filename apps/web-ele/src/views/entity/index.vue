@@ -303,23 +303,80 @@ const schemaWithExamples = computed(() => {
   }
 }
 
+@media (max-width: 1180px) {
+  .entity-detail .entity-detail__layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+    padding: 18px 20px 32px;
+  }
+
+  .entity-detail .entity-detail__aside-stack {
+    position: static;
+    max-height: none;
+    padding-right: 0;
+    overflow: visible;
+  }
+}
+
+@media (max-width: 767px) {
+  .entity-detail .entity-detail__layout {
+    gap: 18px;
+    padding: 24px 14px 32px;
+  }
+
+  .entity-detail .entity-hero,
+  .entity-detail .entity-panel {
+    padding: 12px;
+  }
+
+  .entity-detail .entity-hero__title {
+    font-size: 20px;
+  }
+
+  .entity-detail .example-card__header {
+    flex-direction: column;
+    gap: 8px;
+    align-items: stretch;
+  }
+}
+
 .entity-detail {
   --doc-chip-radius: var(--radius);
   --doc-radius-xs: calc(var(--radius) * 0.56);
   --doc-radius-sm: calc(var(--radius) * 0.72);
   --doc-radius-md: calc(var(--radius) * 0.94);
   --doc-radius-lg: calc(var(--radius) * 1.18);
-  --doc-page-bg: #f8fafc;
-  --doc-panel-bg: #fff;
-  --doc-panel-border: #e2e8f0;
-  --doc-row-border: #f1f5f9;
-  --doc-muted-bg: #f1f5f9;
-  --doc-text-muted: #64748b;
-  --doc-example-bg: #fff;
-  --doc-example-header-bg: #f8fafc;
-  --doc-example-border: #e2e8f0;
-  --doc-example-title: #475569;
-  --doc-example-chip-bg: #f1f5f9;
+  --doc-page-bg: var(--el-fill-color-light);
+  --doc-panel-bg: var(--el-bg-color);
+  --doc-panel-border: var(--el-border-color-lighter);
+  --doc-row-border: var(--el-border-color-lighter);
+  --doc-muted-bg: var(--el-fill-color-light);
+  --doc-row-hover-bg: color-mix(
+    in srgb,
+    var(--el-fill-color-light) 72%,
+    transparent
+  );
+  --doc-field-chip-bg: var(--el-fill-color-light);
+  --doc-field-chip-border: var(--el-border-color-lighter);
+  --doc-control-bg: var(--el-bg-color);
+  --doc-control-hover-bg: var(--el-fill-color-light);
+  --doc-control-active-bg: var(--el-color-primary-light-9);
+  --doc-active-border: color-mix(
+    in srgb,
+    var(--el-color-primary) 30%,
+    transparent
+  );
+  --doc-active-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--el-color-primary) 10%, transparent);
+  --doc-text-muted: var(--el-text-color-secondary);
+  --doc-example-bg: var(--doc-panel-bg);
+  --doc-example-header-bg: var(--doc-muted-bg);
+  --doc-example-border: var(--doc-panel-border);
+  --doc-example-title: var(--el-text-color-secondary);
+  --doc-example-chip-bg: var(--doc-muted-bg);
+  --doc-shadow-sm:
+    0 1px 2px color-mix(in srgb, var(--el-text-color-primary) 5%, transparent),
+    0 5px 18px color-mix(in srgb, var(--el-text-color-primary) 4%, transparent);
   --el-border-radius-base: calc(var(--radius) * 0.75);
   --el-border-radius-small: calc(var(--radius) * 0.62);
 
@@ -340,32 +397,6 @@ const schemaWithExamples = computed(() => {
     );
     border-radius: var(--doc-chip-radius);
   }
-}
-
-.dark .entity-detail {
-  --doc-page-bg: var(--el-bg-color);
-  --doc-panel-bg: color-mix(in srgb, var(--el-bg-color) 92%, #fff 8%);
-  --doc-panel-border: color-mix(
-    in srgb,
-    var(--el-text-color-primary) 22%,
-    transparent
-  );
-  --doc-row-border: color-mix(
-    in srgb,
-    var(--el-text-color-primary) 14%,
-    transparent
-  );
-  --doc-muted-bg: color-mix(
-    in srgb,
-    var(--el-bg-color) 86%,
-    var(--el-fill-color-light) 14%
-  );
-  --doc-text-muted: var(--el-text-color-secondary);
-  --doc-example-bg: #0d1117;
-  --doc-example-header-bg: #161b22;
-  --doc-example-border: #30363d;
-  --doc-example-title: #94a3b8;
-  --doc-example-chip-bg: #1f2937;
 }
 
 .entity-detail__layout {
@@ -407,7 +438,7 @@ const schemaWithExamples = computed(() => {
   background: var(--doc-panel-bg);
   border: 1px solid var(--doc-panel-border);
   border-radius: var(--doc-radius-lg);
-  box-shadow: 0 8px 18px rgb(15 23 42 / 4%);
+  box-shadow: var(--doc-shadow-sm);
 }
 
 .entity-hero {
@@ -483,7 +514,7 @@ const schemaWithExamples = computed(() => {
   background: var(--doc-example-bg);
   border: 1px solid var(--doc-example-border);
   border-radius: var(--doc-radius-lg);
-  box-shadow: 0 12px 26px rgb(15 23 42 / 7%);
+  box-shadow: var(--doc-shadow-sm);
 }
 
 .example-card__header {
@@ -536,9 +567,9 @@ const schemaWithExamples = computed(() => {
 .example-card__toggle {
   --el-button-bg-color: transparent;
   --el-button-border-color: var(--doc-example-border);
-  --el-button-hover-bg-color: var(--doc-example-chip-bg);
-  --el-button-hover-border-color: var(--doc-example-border);
-  --el-button-active-bg-color: var(--doc-example-chip-bg);
+  --el-button-hover-bg-color: var(--doc-control-hover-bg);
+  --el-button-hover-border-color: var(--doc-active-border);
+  --el-button-active-bg-color: var(--doc-control-active-bg);
 
   flex: none;
   min-width: 48px;
@@ -550,8 +581,10 @@ const schemaWithExamples = computed(() => {
 }
 
 .example-card__toggle--active {
-  color: #93c5fd;
-  border-color: rgb(59 130 246 / 42%);
+  color: var(--el-color-primary);
+  background: var(--doc-control-active-bg);
+  border-color: var(--doc-active-border);
+  box-shadow: var(--doc-active-shadow);
 }
 
 .example-card__body {
@@ -611,40 +644,4 @@ const schemaWithExamples = computed(() => {
   border-radius: var(--doc-radius-xs);
 }
 
-@media (max-width: 1180px) {
-  .entity-detail__layout {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 24px;
-    padding: 18px 20px 32px;
-  }
-
-  .entity-detail__aside-stack {
-    position: static;
-    max-height: none;
-    padding-right: 0;
-    overflow: visible;
-  }
-}
-
-@media (max-width: 767px) {
-  .entity-detail__layout {
-    gap: 18px;
-    padding: 24px 14px 32px;
-  }
-
-  .entity-hero,
-  .entity-panel {
-    padding: 12px;
-  }
-
-  .entity-hero__title {
-    font-size: 20px;
-  }
-
-  .example-card__header {
-    flex-direction: column;
-    gap: 8px;
-    align-items: stretch;
-  }
-}
 </style>
