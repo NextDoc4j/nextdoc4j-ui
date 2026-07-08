@@ -2842,7 +2842,7 @@ defineExpose({
   gap: 10px;
   min-width: 0;
   min-height: 0;
-  padding: 12px;
+  padding: 8px 8px 8px 6px;
   background: var(--doc-example-bg);
 }
 
@@ -2867,6 +2867,12 @@ defineExpose({
   background: var(--doc-example-bg);
   border: none;
   border-radius: 0;
+}
+
+/* 收紧示例面板内 JSON 滚动容器的内边距，使 { 更贴近左上角 */
+.json-panel.json-viewer-scroll-host,
+.json-panel :deep(.json-viewer-scroll-host) {
+  padding: 4px 8px;
 }
 
 /* 窄屏文档流模式：示例区块回归自然高度，内部 JSON 面板按内容撑开 */
