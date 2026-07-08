@@ -1004,6 +1004,8 @@ defineExpose({
 }
 
 .body-params {
+  margin-bottom: 12px;
+
   :deep(.el-radio-button) {
     padding: 0 6px 6px;
 

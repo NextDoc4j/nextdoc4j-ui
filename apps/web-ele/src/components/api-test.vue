@@ -3593,20 +3593,12 @@ onBeforeUnmount(() => {
 }
 
 .debug-inline-tab--active {
-  color: var(--el-text-color-primary);
+  color: var(--el-color-primary);
   background: transparent;
   border-color: transparent;
 }
 
 .debug-inline-tab--active::after {
-  background: var(--el-text-color-primary);
-}
-
-.debug-pane--response .debug-inline-tab--active {
-  color: var(--el-color-primary);
-}
-
-.debug-pane--response .debug-inline-tab--active::after {
   background: var(--el-color-primary);
 }
 
