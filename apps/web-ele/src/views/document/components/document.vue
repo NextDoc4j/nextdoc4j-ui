@@ -2187,7 +2187,11 @@ defineExpose({
     color-mix(in srgb, var(--el-color-primary) 10%, transparent);
   --doc-text-muted: var(--el-text-color-secondary);
   --doc-example-bg: var(--doc-panel-bg);
-  --doc-example-header-bg: var(--doc-muted-bg);
+  --doc-example-header-bg: color-mix(
+    in srgb,
+    var(--doc-page-bg) 58%,
+    var(--doc-panel-bg) 42%
+  );
   --doc-example-border: var(--doc-panel-border);
   --doc-example-title: var(--el-text-color-secondary);
   --doc-example-chip-bg: var(--doc-muted-bg);
@@ -2440,10 +2444,11 @@ defineExpose({
 }
 
 .hero-panel__security {
-  padding: 12px;
-  background: var(--doc-muted-bg);
+  padding: 14px 16px;
+  background: var(--doc-panel-bg);
   border: 1px solid var(--doc-panel-border);
-  border-radius: var(--doc-radius-sm);
+  border-radius: var(--doc-radius-lg);
+  box-shadow: var(--doc-shadow-sm);
 }
 
 .api-section {
