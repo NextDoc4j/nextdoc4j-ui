@@ -643,5 +643,4 @@ const schemaWithExamples = computed(() => {
   border: 1px solid var(--doc-panel-border);
   border-radius: var(--doc-radius-xs);
 }
-
 </style>
