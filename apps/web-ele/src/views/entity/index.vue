@@ -2,8 +2,6 @@
 import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 
-import { ElButton } from 'element-plus';
-
 import JsonViewer from '#/components/json-viewer/index.vue';
 import SchemaView from '#/components/schema-view.vue';
 import { useApiStore } from '#/store';
@@ -11,7 +9,6 @@ import { adaptSchemaForView, hasRenderableSchema } from '#/utils/schema';
 
 const route = useRoute();
 const apiStore = useApiStore();
-const exampleOpen = ref(true);
 const entityVariantState = ref<Record<string, number>>({});
 
 const entityName = computed(() => {
@@ -259,10 +256,7 @@ const schemaWithExamples = computed(() => {
 
       <aside v-if="schemaWithExamples" class="entity-detail__aside">
         <div class="entity-detail__aside-stack">
-          <section
-            class="example-card"
-            :class="{ 'example-card--collapsed': !exampleOpen }"
-          >
+          <section class="example-card">
             <div class="example-card__header">
               <div class="example-card__meta">
                 <div class="example-card__title">Entity JSON Example</div>
@@ -270,25 +264,15 @@ const schemaWithExamples = computed(() => {
                   application/json
                 </span>
               </div>
-              <ElButton
-                size="small"
-                class="example-card__toggle"
-                :class="{ 'example-card__toggle--active': exampleOpen }"
-                @click="exampleOpen = !exampleOpen"
-              >
-                {{ exampleOpen ? '收起' : '展开' }}
-              </ElButton>
             </div>
 
-            <Transition name="example-expand">
-              <div v-if="exampleOpen" class="example-card__body">
-                <JsonViewer
-                  class="json-panel app-json-schema-viewer"
-                  :schema="schemaWithExamples"
-                  mode="entity"
-                />
-              </div>
-            </Transition>
+            <div class="example-card__body">
+              <JsonViewer
+                class="json-panel app-json-schema-viewer"
+                :schema="schemaWithExamples"
+                mode="entity"
+              />
+            </div>
           </section>
         </div>
       </aside>
@@ -370,7 +354,11 @@ const schemaWithExamples = computed(() => {
     color-mix(in srgb, var(--el-color-primary) 10%, transparent);
   --doc-text-muted: var(--el-text-color-secondary);
   --doc-example-bg: var(--doc-panel-bg);
-  --doc-example-header-bg: var(--doc-muted-bg);
+  --doc-example-header-bg: color-mix(
+    in srgb,
+    var(--doc-page-bg) 58%,
+    var(--doc-panel-bg) 42%
+  );
   --doc-example-border: var(--doc-panel-border);
   --doc-example-title: var(--el-text-color-secondary);
   --doc-example-chip-bg: var(--doc-muted-bg);
@@ -509,7 +497,10 @@ const schemaWithExamples = computed(() => {
 }
 
 .example-card {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
   overflow: hidden;
   background: var(--doc-example-bg);
   border: 1px solid var(--doc-example-border);
@@ -527,10 +518,6 @@ const schemaWithExamples = computed(() => {
   padding: 10px 12px;
   background: var(--doc-example-header-bg);
   border-bottom: 1px solid var(--doc-example-border);
-}
-
-.example-card--collapsed .example-card__header {
-  border-bottom: none;
 }
 
 .example-card__meta {
@@ -564,67 +551,33 @@ const schemaWithExamples = computed(() => {
   border-radius: var(--doc-chip-radius);
 }
 
-.example-card__toggle {
-  --el-button-bg-color: transparent;
-  --el-button-border-color: var(--doc-example-border);
-  --el-button-hover-bg-color: var(--doc-control-hover-bg);
-  --el-button-hover-border-color: var(--doc-active-border);
-  --el-button-active-bg-color: var(--doc-control-active-bg);
-
-  flex: none;
-  min-width: 48px;
-  height: 26px;
-  padding: 0 8px;
-  font-size: 12px;
-  color: var(--doc-example-title);
-  border-radius: var(--doc-chip-radius);
-}
-
-.example-card__toggle--active {
-  color: var(--el-color-primary);
-  background: var(--doc-control-active-bg);
-  border-color: var(--doc-active-border);
-  box-shadow: var(--doc-active-shadow);
-}
-
 .example-card__body {
-  display: grid;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
   gap: 10px;
   min-width: 0;
-  padding: 12px;
+  min-height: 0;
+  padding: 8px 8px 8px 6px;
   background: var(--doc-example-bg);
-}
-
-.example-expand-enter-active,
-.example-expand-leave-active {
-  overflow: hidden;
-  transition:
-    max-height 0.2s ease,
-    opacity 0.16s ease;
-}
-
-.example-expand-enter-from,
-.example-expand-leave-to {
-  max-height: 0;
-  opacity: 0;
-}
-
-.example-expand-enter-to,
-.example-expand-leave-from {
-  max-height: 1200px;
-  opacity: 1;
 }
 
 .json-panel {
+  flex: 1;
   width: 100%;
   min-width: 0;
-  min-height: 120px;
+  min-height: 0;
   max-height: none;
   overflow: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior: contain auto;
   background: var(--doc-example-bg);
   border: none;
   border-radius: 0;
+}
+
+.json-panel.json-viewer-scroll-host,
+.json-panel :deep(.json-viewer-scroll-host) {
+  padding: 4px 8px;
 }
 
 .json-panel.app-json-schema-viewer {
