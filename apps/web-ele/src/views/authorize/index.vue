@@ -86,7 +86,9 @@ const tokenKey = (
 ) => `${name}_${resolveIn(item)}`;
 
 const handleToken = (value: null | string, key: string) => {
-  tokenStore.setToken(value, key);
+  // 仅裁剪首尾空格，保留中间空格（如 "Bearer {token}" 需要的分隔空格）
+  const normalized = typeof value === 'string' ? value.trim() : value;
+  tokenStore.setToken(normalized, key);
   refresh();
 };
 
@@ -198,7 +200,7 @@ onMounted(() => {});
                 </p>
                 <ElInput
                   placeholder="请输入"
-                  v-model.trim="value[tokenKey(index, item)]"
+                  v-model="value[tokenKey(index, item)]"
                   @click.stop=""
                   @keydown.stop=""
                   @keyup.stop=""
