@@ -2052,6 +2052,10 @@ const stopRequest = () => {
 async function sendRequest() {
   loading.value = true;
   responseLoading.value = true;
+  // 每次请求都是新的：清空上一次的流式事件，避免旧数据残留
+  sseEvents.value = [];
+  sseAborted.value = false;
+  isStreaming.value = false;
   const startTime = performance.now(); // 记录开始时间;
   const abortController = new AbortController();
   activeAbortController = abortController;
