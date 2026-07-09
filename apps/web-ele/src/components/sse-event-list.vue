@@ -141,7 +141,7 @@ watch(
   font-family: var(--el-font-family-mono, monospace);
   font-size: 13px;
   line-height: 1.6;
-  white-space: pre-wrap;
   word-break: break-all;
+  white-space: pre-wrap;
 }
 </style>
