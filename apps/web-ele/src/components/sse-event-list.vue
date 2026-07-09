@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 
 import { ElEmpty } from 'element-plus';
 
@@ -20,6 +20,11 @@ const props = defineProps<{
   streaming: boolean;
 }>();
 
+// 单条卡片在测量到真实高度前的预估高度（px），用于撑起总高度占位
+const ESTIMATED_ITEM_HEIGHT = 96;
+// 可视区上下额外预渲染的缓冲高度（px），滚动时提前挂载，避免露白
+const VIRTUAL_OVERSCAN = 600;
+
 // 展示模式：pretty 结构化 / raw 原始文本，全局切换
 const viewMode = ref<'pretty' | 'raw'>('pretty');
 
@@ -28,6 +33,135 @@ const scrollHostRef = ref<HTMLElement | null>(null);
 const autoScroll = ref(true);
 // 暂停自动滚动期间已读到的事件数，用于计算未读新事件
 const seenCount = ref(0);
+
+// 滚动容器状态：滚动位置与视口高度，驱动可视窗口计算
+const scrollTop = ref(0);
+const viewportHeight = ref(0);
+
+// 每条事件测量到的真实高度缓存（seq -> 高度），未命中时回退预估高度
+const heightCache = new Map<number, number>();
+// 高度缓存版本号：测量结果变化时自增，触发布局重算
+const measureVersion = ref(0);
+// 可视卡片的 DOM 元素与其 seq 的双向映射，供 ResizeObserver 反查
+const seqElementMap = new Map<number, HTMLElement>();
+const elementSeqMap = new WeakMap<HTMLElement, number>();
+
+let scrollRaf: null | number = null;
+let itemResizeObserver: null | ResizeObserver = null;
+let hostResizeObserver: null | ResizeObserver = null;
+
+/**
+ * 记录单条卡片测量到的真实高度，仅在与缓存值不同时自增版本触发重算。
+ */
+const recordItemHeight = (seq: number, height: number) => {
+  if (height <= 0 || heightCache.get(seq) === height) {
+    return;
+  }
+  heightCache.set(seq, height);
+  measureVersion.value += 1;
+};
+
+/**
+ * 挂载可视卡片时观察其尺寸，卸载时解除观察。
+ * 通过双向映射在 ResizeObserver 回调中反查对应事件 seq。
+ */
+const setItemRef = (seq: number, el: Element | null) => {
+  const previous = seqElementMap.get(seq);
+  if (previous && previous !== el) {
+    itemResizeObserver?.unobserve(previous);
+    seqElementMap.delete(seq);
+  }
+
+  if (el instanceof HTMLElement) {
+    seqElementMap.set(seq, el);
+    elementSeqMap.set(el, seq);
+    recordItemHeight(seq, Math.round(el.getBoundingClientRect().height));
+    itemResizeObserver?.observe(el);
+  }
+};
+
+// 按 seq 缓存稳定的 ref 回调，避免内联箭头函数每次渲染都触发解绑/绑定抖动
+const itemRefCallbacks = new Map<number, (el: Element | null) => void>();
+const getItemRef = (seq: number) => {
+  let callback = itemRefCallbacks.get(seq);
+  if (!callback) {
+    callback = (el: Element | null) => setItemRef(seq, el);
+    itemRefCallbacks.set(seq, callback);
+  }
+  return callback;
+};
+
+// 累积偏移布局：tops[i] 为第 i 条卡片的顶部偏移，total 为列表总高度
+const layout = computed(() => {
+  // 显式依赖测量版本，卡片高度变化时重算
+  void measureVersion.value;
+  const events = props.events;
+  const tops = Array.from({ length: events.length + 1 });
+  tops[0] = 0;
+  for (const [index, event_] of events.entries()) {
+    const height = heightCache.get(event_!.seq) ?? ESTIMATED_ITEM_HEIGHT;
+    tops[index + 1] = (tops[index] as number) + height;
+  }
+  return {
+    tops: tops as number[],
+    total: (tops[events.length] as number) || 0,
+  };
+});
+
+/**
+ * 二分查找首个底部超过 target 的卡片下标，用于快速定位可视窗口起点。
+ */
+const findFirstIndexBelow = (tops: number[], target: number) => {
+  let low = 0;
+  let high = tops.length - 1;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if ((tops[mid + 1] ?? 0) <= target) {
+      low = mid + 1;
+    } else {
+      high = mid;
+    }
+  }
+  return low;
+};
+
+// 当前应渲染的卡片窗口（含 overscan），仅这部分进入 DOM
+const visibleItems = computed(() => {
+  const events = props.events;
+  if (events.length === 0) {
+    return [];
+  }
+
+  const { tops } = layout.value;
+  const viewportTop = Math.max(scrollTop.value - VIRTUAL_OVERSCAN, 0);
+  const viewportBottom =
+    scrollTop.value + viewportHeight.value + VIRTUAL_OVERSCAN;
+
+  const start = findFirstIndexBelow(tops, viewportTop);
+  const rendered: Array<{
+    index: number;
+    isFirst: boolean;
+    isLast: boolean;
+    item: SseEvent;
+    top: number;
+  }> = [];
+
+  for (let index = start; index < events.length; index += 1) {
+    if ((tops[index] ?? 0) > viewportBottom) {
+      break;
+    }
+    rendered.push({
+      index,
+      isFirst: index === 0,
+      isLast: index === events.length - 1,
+      item: events[index]!,
+      top: tops[index] ?? 0,
+    });
+  }
+  return rendered;
+});
+
+const totalHeight = computed(() => layout.value.total);
 
 // 暂停跟随时积压的新事件数量（回底浮标用）
 const pendingCount = computed(() =>
@@ -47,6 +181,7 @@ const scrollToBottom = () => {
   const host = scrollHostRef.value;
   if (host) {
     host.scrollTop = host.scrollHeight;
+    scrollTop.value = host.scrollTop;
   }
   seenCount.value = props.events.length;
 };
@@ -59,9 +194,51 @@ const resumeAutoScroll = async () => {
 };
 
 const handleScroll = () => {
-  autoScroll.value = isNearBottom();
-  if (autoScroll.value) {
-    seenCount.value = props.events.length;
+  if (scrollRaf !== null) {
+    return;
+  }
+  scrollRaf = requestAnimationFrame(() => {
+    scrollRaf = null;
+    const host = scrollHostRef.value;
+    if (!host) {
+      return;
+    }
+    scrollTop.value = host.scrollTop;
+    autoScroll.value = isNearBottom();
+    if (autoScroll.value) {
+      seenCount.value = props.events.length;
+    }
+  });
+};
+
+const updateViewportHeight = () => {
+  viewportHeight.value = scrollHostRef.value?.clientHeight || 0;
+};
+
+/**
+ * 绑定滚动容器与卡片尺寸观察，容器高度或卡片高度变化时刷新虚拟窗口布局。
+ */
+const bindObservers = () => {
+  if (typeof ResizeObserver === 'undefined') {
+    return;
+  }
+  itemResizeObserver = new ResizeObserver((entries) => {
+    entries.forEach((entry) => {
+      const seq = elementSeqMap.get(entry.target as HTMLElement);
+      if (seq !== undefined) {
+        recordItemHeight(
+          seq,
+          Math.round(
+            (entry.target as HTMLElement).getBoundingClientRect().height,
+          ),
+        );
+      }
+    });
+  });
+  const host = scrollHostRef.value;
+  if (host) {
+    hostResizeObserver = new ResizeObserver(updateViewportHeight);
+    hostResizeObserver.observe(host);
   }
 };
 
@@ -69,13 +246,64 @@ const handleScroll = () => {
 watch(
   () => props.events.length,
   async () => {
+    if (props.events.length === 0) {
+      heightCache.clear();
+      seqElementMap.clear();
+      scrollTop.value = 0;
+      seenCount.value = 0;
+      autoScroll.value = true;
+    }
     if (!autoScroll.value) {
       return;
     }
     await nextTick();
+    updateViewportHeight();
     scrollToBottom();
   },
 );
+
+// 卡片高度重算后若仍处于跟随态，保持吸附底部，避免测量抖动导致露白
+watch(measureVersion, async () => {
+  if (!autoScroll.value) {
+    return;
+  }
+  await nextTick();
+  scrollToBottom();
+});
+
+// 切换展示模式后卡片高度整体变化，清空缓存重新测量
+watch(viewMode, async () => {
+  heightCache.clear();
+  measureVersion.value += 1;
+  await nextTick();
+  updateViewportHeight();
+  if (autoScroll.value) {
+    scrollToBottom();
+  }
+});
+
+// 容器挂载后再绑定观察器并初始化视口高度
+watch(
+  scrollHostRef,
+  (host) => {
+    if (host) {
+      bindObservers();
+      updateViewportHeight();
+    }
+  },
+  { flush: 'post' },
+);
+
+onBeforeUnmount(() => {
+  if (scrollRaf !== null) {
+    cancelAnimationFrame(scrollRaf);
+    scrollRaf = null;
+  }
+  itemResizeObserver?.disconnect();
+  itemResizeObserver = null;
+  hostResizeObserver?.disconnect();
+  hostResizeObserver = null;
+});
 
 // 单条事件是否以结构化视图展示（pretty 且能解析为可结构化的对象/数组）
 const isPrettyRenderable = (item: SseEvent) =>
@@ -122,34 +350,47 @@ const isPrettyRenderable = (item: SseEvent) =>
       class="sse-stream__scroll"
       @scroll="handleScroll"
     >
-      <ol class="sse-timeline">
-        <li v-for="item in events" :key="item.seq" class="sse-timeline__item">
+      <!-- 虚拟列表：外层撑满总高度占位，仅可视窗口内的卡片进入 DOM 并绝对定位 -->
+      <ol class="sse-timeline" :style="{ height: `${totalHeight}px` }">
+        <li
+          v-for="row in visibleItems"
+          :key="row.item.seq"
+          :ref="getItemRef(row.item.seq)"
+          class="sse-timeline__item"
+          :class="{
+            'sse-timeline__item--first': row.isFirst,
+            'sse-timeline__item--last': row.isLast,
+          }"
+          :style="{ transform: `translateY(${row.top}px)` }"
+        >
           <div class="sse-timeline__rail">
             <span class="sse-timeline__node"></span>
           </div>
           <div class="sse-card">
             <div class="sse-card__header">
-              <span class="sse-card__seq">#{{ item.seq }}</span>
+              <span class="sse-card__seq">#{{ row.item.seq }}</span>
               <span
-                v-if="item.event && item.event !== 'message'"
+                v-if="row.item.event && row.item.event !== 'message'"
                 class="sse-card__event"
               >
-                {{ item.event }}
+                {{ row.item.event }}
               </span>
-              <span v-if="item.id" class="sse-card__id">id: {{ item.id }}</span>
-              <span class="sse-card__time">{{ item.time }}</span>
+              <span v-if="row.item.id" class="sse-card__id">
+                id: {{ row.item.id }}
+              </span>
+              <span class="sse-card__time">{{ row.item.time }}</span>
             </div>
             <div
               class="sse-card__body"
-              :class="{ 'sse-card__body--json': isPrettyRenderable(item) }"
+              :class="{ 'sse-card__body--json': isPrettyRenderable(row.item) }"
             >
               <JsonViewer
-                v-if="isPrettyRenderable(item)"
-                :value="item.parsed"
+                v-if="isPrettyRenderable(row.item)"
+                :value="row.item.parsed"
                 :default-expanded="true"
                 class="sse-card__json app-json-schema-viewer"
               />
-              <pre v-else class="sse-card__raw">{{ item.data }}</pre>
+              <pre v-else class="sse-card__raw">{{ row.item.data }}</pre>
             </div>
           </div>
         </li>
@@ -254,15 +495,21 @@ const isPrettyRenderable = (item: SseEvent) =>
   overflow-y: auto;
 }
 
+/* 虚拟列表容器：以总高度撑起滚动条，内部卡片绝对定位 */
 .sse-timeline {
+  position: relative;
   padding: 0;
   margin: 0;
   list-style: none;
 }
 
 .sse-timeline__item {
+  position: absolute;
+  top: 0;
+  left: 0;
   display: flex;
   gap: 10px;
+  width: 100%;
 }
 
 .sse-timeline__rail {
@@ -282,11 +529,11 @@ const isPrettyRenderable = (item: SseEvent) =>
   background: var(--el-border-color-light);
 }
 
-.sse-timeline__item:first-child .sse-timeline__rail::before {
+.sse-timeline__item--first .sse-timeline__rail::before {
   top: 14px;
 }
 
-.sse-timeline__item:last-child .sse-timeline__rail::before {
+.sse-timeline__item--last .sse-timeline__rail::before {
   bottom: calc(100% - 18px);
 }
 
@@ -385,6 +632,7 @@ const isPrettyRenderable = (item: SseEvent) =>
 .sse-stream__jump {
   position: sticky;
   bottom: 8px;
+  z-index: 2;
   display: block;
   padding: 4px 14px;
   margin: 0 auto;
