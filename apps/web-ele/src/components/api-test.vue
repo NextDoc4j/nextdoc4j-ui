@@ -73,6 +73,7 @@ import { adaptSchemaForView, hasRenderableSchema } from '#/utils/schema';
 import bodyParams from './body-params.vue';
 import GlobalConfigPanel from './global-config-panel.vue';
 import paramsTable from './params-table.vue';
+import SseEventList from './sse-event-list.vue';
 
 const props = defineProps<{
   method: string;
@@ -139,6 +140,22 @@ interface DebugInlineTab {
   count?: number;
   key: string;
   label: string;
+}
+
+// SSE（text/event-stream）单条事件的结构化表示
+interface SseEvent {
+  // data 字段原始文本（多行 data 以 \n 拼接）
+  data: string;
+  // event 字段名，缺省为 message
+  event: string;
+  // id 字段，可能不存在
+  id?: string;
+  // data 能被 JSON.parse 时的结构化结果，否则为 undefined
+  parsed?: unknown;
+  // 到达顺序序号，从 1 开始
+  seq: number;
+  // 到达时间，格式 HH:mm:ss.SSS
+  time: string;
 }
 
 interface DebugBodyTabExpose {
@@ -405,6 +422,9 @@ const resetResponseState = () => {
   responseMimeType.value = '';
   responseHeaders.value = [];
   actualRequestSnapshot.value = null;
+  isStreaming.value = false;
+  sseAborted.value = false;
+  sseEvents.value = [];
 };
 
 const resolveBodyContent = () => {
@@ -637,6 +657,13 @@ const responseHeaders = ref<
   Array<{ enabled: boolean; name: string; value: string }>
 >([]);
 
+// SSE 流式响应状态
+const isStreaming = ref(false); // 是否正在接收 text/event-stream 流
+const sseAborted = ref(false); // 是否被用户主动停止
+const sseEvents = shallowRef<SseEvent[]>([]); // 已接收的 SSE 事件
+// 当前进行中请求的中止控制器，供停止按钮及卸载时释放连接
+let activeAbortController: AbortController | null = null;
+
 const realtimeDetectedBase64Images = computed<DetectedBase64Image[]>(() => {
   if (responseStatus.value.type === 'default') {
     return [];
@@ -764,12 +791,23 @@ const requestInlineTabs = computed<DebugInlineTab[]>(() => {
   ];
 });
 
+// 是否为 SSE 响应：接收中或已接收到事件时以事件流形式展示
+const isSseResponse = computed(
+  () => isStreaming.value || sseEvents.value.length > 0,
+);
+
 const responseInlineTabs = computed<DebugInlineTab[]>(() => {
   return [
-    {
-      key: 'RealtimeResponse',
-      label: '实时响应',
-    },
+    isSseResponse.value
+      ? {
+          key: 'EventStream',
+          label: '事件流',
+          count: sseEvents.value.length,
+        }
+      : {
+          key: 'RealtimeResponse',
+          label: '实时响应',
+        },
     {
       key: 'ResponseHeaders',
       label: '响应头',
@@ -1889,11 +1927,134 @@ const downloadDetectedBase64Image = (
   link.remove();
 };
 
+// 生成 SSE 事件到达时间，格式 HH:mm:ss.SSS
+const formatSseTime = () => {
+  const now = new Date();
+  const pad = (value: number, len = 2) => String(value).padStart(len, '0');
+  return `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(
+    now.getSeconds(),
+  )}.${pad(now.getMilliseconds(), 3)}`;
+};
+
+/**
+ * 解析单个 SSE 事件块（以空行分隔的一段文本）为结构化事件。
+ * @param block - 事件块原始文本，可能包含多行 data/event/id 字段
+ * @param seq - 该事件的到达序号
+ * @returns 解析后的事件；不含任何 data 字段时返回 null
+ */
+const parseSseEventBlock = (block: string, seq: number): null | SseEvent => {
+  const dataLines: string[] = [];
+  let event = 'message';
+  let id: string | undefined;
+
+  for (const line of block.split('\n')) {
+    // 忽略空行与注释行（以冒号开头）
+    if (!line || line.startsWith(':')) {
+      continue;
+    }
+    const colonIndex = line.indexOf(':');
+    const field = colonIndex === -1 ? line : line.slice(0, colonIndex);
+    let value = colonIndex === -1 ? '' : line.slice(colonIndex + 1);
+    // 规范：字段值前的单个空格需去除
+    if (value.startsWith(' ')) {
+      value = value.slice(1);
+    }
+    switch (field) {
+      case 'data': {
+        dataLines.push(value);
+        break;
+      }
+      case 'event': {
+        event = value || 'message';
+        break;
+      }
+      case 'id': {
+        id = value;
+        break;
+      }
+      // retry 字段与其他字段调试场景无需展示，忽略
+    }
+  }
+
+  if (dataLines.length === 0) {
+    return null;
+  }
+  const data = dataLines.join('\n');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(data);
+  } catch {
+    parsed = undefined;
+  }
+  return { data, event, id, parsed, seq, time: formatSseTime() };
+};
+
+/**
+ * 增量消费 text/event-stream 响应流，按 SSE 协议分帧并实时追加到 sseEvents。
+ * @param response - fetch 返回的流式响应对象
+ * @param startTime - 请求开始时间戳，用于持续更新耗时
+ */
+async function consumeEventStream(response: Response, startTime: number) {
+  if (!response.body) {
+    isStreaming.value = false;
+    return;
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let seq = 0;
+  let totalBytes = 0;
+
+  // 追加事件：shallowRef 需替换数组引用以触发视图更新，并同步耗时
+  const appendEvent = (block: string) => {
+    const parsedEvent = parseSseEventBlock(block, seq + 1);
+    if (!parsedEvent) {
+      return;
+    }
+    seq += 1;
+    sseEvents.value = [...sseEvents.value, parsedEvent];
+    responseTime.value = Number((performance.now() - startTime).toFixed(2));
+  };
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      totalBytes += value.byteLength;
+      responseSize.value = formatSize(totalBytes);
+      buffer = (buffer + decoder.decode(value, { stream: true })).replaceAll(
+        '\r\n',
+        '\n',
+      );
+      // 按空行切分出完整事件块，保留末尾不完整片段等待后续数据
+      const blocks = buffer.split('\n\n');
+      buffer = blocks.pop() ?? '';
+      blocks.forEach((block) => appendEvent(block));
+    }
+    // 处理流结束时残留在缓冲区的最后一个事件块
+    if (buffer.trim()) {
+      appendEvent(buffer);
+    }
+  } finally {
+    reader.releaseLock();
+    isStreaming.value = false;
+  }
+}
+
+// 停止当前请求，主要用于中止 SSE 长连接并保留已接收事件
+const stopRequest = () => {
+  sseAborted.value = true;
+  activeAbortController?.abort();
+};
+
 async function sendRequest() {
   loading.value = true;
   responseLoading.value = true;
   const startTime = performance.now(); // 记录开始时间;
   const abortController = new AbortController();
+  activeAbortController = abortController;
   const timeoutId = window.setTimeout(() => {
     abortController.abort();
   }, REQUEST_TIMEOUTS.onlineDebug);
@@ -2093,21 +2254,15 @@ async function sendRequest() {
             ? searchParams
             : bodyData || undefined,
     });
-    // 处理响应：按 content-type 自动解析 JSON/XML/Text/Form/Binary
-    const parsedResponse = await parseResponseBody(
-      response,
-      finalUrl.toString(),
-    );
 
-    responseTime.value = Number((performance.now() - startTime).toFixed(2));
+    // 响应头到达即可展示状态与头信息（SSE 与普通响应共用）
     responseStatus.value = {
       code: response.status,
       text: `${response.status} ${response.statusText}`,
       type: response.ok ? 'success' : 'error',
     };
-    responseData.value = parsedResponse.data;
-    responseMimeType.value = parsedResponse.contentType || '-';
-
+    responseMimeType.value =
+      normalizeContentType(response.headers.get('content-type')) || '-';
     const header = Object.fromEntries(response.headers.entries());
     responseHeaders.value = [];
     for (const key in header) {
@@ -2117,6 +2272,30 @@ async function sendRequest() {
         enabled: true,
       });
     }
+
+    // text/event-stream 走流式分支：首字节已到达，取消建连超时后持续接收
+    if (
+      normalizeContentType(response.headers.get('content-type')) ===
+      'text/event-stream'
+    ) {
+      window.clearTimeout(timeoutId);
+      isStreaming.value = true;
+      responseLoading.value = false;
+      responseTab.value = 'EventStream';
+      await consumeEventStream(response, startTime);
+      return;
+    }
+
+    // 处理响应：按 content-type 自动解析 JSON/XML/Text/Form/Binary
+    const parsedResponse = await parseResponseBody(
+      response,
+      finalUrl.toString(),
+    );
+
+    responseTime.value = Number((performance.now() - startTime).toFixed(2));
+    responseData.value = parsedResponse.data;
+    responseMimeType.value = parsedResponse.contentType || '-';
+
     // 计算响应大小
     const size =
       typeof parsedResponse.data === 'string'
@@ -2124,6 +2303,10 @@ async function sendRequest() {
         : JSON.stringify(parsedResponse.data ?? '').length * 2;
     responseSize.value = formatSize(size);
   } catch (error: any) {
+    // 用户主动停止 SSE 时保留已接收事件，不提示错误
+    if (error?.name === 'AbortError' && sseAborted.value) {
+      return;
+    }
     const errorMessage =
       error?.name === 'AbortError'
         ? ONLINE_DEBUG_TIMEOUT_MESSAGE
@@ -2138,6 +2321,8 @@ async function sendRequest() {
     responseMimeType.value = '-';
   } finally {
     window.clearTimeout(timeoutId);
+    isStreaming.value = false;
+    activeAbortController = null;
     loading.value = false;
     responseLoading.value = false;
   }
@@ -2315,6 +2500,8 @@ watch(
 );
 
 onBeforeUnmount(() => {
+  // 卸载时中止进行中的请求，释放 SSE 长连接
+  activeAbortController?.abort();
   window.removeEventListener('pagehide', handlePageHide);
   window.removeEventListener('resize', syncNarrowLayoutState);
   flushPersistCache();
@@ -2373,6 +2560,15 @@ onBeforeUnmount(() => {
           </ElInput>
           <div class="debug-console__request-actions">
             <ElButton
+              v-if="isStreaming"
+              type="danger"
+              class="debug-send-button"
+              @click="stopRequest"
+            >
+              <span>停止</span>
+            </ElButton>
+            <ElButton
+              v-else
               type="primary"
               class="debug-send-button"
               :loading="loading"
@@ -2741,7 +2937,23 @@ onBeforeUnmount(() => {
                   v-model="responseTab"
                   class="debug-response-tabs debug-response-tabs--inline"
                 >
-                  <ElTabPane name="RealtimeResponse" label="实时响应" lazy>
+                  <ElTabPane
+                    v-if="isSseResponse"
+                    name="EventStream"
+                    label="事件流"
+                  >
+                    <SseEventList
+                      :events="sseEvents"
+                      :streaming="isStreaming"
+                      class="response-body"
+                    />
+                  </ElTabPane>
+                  <ElTabPane
+                    v-else
+                    name="RealtimeResponse"
+                    label="实时响应"
+                    lazy
+                  >
                     <template v-if="responseStatus.type !== 'default'">
                       <JsonViewer
                         ref="realtimeResponseJsonRef"
