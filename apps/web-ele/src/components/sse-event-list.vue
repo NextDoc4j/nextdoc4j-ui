@@ -173,6 +173,17 @@ const isPrettyRenderable = (item: SseEvent) =>
 </template>
 
 <style scoped>
+@keyframes sse-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.3;
+  }
+}
+
 .sse-stream {
   display: flex;
   flex-direction: column;
@@ -207,17 +218,6 @@ const isPrettyRenderable = (item: SseEvent) =>
 
 .sse-stream__dot--done {
   background: var(--el-text-color-placeholder);
-}
-
-@keyframes sse-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-
-  50% {
-    opacity: 0.3;
-  }
 }
 
 .sse-stream__view-toggle {
