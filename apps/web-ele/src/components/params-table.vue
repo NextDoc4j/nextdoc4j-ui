@@ -16,6 +16,7 @@ import {
 } from '@vben/icons';
 
 import {
+  ElAutocomplete,
   ElButton,
   ElCheckbox,
   ElInput,
@@ -77,12 +78,30 @@ const props = withDefaults(
 );
 
 const contentTypeOptions = [
-  { label: 'application/octet-stream', value: 'application/octet-stream' },
-  { label: 'application/json', value: 'application/json' },
-  { label: 'application/xml', value: 'application/xml' },
-  { label: 'text/plain', value: 'text/plain' },
-  { label: 'text/html', value: 'text/html' },
+  { value: 'application/octet-stream' },
+  { value: 'application/json' },
+  { value: 'application/xml' },
+  { value: 'text/plain' },
+  { value: 'text/html' },
 ];
+
+/**
+ * Content-Type 输入框的候选建议：按已输入内容做子串过滤，空输入时返回全部内置项。
+ * 交由 ElAutocomplete 作为搜索提示使用，不限制自由输入。
+ */
+const queryContentTypeSuggestions = (
+  queryString: string,
+  callback: (suggestions: Array<{ value: string }>) => void,
+) => {
+  const keyword = queryString.trim().toLowerCase();
+  callback(
+    keyword
+      ? contentTypeOptions.filter((option) =>
+          option.value.toLowerCase().includes(keyword),
+        )
+      : contentTypeOptions,
+  );
+};
 
 const showInlineDelete = computed(() => {
   return props.allowDelete && !props.showDeleteInDescription;
@@ -717,21 +736,17 @@ watch(
             v-if="showContentType"
             class="params-grid-table__cell params-grid-table__cell--body"
           >
-            <ElSelect
+            <ElAutocomplete
               v-if="!isDraftRow(row)"
               v-model="row.contentType"
               placeholder="自动"
+              :fetch-suggestions="queryContentTypeSuggestions"
+              :trigger-on-focus="true"
+              value-key="value"
               clearable
               size="small"
               class="w-full"
-            >
-              <ElOption
-                v-for="option in contentTypeOptions"
-                :key="option.value"
-                :label="option.label"
-                :value="option.value"
-              />
-            </ElSelect>
+            />
           </div>
 
           <div
