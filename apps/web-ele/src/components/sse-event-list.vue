@@ -139,7 +139,10 @@ const isPrettyRenderable = (item: SseEvent) =>
               <span v-if="item.id" class="sse-card__id">id: {{ item.id }}</span>
               <span class="sse-card__time">{{ item.time }}</span>
             </div>
-            <div class="sse-card__body">
+            <div
+              class="sse-card__body"
+              :class="{ 'sse-card__body--json': isPrettyRenderable(item) }"
+            >
               <JsonViewer
                 v-if="isPrettyRenderable(item)"
                 :value="item.parsed"
@@ -353,6 +356,11 @@ const isPrettyRenderable = (item: SseEvent) =>
   padding: 8px 10px;
 }
 
+/* JSON 两段式：头部之下直接是 JSON，交由 JsonViewer 自身内边距处理 */
+.sse-card__body--json {
+  padding: 0;
+}
+
 .sse-card__raw {
   margin: 0;
   overflow-x: auto;
@@ -363,8 +371,15 @@ const isPrettyRenderable = (item: SseEvent) =>
   white-space: pre-wrap;
 }
 
+/* 去掉 JsonViewer 自带的边框与圆角，避免与卡片外框形成「框套框」 */
+.sse-card__json.json-viewer-scroll-host,
+.sse-card__json :deep(.json-viewer-scroll-host) {
+  padding: 6px 10px;
+}
+
 .sse-card__json {
-  padding: 0 !important;
+  border: none !important;
+  border-radius: 0 !important;
 }
 
 .sse-stream__jump {
