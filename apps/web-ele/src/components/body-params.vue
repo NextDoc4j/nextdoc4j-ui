@@ -1,12 +1,22 @@
 <script lang="ts" setup>
 import type { UploadInstance, UploadProps, UploadRawFile } from 'element-plus';
 
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from 'vue';
+
+import { SvgDocumentOmittedIcon } from '@vben/icons';
 
 import {
   ElButton,
-  ElRadioButton,
-  ElRadioGroup,
+  ElDropdown,
+  ElDropdownItem,
+  ElDropdownMenu,
   ElTabPane,
   ElUpload,
   genFileId,
@@ -95,6 +105,173 @@ function inferContentType(type?: string, format?: string): string | undefined {
 }
 // 请求体类型
 const bodyType = ref<BodyType>();
+
+// Body 类型切换项：与请求/响应内联 Tab 一致，宽度不足时溢出收进「···」下拉
+const BODY_TYPE_OPTIONS: Array<{ label: string; value: BodyType }> = [
+  { label: 'none', value: 'none' },
+  { label: 'form-data', value: 'form-data' },
+  { label: 'x-www-form-urlencoded', value: 'x-www-form-urlencoded' },
+  { label: 'json', value: 'json' },
+  { label: 'raw', value: 'raw' },
+  { label: 'binary', value: 'binary' },
+  { label: 'xml', value: 'xml' },
+];
+const BODY_TYPE_OVERFLOW_GAP = 6;
+
+const bodyTypeHostRef = ref<HTMLElement>();
+const bodyTypeMoreMeasureRef = ref<HTMLElement>();
+// 隐藏测量层里各切换项的真实宽度节点，供溢出计算使用
+const bodyTypeMeasureRefs = new Map<string, HTMLElement>();
+// 当前宽度下可直接展示的切换项 key；null 表示尚未测量，先全部展示
+const bodyTypeVisibleKeys = ref<null | string[]>(null);
+// 从「···」折叠下拉里选出的项：钉在可见区最右侧；点击已可见项不会改变它
+const promotedBodyType = ref<BodyType | null>(null);
+let bodyTypeResizeObserver: null | ResizeObserver = null;
+let bodyTypeOverflowRaf: null | number = null;
+
+const setBodyTypeMeasureRef = (key: string, el: null | unknown) => {
+  if (el instanceof HTMLElement) {
+    bodyTypeMeasureRefs.set(key, el);
+  } else {
+    bodyTypeMeasureRefs.delete(key);
+  }
+};
+
+/**
+ * 计算当前容器宽度下按顺序展示的 Body 类型切换项。
+ * 基础布局：从左往右按原始顺序尽量塞入，放不下的收进「···」下拉。
+ * 被提升项（promotedKey，来自下拉选择）先在最右侧占位，其余项再从左依次填充剩余空间。
+ * 返回的 key 列表已是最终展示顺序（被提升项排在末尾）。
+ */
+const resolveBodyTypeVisibleKeys = () => {
+  const keys = BODY_TYPE_OPTIONS.map((option) => option.value);
+  const host = bodyTypeHostRef.value;
+  const promotedKey = promotedBodyType.value;
+  if (!host) {
+    return keys;
+  }
+
+  const containerWidth = host.clientWidth;
+  if (!containerWidth) {
+    return keys;
+  }
+
+  const getTabWidth = (key: string) => {
+    const width =
+      bodyTypeMeasureRefs.get(key)?.getBoundingClientRect().width ?? 0;
+    return Math.max(40, Math.ceil(width) || 60);
+  };
+
+  const totalWidth =
+    keys.reduce((sum, key) => sum + getTabWidth(key), 0) +
+    BODY_TYPE_OVERFLOW_GAP * Math.max(0, keys.length - 1);
+  if (totalWidth <= containerWidth) {
+    return keys;
+  }
+
+  const moreWidth = Math.max(
+    24,
+    Math.ceil(
+      bodyTypeMoreMeasureRef.value?.getBoundingClientRect().width ?? 0,
+    ) || 28,
+  );
+
+  // 判断一组 key（含末尾被提升项，需为「···」预留宽度）能否放入容器
+  const canFit = (candidateKeys: string[]) => {
+    if (candidateKeys.length === 0) {
+      return true;
+    }
+    const tabsWidth = candidateKeys.reduce(
+      (sum, key) => sum + getTabWidth(key),
+      0,
+    );
+    const tabsGap =
+      BODY_TYPE_OVERFLOW_GAP * Math.max(0, candidateKeys.length - 1);
+    // 溢出态必然存在「···」按钮，始终为其预留宽度与间距
+    return (
+      tabsWidth + tabsGap + BODY_TYPE_OVERFLOW_GAP + moreWidth <= containerWidth
+    );
+  };
+
+  const hasPromoted = Boolean(promotedKey && keys.includes(promotedKey));
+  // 顺序填充候选项（排除被提升项，它固定在最右）
+  const fillKeys = hasPromoted
+    ? keys.filter((key) => key !== promotedKey)
+    : keys;
+
+  const visibleKeys: string[] = [];
+  fillKeys.forEach((key) => {
+    // 被提升项占用最右一格，候选组合需带上它一起校验宽度
+    const candidate = hasPromoted
+      ? [...visibleKeys, key, promotedKey as string]
+      : [...visibleKeys, key];
+    if (canFit(candidate)) {
+      visibleKeys.push(key);
+    }
+  });
+
+  if (hasPromoted) {
+    // 极窄场景下连一个填充项都放不下时，至少保留被提升项
+    return [...visibleKeys, promotedKey as string];
+  }
+  return visibleKeys;
+};
+
+// 直接展示的切换项，顺序与 resolveBodyTypeVisibleKeys 返回一致（被提升项在最右）
+const visibleBodyTypeOptions = computed(() => {
+  if (!bodyTypeVisibleKeys.value) {
+    return BODY_TYPE_OPTIONS;
+  }
+  const optionMap = new Map(
+    BODY_TYPE_OPTIONS.map((option) => [option.value, option]),
+  );
+  return bodyTypeVisibleKeys.value
+    .map((key) => optionMap.get(key as BodyType))
+    .filter((option) => option !== undefined);
+});
+
+// 溢出收纳进「···」下拉的切换项（保持原始顺序）
+const hiddenBodyTypeOptions = computed(() => {
+  const visibleKeySet = new Set(
+    visibleBodyTypeOptions.value.map((option) => option.value),
+  );
+  return BODY_TYPE_OPTIONS.filter((option) => !visibleKeySet.has(option.value));
+});
+
+const updateBodyTypeOverflow = () => {
+  bodyTypeVisibleKeys.value = resolveBodyTypeVisibleKeys();
+};
+
+const scheduleBodyTypeOverflow = () => {
+  if (typeof window === 'undefined') {
+    updateBodyTypeOverflow();
+    return;
+  }
+  if (bodyTypeOverflowRaf) {
+    window.cancelAnimationFrame(bodyTypeOverflowRaf);
+  }
+  bodyTypeOverflowRaf = window.requestAnimationFrame(() => {
+    bodyTypeOverflowRaf = null;
+    updateBodyTypeOverflow();
+  });
+};
+
+/**
+ * 点击已可见的切换项：仅改变选中态，不触发提升，基础布局保持不变。
+ */
+const handleBodyTypeSelect = (value: BodyType) => {
+  bodyType.value = value;
+};
+
+/**
+ * 从「···」折叠下拉里选择：将该项提升到可见区最右侧，右侧原可见项按需挤入折叠。
+ */
+const handleBodyTypeDropdownSelect = (value: BodyType) => {
+  promotedBodyType.value = value;
+  bodyType.value = value;
+  scheduleBodyTypeOverflow();
+};
+
 // Raw 请求体
 const editorRef = ref();
 const uploadRef = ref<UploadInstance>();
@@ -720,6 +897,8 @@ const resolveNextTextValue = (
 const syncByRequestBodyType = async (
   options: { forceBodyType?: boolean; preserveValue?: boolean } = {},
 ) => {
+  // 程序性同步（切换接口等）恢复默认布局，清除下拉提升态
+  promotedBodyType.value = null;
   const picked = pickRequestBodySchema();
   if (!picked?.schema) {
     bodyType.value = 'none';
@@ -835,6 +1014,27 @@ onMounted(async () => {
     forceBodyType: true,
     preserveValue: false,
   });
+
+  // 容器宽度变化时（如拖动分栏）重算 Body 类型切换项的溢出折叠
+  if (typeof ResizeObserver !== 'undefined' && bodyTypeHostRef.value) {
+    bodyTypeResizeObserver = new ResizeObserver(scheduleBodyTypeOverflow);
+    bodyTypeResizeObserver.observe(bodyTypeHostRef.value);
+  }
+  scheduleBodyTypeOverflow();
+});
+
+onBeforeUnmount(() => {
+  bodyTypeResizeObserver?.disconnect();
+  bodyTypeResizeObserver = null;
+  if (bodyTypeOverflowRaf) {
+    window.cancelAnimationFrame(bodyTypeOverflowRaf);
+    bodyTypeOverflowRaf = null;
+  }
+});
+
+// 选中项变化后重算布局（提升逻辑由下拉选择单独维护，此处仅同步溢出计算）
+watch(bodyType, () => {
+  scheduleBodyTypeOverflow();
 });
 
 watch(
@@ -902,18 +1102,72 @@ defineExpose({
       </span>
     </template>
     <div class="body-tab-content">
-      <div class="body-params flex flex-wrap">
-        <ElRadioGroup v-model="bodyType" size="small">
-          <ElRadioButton value="none">none</ElRadioButton>
-          <ElRadioButton value="form-data">form-data</ElRadioButton>
-          <ElRadioButton value="x-www-form-urlencoded">
-            x-www-form-urlencoded
-          </ElRadioButton>
-          <ElRadioButton value="json">json</ElRadioButton>
-          <ElRadioButton value="raw">raw</ElRadioButton>
-          <ElRadioButton value="binary">binary</ElRadioButton>
-          <ElRadioButton value="xml">xml</ElRadioButton>
-        </ElRadioGroup>
+      <div class="body-params">
+        <!-- Body 类型切换：宽度不足时溢出项收进「···」下拉，从下拉选出的项固定在最右侧 -->
+        <div ref="bodyTypeHostRef" class="body-type-switch">
+          <button
+            v-for="option in visibleBodyTypeOptions"
+            :key="option.value"
+            type="button"
+            class="body-type-tab"
+            :class="{ 'body-type-tab--active': bodyType === option.value }"
+            @click="handleBodyTypeSelect(option.value)"
+          >
+            {{ option.label }}
+          </button>
+
+          <ElDropdown
+            v-if="hiddenBodyTypeOptions.length > 0"
+            trigger="click"
+            placement="bottom-end"
+            @command="handleBodyTypeDropdownSelect($event)"
+          >
+            <button
+              type="button"
+              class="body-type-tab body-type-tab--more"
+              :class="{
+                'body-type-tab--active': hiddenBodyTypeOptions.some(
+                  (option) => option.value === bodyType,
+                ),
+              }"
+            >
+              <SvgDocumentOmittedIcon class="body-type-tab__more-icon" />
+            </button>
+
+            <template #dropdown>
+              <ElDropdownMenu>
+                <ElDropdownItem
+                  v-for="option in hiddenBodyTypeOptions"
+                  :key="option.value"
+                  :command="option.value"
+                  :class="{ 'is-active': bodyType === option.value }"
+                >
+                  {{ option.label }}
+                </ElDropdownItem>
+              </ElDropdownMenu>
+            </template>
+          </ElDropdown>
+        </div>
+
+        <!-- 隐藏测量层：常驻渲染全部切换项供溢出计算真实宽度 -->
+        <div class="body-type-measure" aria-hidden="true">
+          <button
+            v-for="option in BODY_TYPE_OPTIONS"
+            :key="`measure-${option.value}`"
+            type="button"
+            class="body-type-tab"
+            :ref="(el) => setBodyTypeMeasureRef(option.value, el)"
+          >
+            {{ option.label }}
+          </button>
+          <button
+            ref="bodyTypeMoreMeasureRef"
+            type="button"
+            class="body-type-tab body-type-tab--more"
+          >
+            <SvgDocumentOmittedIcon class="body-type-tab__more-icon" />
+          </button>
+        </div>
       </div>
 
       <div
@@ -1005,15 +1259,73 @@ defineExpose({
 
 .body-params {
   margin-bottom: 12px;
+}
 
-  :deep(.el-radio-button) {
-    padding: 0 6px 6px;
+/* Body 类型切换：单行不换行，宽度不足时溢出项收进「···」下拉 */
+.body-type-switch {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+}
 
-    .el-radio-button__inner {
-      border: 1px solid var(--el-border-color);
-      border-radius: var(--el-border-radius-base);
-    }
-  }
+.body-type-tab {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  color: var(--el-text-color-regular);
+  white-space: nowrap;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--el-border-color);
+  border-radius: var(--el-border-radius-base);
+  transition:
+    color 0.14s ease,
+    background-color 0.14s ease,
+    border-color 0.14s ease;
+}
+
+.body-type-tab:hover {
+  color: var(--el-color-primary);
+  border-color: var(--el-color-primary-light-5);
+}
+
+.body-type-tab--active {
+  color: var(--el-color-white);
+  background: var(--el-color-primary);
+  border-color: var(--el-color-primary);
+}
+
+.body-type-tab--active:hover {
+  color: var(--el-color-white);
+  border-color: var(--el-color-primary);
+}
+
+.body-type-tab--more {
+  width: 28px;
+  padding: 0;
+}
+
+.body-type-tab__more-icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* 隐藏测量层：不参与布局，仅供溢出计算真实宽度 */
+.body-type-measure {
+  position: fixed;
+  top: -9999px;
+  left: -9999px;
+  display: flex;
+  gap: 6px;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .body-editor {
