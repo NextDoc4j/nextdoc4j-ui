@@ -1323,8 +1323,8 @@ defineExpose({
   top: -9999px;
   left: -9999px;
   display: flex;
-  gap: 6px;
   visibility: hidden;
+  gap: 6px;
   pointer-events: none;
 }
 

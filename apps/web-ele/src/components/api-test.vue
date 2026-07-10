@@ -49,6 +49,8 @@ import {
 } from 'element-plus';
 
 import JsonViewer from '#/components/json-viewer/index.vue';
+import MarkdownCodeBlock from '#/components/markdown-code-block.vue';
+import XmlView from '#/components/xml-view.vue';
 import { getMethodStyle } from '#/constants/methods';
 import {
   ONLINE_DEBUG_TIMEOUT_MESSAGE,
@@ -418,6 +420,7 @@ const resetResponseState = () => {
   responseTime.value = 0;
   responseSize.value = '0 B';
   responseData.value = null;
+  responseLanguage.value = 'json';
   base64ImageDrawerVisible.value = false;
   responseMimeType.value = '';
   responseHeaders.value = [];
@@ -652,6 +655,8 @@ const responseStatus = ref({ code: 0, text: '-', type: 'default' });
 const responseTime = ref(0);
 const responseSize = ref('0 B');
 const responseData = shallowRef<any>(null);
+// 响应体高亮语言（json/xml/html/yaml/plaintext…），驱动实时响应的展示方式
+const responseLanguage = ref('json');
 const responseMimeType = ref('');
 const responseHeaders = ref<
   Array<{ enabled: boolean; name: string; value: string }>
@@ -739,6 +744,26 @@ const responseSchemaForViewer = computed(() => {
   }
   const resolved = adaptSchemaForView(schema, { mode: 'response' });
   return resolved && hasRenderableSchema(resolved) ? resolved : null;
+});
+
+// XML 响应用原样 XML 树视图展示（保留标签/缩进，支持节点折叠与复制、背景透明）
+const showResponseAsXml = computed(() => {
+  return (
+    responseLanguage.value === 'xml' &&
+    typeof responseData.value === 'string' &&
+    responseData.value !== ''
+  );
+});
+
+// 其余字符串类响应（HTML/YAML/纯文本等）用代码块高亮展示；
+// 对象类响应（JSON、form-urlencoded、二进制提示）走 JsonViewer 树形展示
+const showResponseAsCode = computed(() => {
+  return (
+    !showResponseAsXml.value &&
+    typeof responseData.value === 'string' &&
+    responseData.value !== '' &&
+    responseLanguage.value !== 'json'
+  );
 });
 
 const activeGlobalQueryCount = computed(() => {
@@ -1638,55 +1663,6 @@ const looksLikeJson = (text: string) => {
   );
 };
 
-const prettyFormatXml = (xmlString: string) => {
-  const xml = xmlString.replaceAll(/>\s*</g, '><').trim();
-  if (!xml) return xmlString;
-
-  const parts = xml.replaceAll(/(>)(<)(\/*)/g, '$1\n$2$3').split('\n');
-  let indent = 0;
-
-  return parts
-    .map((part) => {
-      const line = part.trim();
-      if (!line) return '';
-
-      if (line.startsWith('</')) {
-        indent = Math.max(indent - 1, 0);
-      }
-
-      const padding = '  '.repeat(indent);
-      const result = `${padding}${line}`;
-
-      if (
-        line.startsWith('<') &&
-        !line.startsWith('</') &&
-        !line.endsWith('/>') &&
-        !line.includes('</')
-      ) {
-        indent += 1;
-      }
-      return result;
-    })
-    .filter(Boolean)
-    .join('\n');
-};
-
-const formatXml = (text: string) => {
-  if (!text) return '';
-  try {
-    const parser = new DOMParser();
-    const xmlDoc = parser.parseFromString(text, 'application/xml');
-    const parseError = xmlDoc.querySelector('parsererror');
-    if (parseError) {
-      return text;
-    }
-    const serialized = new XMLSerializer().serializeToString(xmlDoc);
-    return prettyFormatXml(serialized);
-  } catch {
-    return text;
-  }
-};
-
 const parseUrlEncodedBody = (text: string) => {
   const params = new URLSearchParams(text);
   const result: Record<string, string | string[]> = {};
@@ -1866,9 +1842,10 @@ async function parseResponseBody(response: Response, requestUrl: string) {
   }
 
   if (isXmlContentType(contentType) || looksLikeXml(rawText)) {
+    // 保留原始文本（含 <?xml?> 声明），由 XmlView 自行解析并排版，保真展示
     return {
       contentType,
-      data: formatXml(rawText),
+      data: rawText,
       language: 'xml',
     };
   }
@@ -2298,6 +2275,7 @@ async function sendRequest() {
 
     responseTime.value = Number((performance.now() - startTime).toFixed(2));
     responseData.value = parsedResponse.data;
+    responseLanguage.value = parsedResponse.language || 'plaintext';
     responseMimeType.value = parsedResponse.contentType || '-';
 
     // 计算响应大小
@@ -2959,7 +2937,21 @@ onBeforeUnmount(() => {
                     lazy
                   >
                     <template v-if="responseStatus.type !== 'default'">
+                      <XmlView
+                        v-if="showResponseAsXml"
+                        :xml="responseData"
+                        :dark="isDark"
+                        class="response-body"
+                      />
+                      <MarkdownCodeBlock
+                        v-else-if="showResponseAsCode"
+                        :code="responseData"
+                        :language="responseLanguage"
+                        :dark="isDark"
+                        class="response-body response-body--code"
+                      />
                       <JsonViewer
+                        v-else
                         ref="realtimeResponseJsonRef"
                         :value="responseData"
                         :schema="responseSchemaForViewer"
@@ -4207,10 +4199,15 @@ onBeforeUnmount(() => {
   min-height: 0;
 }
 
+.response-body--code {
+  overflow: auto;
+}
+
 :deep(.response-body.theme-light),
 :deep(.response-body.theme-dark) {
   height: 100%;
   min-height: 0;
+  background: transparent;
   border: none;
   border-radius: 0;
 }

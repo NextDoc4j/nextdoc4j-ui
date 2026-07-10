@@ -871,7 +871,12 @@ onBeforeUnmount(() => {
           <span>{{ keyName }}</span>
           <span>:&nbsp;</span>
         </span>
-        <span :class="valueClass" v-html="formattedValue"></span>
+        <span
+          v-if="valueType === 'number'"
+          :class="valueClass"
+          v-html="formattedValue"
+        ></span>
+        <span v-else :class="valueClass">{{ formattedValue }}</span>
         <span v-if="!isLastItem" class="comma">,</span>
         <span v-if="fieldDescription" class="field-description">
           <span class="comment-prefix">//</span>
