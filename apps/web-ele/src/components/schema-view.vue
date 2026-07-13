@@ -36,6 +36,10 @@ const variantState = ref<Record<string, number>>({});
 const mode = computed(() => props.mode);
 const rootPath = computed(() => props.pathPrefix || '$');
 
+const requiredLabel = computed(() => {
+  return mode.value === 'response' ? '必含' : '必填';
+});
+
 const hasHtmlDescription = (desc?: string) => Boolean(desc?.includes('<'));
 
 const formatValue = (value: unknown) => {
@@ -556,8 +560,11 @@ const showSchemaStack = computed(() => {
               <span
                 v-if="isRequired(resolvedRootObjectSchema, String(key), value)"
                 class="schema-item__required-tag"
+                :class="{
+                  'schema-item__required-tag--response': mode === 'response',
+                }"
               >
-                必填
+                {{ requiredLabel }}
               </span>
               <div
                 v-if="getPlainDescription(value, getNodePath(String(key)))"
@@ -1163,6 +1170,20 @@ const showSchemaStack = computed(() => {
   border: 1px solid
     color-mix(in srgb, var(--el-color-danger-light-7) 86%, transparent);
   border-radius: 6px;
+}
+
+.schema-item__required-tag--response {
+  color: var(--el-color-info);
+  background: color-mix(
+    in srgb,
+    var(--el-color-info-light-9) 88%,
+    transparent
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--el-color-info-light-7) 86%,
+    transparent
+  );
 }
 
 .schema-item__type {
