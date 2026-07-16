@@ -827,7 +827,7 @@ const resolveEditorValueByBodyType = (type: BodyType) => {
     return '';
   }
   if (typeof example === 'string') {
-    return example;
+    return type === 'json' ? JSON.stringify(example) : example;
   }
   try {
     return JSON.stringify(example, null, 2);
@@ -876,6 +876,13 @@ const resolveNextTextValue = (
   }
 
   if (mergedStructuredData !== null && mergedStructuredData !== undefined) {
+    if (type === 'json') {
+      try {
+        return JSON.stringify(mergedStructuredData, null, 2) ?? '';
+      } catch {
+        return resolveEditorValueByBodyType(type);
+      }
+    }
     return normalizeStructuredValue(mergedStructuredData);
   }
 

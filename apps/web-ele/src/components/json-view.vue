@@ -269,6 +269,7 @@ onMounted(() => {
     hideCursorInOverviewRuler: true,
     contextmenu: false,
     matchBrackets: 'never',
+    occurrencesHighlight: 'off',
   });
 
   updateEditorHeight = () => {

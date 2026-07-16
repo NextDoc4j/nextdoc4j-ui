@@ -19,6 +19,7 @@ export interface ApiTestRequestCache {
   bodyContent?: string;
   bodyDrafts?: Partial<Record<'json' | 'raw' | 'xml', string>>;
   bodyType?: string;
+  cacheVersion?: number;
   cookies: ApiTestParamCacheItem[];
   formDataParams: ApiTestParamCacheItem[];
   headers: ApiTestParamCacheItem[];

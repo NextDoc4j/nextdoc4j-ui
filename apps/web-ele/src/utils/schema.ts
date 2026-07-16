@@ -623,7 +623,8 @@ const generateExampleInternal = (
 
   if (
     normalized.default !== undefined &&
-    normalized.default !== DEFAULT_SENTINEL
+    normalized.default !== DEFAULT_SENTINEL &&
+    (normalized.default !== null || normalized.nullable === true)
   ) {
     return parseExampleValue(normalized.default);
   }

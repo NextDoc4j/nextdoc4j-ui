@@ -119,6 +119,7 @@ interface DebugRequestStateSnapshot {
   bodyContent?: string;
   bodyDrafts?: Partial<Record<'json' | 'raw' | 'xml', string>>;
   bodyType?: string;
+  cacheVersion?: number;
   cookies: TableParamsObject[];
   formDataParams: TableParamsObject[];
   headers: TableParamsObject[];
@@ -222,6 +223,7 @@ const normalizeParamName = (name: string) => name.trim();
 const normalizeHeaderName = (name: string) => name.trim().toLowerCase();
 const PATH_PLACEHOLDER_SEGMENT_RE = /^\{[^/{}]+\}$/;
 const DEBUG_STACKED_BREAKPOINT = 720;
+const DEBUG_REQUEST_CACHE_VERSION = 1;
 let tableRowKeySeed = 0;
 
 const createTableRowKey = () => `api-test-row-${tableRowKeySeed++}`;
@@ -382,9 +384,25 @@ const mergeCachedRequestState = (cachedState: DebugRequestStateSnapshot) => {
   const cachedLocalQueryParams = cachedState.queryParams.filter(
     (item) => !item.fromGlobal && !item.fromSecurity,
   );
+  const shouldRestoreGeneratedJson =
+    cachedState.cacheVersion !== DEBUG_REQUEST_CACHE_VERSION &&
+    cachedState.bodyType === 'json' &&
+    !cachedState.bodyContent?.trim() &&
+    !cachedState.bodyDrafts?.json?.trim() &&
+    Boolean(latestState.bodyContent?.trim());
 
   return {
     ...cachedState,
+    bodyContent: shouldRestoreGeneratedJson
+      ? latestState.bodyContent
+      : cachedState.bodyContent,
+    bodyDrafts: shouldRestoreGeneratedJson
+      ? {
+          ...cachedState.bodyDrafts,
+          json: latestState.bodyDrafts?.json ?? latestState.bodyContent,
+        }
+      : cachedState.bodyDrafts,
+    cacheVersion: DEBUG_REQUEST_CACHE_VERSION,
     formDataParams: mergeCachedTableParamsWithLatest(
       latestState.formDataParams,
       cachedState.formDataParams,
@@ -444,6 +462,7 @@ const buildCurrentSnapshot = (): DebugRequestStateSnapshot => {
     bodyContent: resolveBodyContent(),
     bodyDrafts: bodyTabRef.value?.getTextBodyDrafts?.() ?? {},
     bodyType: bodyTabRef.value?.bodyType,
+    cacheVersion: DEBUG_REQUEST_CACHE_VERSION,
     cookies: cloneTableParams(cookies.value),
     formDataParams: cloneTableParams(formDataParams.value),
     headers: cloneTableParams(headers.value),
