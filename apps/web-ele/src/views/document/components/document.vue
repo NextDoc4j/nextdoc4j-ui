@@ -117,6 +117,7 @@ const responseCardHeight = ref<null | number>(null);
 // 窄屏时右侧示例面板降级为普通文档流，不再固定高度与智能分配
 const asideFlowMode = ref(false);
 let asideResizeObserver: null | ResizeObserver = null;
+let asideMutationObserver: MutationObserver | null = null;
 let asideMediaQuery: MediaQueryList | null = null;
 
 /**
@@ -1253,6 +1254,13 @@ const observeAsideContent = () => {
 
 const scheduleAsideRefresh = () => {
   void nextTick(() => {
+    asideMutationObserver?.disconnect();
+    if (asideStackRef.value) {
+      asideMutationObserver?.observe(asideStackRef.value, {
+        childList: true,
+        subtree: true,
+      });
+    }
     observeAsideContent();
     scheduleAsideLayoutUpdate();
   });
@@ -1417,6 +1425,10 @@ onMounted(() => {
     passive: true,
   });
   asideResizeObserver = new ResizeObserver(scheduleAsideLayoutUpdate);
+  asideMutationObserver = new MutationObserver(() => {
+    observeAsideContent();
+    scheduleAsideLayoutUpdate();
+  });
   asideMediaQuery = window.matchMedia(
     `(max-width: ${ASIDE_FLOW_BREAKPOINT}px)`,
   );
@@ -1432,6 +1444,8 @@ onBeforeUnmount(() => {
   scrollContainerRef.value?.removeEventListener('scroll', handleDetailScroll);
   asideResizeObserver?.disconnect();
   asideResizeObserver = null;
+  asideMutationObserver?.disconnect();
+  asideMutationObserver = null;
   asideMediaQuery?.removeEventListener('change', handleAsideMediaChange);
   asideMediaQuery = null;
   window.removeEventListener('resize', scheduleAsideLayoutUpdate);
