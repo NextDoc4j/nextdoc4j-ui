@@ -226,40 +226,11 @@ const serviceNavList = computed(() => {
   return isAggregation.value ? services.value : [];
 });
 
-/**
- * 在接口文档菜单树中深度优先查找第一个真正的接口叶子节点路径。
- * 跳过概览页（路径含 __overview__），用于首页「接口文档」入口直达首个接口。
- */
-const findFirstApiLeaf = (menus: MenuRecordRaw[]): null | string => {
-  for (const menu of menus) {
-    if (menu.path?.includes('__overview__')) {
-      continue;
-    }
-    if (menu.children?.length) {
-      const childPath = findFirstApiLeaf(menu.children);
-      if (childPath) {
-        return childPath;
-      }
-    } else if (menu.path?.startsWith('/document/')) {
-      return menu.path;
-    }
-  }
-  return null;
-};
-
 const handleModuleClick = (entry: ModuleEntry) => {
-  // 接口文档入口：直达第一个接口详情，而非分组概览页
+  // 接口文档入口：进入所有接口概览页
   if (entry.path === '/document') {
-    const documentMenu = (accessStore.accessMenus as MenuRecordRaw[]).find(
-      (menu) => menu.path === '/document',
-    );
-    const firstApiPath = documentMenu?.children?.length
-      ? findFirstApiLeaf(documentMenu.children)
-      : null;
-    if (firstApiPath) {
-      router.push(firstApiPath);
-      return;
-    }
+    router.push('/document/all');
+    return;
   }
   router.push(entry.path);
 };

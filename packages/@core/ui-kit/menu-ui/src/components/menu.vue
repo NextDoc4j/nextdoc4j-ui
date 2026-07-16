@@ -99,6 +99,15 @@ watch(
   },
 );
 
+watch(
+  () => props.defaultOpeneds,
+  (value) => {
+    if (!props.collapse) {
+      openedMenus.value = value ? [...value] : [];
+    }
+  },
+);
+
 // 上一次注册项变化时，激活项是否已在菜单中注册
 let activeItemRegistered = false;
 watch(
