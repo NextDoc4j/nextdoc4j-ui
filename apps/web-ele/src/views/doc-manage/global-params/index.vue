@@ -1,8 +1,6 @@
 <script setup lang="ts">
-import { onBeforeUnmount, watch } from 'vue';
+import { watch } from 'vue';
 import { useRouter } from 'vue-router';
-
-import { useAccessStore } from '@vben/stores';
 
 import {
   ElButton,
@@ -17,14 +15,11 @@ import {
 import { storeToRefs } from 'pinia';
 
 import GlobalParamsConfig from '#/components/global-params-config.vue';
-import { generateAccess } from '#/router/access';
-import { accessRoutes } from '#/router/routes';
 import { useApiTestCacheStore } from '#/store';
 
 defineOptions({ name: 'DocManageGlobalParams' });
 
 const apiTestCacheStore = useApiTestCacheStore();
-const accessStore = useAccessStore();
 const router = useRouter();
 
 const { debugCacheEnabled, groupOverviewEnabled } =
@@ -40,61 +35,20 @@ const clearAllDebugRequestCache = () => {
   ElMessage.success('已清理全部调试缓存');
 };
 
-/**
- * 用途：刷新接口文档菜单和动态路由，使分组概览开关切换后立即生效。
- * 参数说明：targetPath 为刷新完成后需要跳转的目标路径，未传入时保持当前路由。
- * 返回值说明：无返回值，刷新失败时仅提示错误并保留当前页面状态。
- */
-const refreshDocumentRoutes = async (targetPath?: string) => {
-  try {
-    const { accessibleMenus, accessibleRoutes } = await generateAccess({
-      roles: [],
-      router,
-      routes: accessRoutes,
-    });
-
-    accessStore.setAccessMenus(accessibleMenus);
-    accessStore.setAccessRoutes(accessibleRoutes);
-    accessStore.setIsAccessChecked(true);
-
-    if (targetPath) {
-      await router.replace(targetPath);
-    }
-  } catch (error) {
-    console.error('Failed to refresh document routes:', error);
-    ElMessage.error('刷新文档菜单失败');
-  }
-};
-
-// 开关切换到路由重建之间的延迟：路由重建会同步遍历全部接口生成菜单与搜索索引，
-// 与开关切换同帧执行会阻塞主线程导致开关动画卡顿，故延迟到过渡动画(~300ms)结束后再执行。
-const ROUTE_REFRESH_DELAY = 320;
-let refreshRoutesTimer: null | ReturnType<typeof setTimeout> = null;
-
 watch(groupOverviewEnabled, (enabled) => {
+  if (enabled) {
+    return;
+  }
   const routeName = router.currentRoute.value.name;
   const activePath = router.currentRoute.value.meta.activePath as
     | string
     | undefined;
-  const targetPath =
-    !enabled &&
+  if (
     typeof routeName === 'string' &&
-    routeName.endsWith('__overview__')
-      ? activePath
-      : undefined;
-  if (refreshRoutesTimer) {
-    clearTimeout(refreshRoutesTimer);
-  }
-  refreshRoutesTimer = setTimeout(() => {
-    refreshRoutesTimer = null;
-    void refreshDocumentRoutes(targetPath);
-  }, ROUTE_REFRESH_DELAY);
-});
-
-onBeforeUnmount(() => {
-  if (refreshRoutesTimer) {
-    clearTimeout(refreshRoutesTimer);
-    refreshRoutesTimer = null;
+    routeName.endsWith('__overview__') &&
+    activePath
+  ) {
+    void router.replace(activePath);
   }
 });
 </script>

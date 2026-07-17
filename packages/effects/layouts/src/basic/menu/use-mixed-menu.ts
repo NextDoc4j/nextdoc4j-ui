@@ -111,9 +111,8 @@ function useMixedMenu() {
 
   /**
    * 点击接口分组菜单时跳转到该分组的概览页。
-   * 仅在「分组概览」开启时生效：此时路由生成会为分组挂载 `${key}/__overview__` 概览子路由，
-   * 据此判断而无需让框架层反向依赖业务层的开关 store。关闭概览开关、或实体模型/其它文档分组
-   * （均无概览子路由）点击时只展开/收起、不跳转，符合「只有点击具体项才进入详情」的预期。
+   * 分组路由通过 meta 提供跳转目标和运行时开关，因此配置变更时无需重建菜单。
+   * 未配置目标或开关关闭时，点击只展开/收起分组。
    *
    * 仅当 fromClick=true（用户亲手点击分组标题）时才跳转：点击接口详情或刷新页面会触发菜单
    * 自动展开祖先分组（fromClick=false），此时不应把用户从正在浏览的接口强制拉回概览页。
@@ -131,11 +130,16 @@ function useMixedMenu() {
     if (preferences.sidebar.collapsed) {
       return false;
     }
-    const overviewPath = `${key}/__overview__`;
-    const hasOverviewRoute = router
-      .getRoutes()
-      .some((item) => item.path === overviewPath);
-    if (!hasOverviewRoute) {
+    const groupRoute = router.getRoutes().find((item) => item.path === key);
+    const overviewPath = groupRoute?.meta.menuGroupTarget;
+    const enabledOption = groupRoute?.meta.menuGroupTargetEnabled;
+    const enabled =
+      typeof enabledOption === 'function' ? enabledOption() : enabledOption;
+    if (
+      !enabled ||
+      typeof overviewPath !== 'string' ||
+      !router.getRoutes().some((item) => item.path === overviewPath)
+    ) {
       return false;
     }
     // 直接进入隐藏概览路由，避免依赖父分组 redirect 在重复切换时再次解析。
