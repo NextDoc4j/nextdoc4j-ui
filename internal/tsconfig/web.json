@@ -1,5 +1,4 @@
 {
-  "$schema": "https://json.schemastore.org/tsconfig",
   "display": "Web Package",
   "extends": "./base.json",
   "compilerOptions": {

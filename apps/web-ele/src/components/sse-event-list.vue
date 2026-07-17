@@ -1,4 +1,6 @@
 <script lang="ts" setup>
+import type { ComponentPublicInstance } from 'vue';
+
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 
 import { ElEmpty } from 'element-plus';
@@ -65,27 +67,30 @@ const recordItemHeight = (seq: number, height: number) => {
  * 挂载可视卡片时观察其尺寸，卸载时解除观察。
  * 通过双向映射在 ResizeObserver 回调中反查对应事件 seq。
  */
-const setItemRef = (seq: number, el: Element | null) => {
+type ItemRefValue = ComponentPublicInstance | Element | null;
+
+const setItemRef = (seq: number, el: ItemRefValue) => {
+  const element = el instanceof HTMLElement ? el : null;
   const previous = seqElementMap.get(seq);
-  if (previous && previous !== el) {
+  if (previous && previous !== element) {
     itemResizeObserver?.unobserve(previous);
     seqElementMap.delete(seq);
   }
 
-  if (el instanceof HTMLElement) {
-    seqElementMap.set(seq, el);
-    elementSeqMap.set(el, seq);
-    recordItemHeight(seq, Math.round(el.getBoundingClientRect().height));
-    itemResizeObserver?.observe(el);
+  if (element) {
+    seqElementMap.set(seq, element);
+    elementSeqMap.set(element, seq);
+    recordItemHeight(seq, Math.round(element.getBoundingClientRect().height));
+    itemResizeObserver?.observe(element);
   }
 };
 
 // 按 seq 缓存稳定的 ref 回调，避免内联箭头函数每次渲染都触发解绑/绑定抖动
-const itemRefCallbacks = new Map<number, (el: Element | null) => void>();
+const itemRefCallbacks = new Map<number, (el: ItemRefValue) => void>();
 const getItemRef = (seq: number) => {
   let callback = itemRefCallbacks.get(seq);
   if (!callback) {
-    callback = (el: Element | null) => setItemRef(seq, el);
+    callback = (el: ItemRefValue) => setItemRef(seq, el);
     itemRefCallbacks.set(seq, callback);
   }
   return callback;

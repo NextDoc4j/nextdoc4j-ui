@@ -1,5 +1,4 @@
 {
-  "$schema": "https://json.schemastore.org/tsconfig",
   "display": "Base",
   "compilerOptions": {
     "composite": false,
@@ -8,10 +7,9 @@
     "moduleDetection": "force",
     "experimentalDecorators": true,
 
-    "baseUrl": ".",
     "module": "ESNext",
 
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "resolveJsonModule": true,
 
     "strict": true,

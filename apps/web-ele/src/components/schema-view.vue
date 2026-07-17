@@ -375,25 +375,25 @@ const getVariantButtonLabel = (option: any, index: number) => {
 /**
  * 获取组合关键字的显示标签（英文）
  */
-const getCompositionLabel = (keyword: CompositionKeyword) => {
+const getCompositionLabel = (keyword: '' | CompositionKeyword) => {
   const labels: Record<CompositionKeyword, string> = {
     oneOf: 'oneOf',
     anyOf: 'anyOf',
     allOf: 'allOf',
   };
-  return labels[keyword] || '';
+  return keyword ? labels[keyword] : '';
 };
 
 /**
  * 获取组合关键字的中文说明（用于 tooltip）
  */
-const getCompositionTooltip = (keyword: CompositionKeyword) => {
+const getCompositionTooltip = (keyword: '' | CompositionKeyword) => {
   const tooltips: Record<CompositionKeyword, string> = {
     oneOf: '选择其中之一',
     anyOf: '可能是以下之一',
     allOf: '合并所有',
   };
-  return tooltips[keyword] || '';
+  return keyword ? tooltips[keyword] : '';
 };
 
 const resolvedRootSchema = computed(() => {
