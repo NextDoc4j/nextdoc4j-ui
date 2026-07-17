@@ -161,11 +161,7 @@ function useMixedMenu() {
   };
 
   /**
-   * 侧边菜单收起事件：收起接口分组时同样跳转到概览页，
-   * 保证「无论展开还是收起，点击分组都进入概览」的一致交互。
-   * @param key 路由路径
-   * @param _parentsPath 父级路径
-   * @param fromClick 是否由用户点击触发
+   * 用户收起接口分组时进入该分组概览；菜单组件会保留用户的收起状态。
    */
   const handleMenuClose = (
     key: string,

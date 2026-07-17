@@ -64,6 +64,8 @@ const sliceIndex = ref(-1);
 const openedMenus = ref<MenuProvider['openedMenus']>(
   props.defaultOpeneds && !props.collapse ? [...props.defaultOpeneds] : [],
 );
+// 用户主动收起的分组在当前路由分支内保持收起，避免激活路由立即将其重新展开。
+const manuallyClosedMenus = new Set<string>();
 const activePath = ref<MenuProvider['activePath']>(props.defaultActive);
 const items = ref<MenuProvider['items']>({});
 const subMenus = ref<MenuProvider['subMenus']>({});
@@ -103,7 +105,9 @@ watch(
   () => props.defaultOpeneds,
   (value) => {
     if (!props.collapse) {
-      openedMenus.value = value ? [...value] : [];
+      openedMenus.value = value
+        ? value.filter((path) => !manuallyClosedMenus.has(path))
+        : [];
     }
   },
 );
@@ -130,6 +134,11 @@ watch(
 watch(
   () => props.defaultActive,
   (currentActive = '') => {
+    manuallyClosedMenus.forEach((path) => {
+      if (currentActive !== path && !currentActive.startsWith(`${path}/`)) {
+        manuallyClosedMenus.delete(path);
+      }
+    });
     if (!items.value[currentActive]) {
       activePath.value = '';
     }
@@ -321,6 +330,9 @@ function close(path: string) {
  * @param fromClick 是否由用户点击触发（区分程序自动收起）
  */
 function closeMenu(path: string, parentPaths: string[], fromClick = false) {
+  if (fromClick) {
+    manuallyClosedMenus.add(path);
+  }
   if (props.accordion) {
     openedMenus.value = subMenus.value[path]?.parentPaths ?? [];
   }
@@ -337,6 +349,11 @@ function closeMenu(path: string, parentPaths: string[], fromClick = false) {
  * @param fromClick 是否由用户点击触发（区分 initMenu/hover 等程序自动展开）
  */
 function openMenu(path: string, parentPaths: string[], fromClick = false) {
+  if (fromClick) {
+    manuallyClosedMenus.delete(path);
+  } else if (manuallyClosedMenus.has(path)) {
+    return;
+  }
   if (openedMenus.value.includes(path)) {
     return;
   }
