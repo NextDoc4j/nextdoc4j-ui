@@ -39,18 +39,21 @@ interface ParamItem {
   type?: string;
   format?: string;
   required?: boolean;
-  enum?: number[] | string[];
+  enum?: Array<number | string>;
   contentType?: string;
   schema?: {
-    enum?: number[] | string[];
+    enum?: Array<number | string>;
     format?: string;
     items?: {
-      enum?: number[] | string[];
+      enum?: Array<number | string>;
       format?: string;
+      'x-nextdoc4j-enum'?: {
+        items?: Array<{ description?: string; value: number | string }>;
+      };
     };
     type?: string;
     'x-nextdoc4j-enum'?: {
-      items?: Array<{ description?: string; value: string }>;
+      items?: Array<{ description?: string; value: number | string }>;
     };
   };
 }
@@ -167,22 +170,31 @@ function handleChange(value: CheckboxValueType) {
   allChecked.value = value as boolean;
 }
 
-function isEnumParam(row: ParamItem) {
-  return (
-    (row.enum && row.enum.length > 0) ||
-    (row.schema?.enum && row.schema.enum.length > 0) ||
-    (row.schema?.items?.enum && row.schema.items.enum.length > 0)
-  );
+function getEnumSchema(row: ParamItem) {
+  const itemSchema = row.schema?.items;
+  const hasItemEnum =
+    (itemSchema?.enum && itemSchema.enum.length > 0) ||
+    (itemSchema?.['x-nextdoc4j-enum']?.items?.length ?? 0) > 0;
+  return hasItemEnum ? itemSchema : row.schema;
 }
 
 function getEnumOptions(row: ParamItem) {
-  const enumValues: (number | string)[] =
-    row.enum || row.schema?.enum || row.schema?.items?.enum || [];
+  const enumSchema = getEnumSchema(row);
+  const extendedItems = enumSchema?.['x-nextdoc4j-enum']?.items || [];
+  const enumValues: Array<number | string> =
+    row.enum || enumSchema?.enum || extendedItems.map((item) => item.value);
+
   return enumValues.map((value) => ({
     label: String(value),
     value,
-    description: undefined,
+    description: extendedItems.find(
+      (item) => String(item.value) === String(value),
+    )?.description,
   }));
+}
+
+function isEnumParam(row: ParamItem) {
+  return getEnumOptions(row).length > 0;
 }
 
 function getPlaceholder(row: ParamItem) {
@@ -195,7 +207,7 @@ function getDescription(row: ParamItem) {
   // 拼接原始描述与扩展枚举（x-nextdoc4j-enum）说明，便于在调试表格中完整查看
   const enumDesc = getEnumDescription(
     row.description?.trim() || '',
-    row.schema,
+    getEnumSchema(row),
   ).trim();
   return enumDesc;
 }

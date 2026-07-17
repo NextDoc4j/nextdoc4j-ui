@@ -1,6 +1,8 @@
 <script lang="ts" setup>
 import type { UploadInstance, UploadProps, UploadRawFile } from 'element-plus';
 
+import type { BodySchemaValidationIssue } from '#/utils/body-schema-validation';
+
 import {
   computed,
   nextTick,
@@ -23,6 +25,11 @@ import {
 } from 'element-plus';
 import X2JS from 'x2js';
 
+import {
+  formatBodyEnumValidationMessage,
+  hasBodyEnumConstraints,
+  validateBodyEnumValues,
+} from '#/utils/body-schema-validation';
 import {
   adaptSchemaForView,
   generateExample,
@@ -64,17 +71,35 @@ type BodyType =
   | 'x-www-form-urlencoded'
   | 'xml';
 type TextBodyType = 'json' | 'raw' | 'xml';
+interface BodyValidationResult {
+  issues: BodySchemaValidationIssue[];
+  message: string;
+  valid: boolean;
+}
 export interface ParamsType {
   __rowKey?: string;
+  enum?: Array<number | string>;
   enabled: boolean;
   name: string;
-  value: string;
+  value: any;
   fileList?: any[];
   required?: boolean;
   format?: string;
   type?: string;
   description?: string;
   contentType?: string;
+  schema?: {
+    enum?: Array<number | string>;
+    format?: string;
+    items?: {
+      enum?: Array<number | string>;
+      format?: string;
+    };
+    type?: string;
+    'x-nextdoc4j-enum'?: {
+      items?: Array<{ description?: string; value: number | string }>;
+    };
+  };
 }
 
 // 根据参数类型推断默认的 Content-Type
@@ -277,6 +302,8 @@ const editorRef = ref();
 const uploadRef = ref<UploadInstance>();
 const fileList = ref([]);
 const textBodyDrafts = ref<Partial<Record<TextBodyType, string>>>({});
+const textBodyValidationMessage = ref('');
+let textBodyValidationTimer: null | number = null;
 let bodyParamRowKeySeed = 0;
 
 const createBodyParamRowKey = () => `body-param-row-${bodyParamRowKeySeed++}`;
@@ -620,6 +647,107 @@ const parseStructuredText = (type: TextBodyType, value: string) => {
   }
 };
 
+const createBodyValidationResult = (
+  issues: BodySchemaValidationIssue[] = [],
+  message = formatBodyEnumValidationMessage(issues),
+): BodyValidationResult => ({
+  issues,
+  message,
+  valid: issues.length === 0 && !message,
+});
+
+const validateTextBodyValue = (
+  type: TextBodyType,
+  source: string,
+): BodyValidationResult => {
+  const schema = resolveCurrentRequestSchema();
+  if (!schema) {
+    return createBodyValidationResult();
+  }
+
+  const text = `${source || ''}`.trim();
+  if (!text) {
+    return createBodyValidationResult();
+  }
+
+  let structuredData: unknown;
+  if (type === 'xml') {
+    const xmlDoc = new DOMParser().parseFromString(text, 'application/xml');
+    if (xmlDoc.querySelector('parsererror')) {
+      return createBodyValidationResult([], 'XML 格式错误，无法校验 Body 参数');
+    }
+    structuredData = parseStructuredText(type, text);
+    if (isPlainObject(structuredData)) {
+      const dataKeys = Object.keys(structuredData);
+      const schemaProperties = schema.properties || {};
+      const hasDirectSchemaField = dataKeys.some((key) =>
+        Object.hasOwn(schemaProperties, key),
+      );
+      if (dataKeys.length === 1 && !hasDirectSchemaField) {
+        structuredData = structuredData[dataKeys[0] as string];
+      }
+    }
+  } else {
+    try {
+      structuredData = JSON.parse(text);
+    } catch {
+      if (type === 'raw' && !schema.properties && !schema.items) {
+        structuredData = text;
+      } else if (type === 'raw' && !hasBodyEnumConstraints(schema)) {
+        return createBodyValidationResult();
+      } else {
+        const format =
+          type === 'raw' ? 'Raw 内容不是有效的 JSON' : 'JSON 格式错误';
+        return createBodyValidationResult(
+          [],
+          `${format}，无法按请求 Schema 校验`,
+        );
+      }
+    }
+  }
+
+  return createBodyValidationResult(
+    validateBodyEnumValues(structuredData, schema),
+  );
+};
+
+const clearTextBodyValidationTimer = () => {
+  if (textBodyValidationTimer !== null) {
+    window.clearTimeout(textBodyValidationTimer);
+    textBodyValidationTimer = null;
+  }
+};
+
+const applyTextBodyValidation = (
+  type: TextBodyType,
+  source: string,
+): BodyValidationResult => {
+  const result = validateTextBodyValue(type, source);
+  textBodyValidationMessage.value = result.message;
+  return result;
+};
+
+const scheduleTextBodyValidation = (type: TextBodyType, source: string) => {
+  clearTextBodyValidationTimer();
+  textBodyValidationTimer = window.setTimeout(() => {
+    textBodyValidationTimer = null;
+    if (bodyType.value === type) {
+      applyTextBodyValidation(type, source);
+    }
+  }, 300);
+};
+
+const validateCurrentBody = (): BodyValidationResult => {
+  clearTextBodyValidationTimer();
+  const currentType = bodyType.value;
+  if (!isTextBodyType(currentType)) {
+    textBodyValidationMessage.value = '';
+    return createBodyValidationResult();
+  }
+  const source = editorRef.value?.getEditorValue?.() ?? '';
+  return applyTextBodyValidation(currentType, source);
+};
+
 const buildStructuredDataFromParams = (params: ParamsType[]) => {
   const result: Record<string, unknown> = {};
   let hasValue = false;
@@ -677,8 +805,12 @@ const resolveStructuredDataFromBody = (type = bodyType.value) => {
   return null;
 };
 
-const handleBodyChange = () => {
-  captureCurrentTextDraft();
+const handleBodyChange = (value: string) => {
+  const currentType = bodyType.value;
+  if (isTextBodyType(currentType)) {
+    setTextBodyDraft(currentType, value);
+    scheduleTextBodyValidation(currentType, value);
+  }
   emit('bodyChange');
 };
 
@@ -781,10 +913,14 @@ const rebuildBodyParamsBySchema = (
         contentType: inferContentType(property.type, fieldFormat),
         description: property.description,
         enabled: previous?.enabled ?? required,
+        enum: property.enum,
         fileList: previous?.fileList ?? [],
         format: fieldFormat,
         name: key,
         required,
+        // 保留完整字段 Schema，枚举选项、扩展枚举说明及数组项元数据
+        // 都由通用参数表统一解析。
+        schema: property,
         type: property.type,
         value: previous?.value ?? '',
       };
@@ -970,6 +1106,8 @@ watch(
       return;
     }
 
+    clearTextBodyValidationTimer();
+    textBodyValidationMessage.value = '';
     captureCurrentTextDraft(previousType);
     const structuredData = resolveStructuredDataFromBody(previousType);
     const sourceText = resolveCurrentTextValue(previousType);
@@ -1031,6 +1169,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  clearTextBodyValidationTimer();
   bodyTypeResizeObserver?.disconnect();
   bodyTypeResizeObserver = null;
   if (bodyTypeOverflowRaf) {
@@ -1077,8 +1216,10 @@ watch(
 
 defineExpose({
   bodyType,
+  focusEditor: focusJsonEditor,
   getTextBodyDrafts: () => ({ ...textBodyDrafts.value }),
   getExample,
+  validateCurrentBody,
   setEditorValue,
   setTextBodyDrafts: (drafts: Partial<Record<TextBodyType, string>>) => {
     textBodyDrafts.value = { ...drafts };
@@ -1252,6 +1393,14 @@ defineExpose({
             <ElButton plain size="small" class="w-full">Upload</ElButton>
           </ElUpload>
         </template>
+
+        <div
+          v-if="isTextBodyType(bodyType) && textBodyValidationMessage"
+          class="body-validation-error"
+          role="alert"
+        >
+          {{ textBodyValidationMessage }}
+        </div>
       </div>
     </div>
   </ElTabPane>
@@ -1336,6 +1485,7 @@ defineExpose({
 }
 
 .body-editor {
+  position: relative;
   display: flex;
   flex: 1;
   min-height: 0;
@@ -1349,6 +1499,25 @@ defineExpose({
 .body-editor__json {
   flex: 1;
   min-height: 100%;
+}
+
+.body-validation-error {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  left: 12px;
+  z-index: 12;
+  flex: none;
+  max-height: 58px;
+  padding: 7px 10px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--el-color-danger);
+  overflow-wrap: anywhere;
+  background: var(--el-color-danger-light-9);
+  border: 1px solid var(--el-color-danger-light-7);
+  border-radius: 4px;
 }
 
 :deep(.body-editor .json-viewer-ultimate),

@@ -164,6 +164,7 @@ interface SseEvent {
 interface DebugBodyTabExpose {
   bodyType?: string;
   fileList?: any[];
+  focusEditor?: () => void;
   getExample?: () => string;
   getTextBodyDrafts?: () => Partial<Record<'json' | 'raw' | 'xml', string>>;
   setEditorValue?: (value: string) => Promise<void> | void;
@@ -174,6 +175,10 @@ interface DebugBodyTabExpose {
     forceBodyType?: boolean;
     preserveValue?: boolean;
   }) => Promise<void> | void;
+  validateCurrentBody?: () => {
+    message: string;
+    valid: boolean;
+  };
 }
 
 const { apiURL } = useAppConfig(import.meta.env, import.meta.env.PROD);
@@ -2046,6 +2051,15 @@ const stopRequest = () => {
 };
 
 async function sendRequest() {
+  const bodyValidation = bodyTabRef.value?.validateCurrentBody?.();
+  if (bodyValidation && !bodyValidation.valid) {
+    activeTab.value = 'Body';
+    ElMessage.error(bodyValidation.message || 'Body 参数校验失败');
+    await nextTick();
+    bodyTabRef.value?.focusEditor?.();
+    return;
+  }
+
   loading.value = true;
   responseLoading.value = true;
   // 每次请求都是新的：清空上一次的流式事件，避免旧数据残留
