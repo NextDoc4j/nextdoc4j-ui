@@ -1192,8 +1192,12 @@ const updateAsideLayout = () => {
     return;
   }
 
-  const viewportHeight =
-    scrollContainerRef.value?.clientHeight || window.innerHeight;
+  const viewportHeight = scrollContainerRef.value?.clientHeight ?? 0;
+  // v-show 隐藏详情页时所有子节点尺寸均为 0，此时测量会覆盖最后一次有效高度。
+  // 恢复显示后 ResizeObserver 会再次触发，再使用真实尺寸重新计算。
+  if (viewportHeight <= 0) {
+    return;
+  }
   const stackHeight = Math.max(
     ASIDE_MIN_STACK_HEIGHT,
     viewportHeight - ASIDE_TOP_OFFSET - ASIDE_BOTTOM_OFFSET,
