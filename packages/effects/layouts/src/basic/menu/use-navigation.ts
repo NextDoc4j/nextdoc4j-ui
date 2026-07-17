@@ -4,6 +4,10 @@ import { useRouter } from 'vue-router';
 
 import { isHttpUrl, openRouteInNewWindow, openWindow } from '@vben/utils';
 
+type RouteComponentLoader = () => Promise<unknown> | unknown;
+
+const routePreloadPromises = new Map<string, Promise<void>>();
+
 function useNavigation() {
   const router = useRouter();
   const routeMetaMap = new Map<string, RouteRecordNormalized>();
@@ -53,11 +57,36 @@ function useNavigation() {
     }
   };
 
+  const preloadRoute = (path: string) => {
+    const cached = routePreloadPromises.get(path);
+    if (cached) {
+      return cached;
+    }
+
+    const loaders = router
+      .resolve(path)
+      .matched.flatMap((record) => Object.values(record.components ?? {}))
+      .filter(
+        (component): component is RouteComponentLoader =>
+          typeof component === 'function',
+      );
+
+    const task = Promise.all(loaders.map((loader) => Promise.resolve(loader())))
+      .then(() => undefined)
+      .catch((error) => {
+        routePreloadPromises.delete(path);
+        throw error;
+      });
+
+    routePreloadPromises.set(path, task);
+    return task;
+  };
+
   const willOpenedByWindow = (path: string) => {
     return shouldOpenInNewWindow(path);
   };
 
-  return { navigation, willOpenedByWindow };
+  return { navigation, preloadRoute, willOpenedByWindow };
 }
 
 export { useNavigation };

@@ -5,12 +5,12 @@ import { useRoute, useRouter } from 'vue-router';
 
 import { preferences, usePreferences } from '@vben/preferences';
 import { useAccessStore } from '@vben/stores';
-import { findRootMenuByPath } from '@vben/utils';
+import { findMenuByPath, findRootMenuByPath } from '@vben/utils';
 
 import { useNavigation } from './use-navigation';
 
 function useMixedMenu() {
-  const { navigation, willOpenedByWindow } = useNavigation();
+  const { navigation, preloadRoute, willOpenedByWindow } = useNavigation();
   const accessStore = useAccessStore();
   const route = useRoute();
   const router = useRouter();
@@ -143,6 +143,12 @@ function useMixedMenu() {
     return true;
   };
 
+  const preloadMenuChildren = (key: string) => {
+    const menu = findMenuByPath(menus.value, key);
+    const childPaths = (menu?.children ?? []).map((child) => child.path);
+    void Promise.allSettled(childPaths.map((path) => preloadRoute(path)));
+  };
+
   /**
    * 侧边菜单展开事件
    * @param key 路由路径
@@ -154,6 +160,9 @@ function useMixedMenu() {
     _parentsPath: string[],
     fromClick = false,
   ) => {
+    if (fromClick && key === '/doc-manage') {
+      preloadMenuChildren(key);
+    }
     // 接口分组：仅在开启分组概览时跳转概览页，否则仅展开。
     // 顶级菜单（接口文档/实体模型/文档管理等）展开时只展开、不自动选中任何子项，
     // 保证「正常菜单展开、只有点击具体项才进入详情」的预期。

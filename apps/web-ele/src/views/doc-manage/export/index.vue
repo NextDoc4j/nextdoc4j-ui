@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { Paragraph as DocxParagraph, Table as DocxTable } from 'docx';
+
 import type { Component } from 'vue';
 
 import type { ServiceItem } from '#/store/aggregation';
@@ -23,18 +25,6 @@ import {
   SvgDoubleArrowUpIcon,
 } from '@vben/icons';
 
-import {
-  Document as DocxDocument,
-  HeadingLevel as DocxHeadingLevel,
-  Packer as DocxPacker,
-  Paragraph as DocxParagraph,
-  Table as DocxTable,
-  TableCell as DocxTableCell,
-  TableLayoutType as DocxTableLayoutType,
-  TableRow as DocxTableRow,
-  TextRun as DocxTextRun,
-  WidthType as DocxWidthType,
-} from 'docx';
 import {
   ElAlert,
   ElButton,
@@ -70,7 +60,15 @@ import {
 defineOptions({ name: 'DocManageExport' });
 
 type ExportFormat = 'docx' | 'html' | 'markdown' | 'openapi.json' | 'pdf';
+type DocxModule = typeof import('docx');
 type ScopeMode = 'all' | 'custom';
+
+let docxModulePromise: null | Promise<DocxModule> = null;
+
+const loadDocxModule = () => {
+  docxModulePromise ||= import('docx');
+  return docxModulePromise;
+};
 
 interface GroupDocItem {
   code: string;
@@ -139,7 +137,10 @@ interface ExportFormatOption {
 const HTTP_METHODS = new Set(['delete', 'get', 'patch', 'post', 'put']);
 const PREVIEW_AUTO_DELAY = 120;
 const PREVIEW_AUTO_DELAY_LARGE = 260;
+const PREVIEW_INITIAL_DELAY = 600;
+const PREVIEW_INITIAL_IDLE_TIMEOUT = 1500;
 const PREVIEW_LARGE_DATA_THRESHOLD = 200;
+const PREVIEW_OPERATION_LIMIT = 20;
 const PREVIEW_RENDER_YIELD_THRESHOLD = 120;
 const PREVIEW_VIRTUAL_BLOCK_CHUNK_SIZE = 24;
 const PREVIEW_VIRTUAL_BLOCK_MIN_COUNT = 24;
@@ -193,6 +194,7 @@ const operations = shallowRef<OperationItem[]>([]);
 const aggregationGatewayOpenApi = shallowRef<null | OpenAPISpec>(null);
 const aggregationServiceDocs = shallowRef<ServiceExportDocItem[]>([]);
 let previewAutoTimer: null | number = null;
+let previewAutoIdleHandle: null | number = null;
 let previewGenerationToken = 0;
 let previewChunkObserver: IntersectionObserver | null = null;
 let previewChunkMeasureFrame: null | number = null;
@@ -379,7 +381,15 @@ const selectedCountByNodeKey = computed(() => {
 
   return counts;
 });
-const previewNoticeText = computed(() => '');
+const previewNoticeText = computed(() => {
+  const selectedCount =
+    scopeMode.value === 'all'
+      ? operations.value.length
+      : selectedOperationItems.value.length;
+  return selectedCount > PREVIEW_OPERATION_LIMIT
+    ? `实时预览仅展示前 ${PREVIEW_OPERATION_LIMIT} 个接口，导出文件仍包含全部 ${selectedCount} 个接口。`
+    : '';
+});
 const activeExportOption = computed<ExportFormatOption>(() => {
   return (
     exportFormatOptions.find((item) => item.format === exportFormat.value) ||
@@ -2901,7 +2911,7 @@ function isGroupIndeterminate(items: OperationItem[], nodeKey?: string) {
 }
 
 function getPreviewOperations(selectedOps: OperationItem[]) {
-  return selectedOps;
+  return selectedOps.slice(0, PREVIEW_OPERATION_LIMIT);
 }
 
 function waitForNextFrame() {
@@ -3329,7 +3339,14 @@ function resolveDocxTableColumnWidths(
   );
 }
 
-function buildDocxTableFromRows(headerCells: string[], bodyRows: string[][]) {
+function buildDocxTableFromRows(
+  headerCells: string[],
+  bodyRows: string[][],
+  docx: DocxModule,
+) {
+  const { Paragraph, Table, TableCell, TableLayoutType, TableRow, TextRun } =
+    docx;
+  const { WidthType } = docx;
   const columnCount = Math.max(
     headerCells.length,
     ...bodyRows.map((row) => row.length),
@@ -3339,11 +3356,11 @@ function buildDocxTableFromRows(headerCells: string[], bodyRows: string[][]) {
   const buildRowCells = (cells: string[], header = false) =>
     Array.from({ length: columnCount }, (_, index) => {
       const text = addExportTableSoftBreaks(cells[index] || '-');
-      return new DocxTableCell({
+      return new TableCell({
         children: [
-          new DocxParagraph({
+          new Paragraph({
             children: [
-              new DocxTextRun({
+              new TextRun({
                 bold: header,
                 text,
               }),
@@ -3352,36 +3369,40 @@ function buildDocxTableFromRows(headerCells: string[], bodyRows: string[][]) {
         ],
         width: {
           size: columnWidths[index] || Math.floor(100 / columnCount),
-          type: DocxWidthType.PERCENTAGE,
+          type: WidthType.PERCENTAGE,
         },
       });
     });
 
-  return new DocxTable({
+  return new Table({
     columnWidths: columnWidths.map((width) =>
       Math.round((DOCX_TABLE_GRID_WIDTH * width) / 100),
     ),
-    layout: DocxTableLayoutType.FIXED,
+    layout: TableLayoutType.FIXED,
     rows: [
-      new DocxTableRow({
+      new TableRow({
         children: buildRowCells(headerCells, true),
         tableHeader: true,
       }),
       ...bodyRows.map(
         (row) =>
-          new DocxTableRow({
+          new TableRow({
             children: buildRowCells(row),
           }),
       ),
     ],
     width: {
       size: 100,
-      type: DocxWidthType.PERCENTAGE,
+      type: WidthType.PERCENTAGE,
     },
   });
 }
 
-function buildDocxChildrenFromMarkdown(markdownContent: string) {
+function buildDocxChildrenFromMarkdown(
+  markdownContent: string,
+  docx: DocxModule,
+) {
+  const { HeadingLevel, Paragraph, TextRun } = docx;
   const lines = markdownContent.split('\n').map((rawLine) => rawLine.trimEnd());
   const children: Array<DocxParagraph | DocxTable> = [];
 
@@ -3407,9 +3428,9 @@ function buildDocxChildrenFromMarkdown(markdownContent: string) {
 
       codeLines.forEach((codeLine) => {
         children.push(
-          new DocxParagraph({
+          new Paragraph({
             children: [
-              new DocxTextRun({
+              new TextRun({
                 font: 'Courier New',
                 text: codeLine || ' ',
               }),
@@ -3417,7 +3438,7 @@ function buildDocxChildrenFromMarkdown(markdownContent: string) {
           }),
         );
       });
-      children.push(new DocxParagraph({ text: '' }));
+      children.push(new Paragraph({ text: '' }));
       index = codeIndex;
       continue;
     }
@@ -3438,27 +3459,27 @@ function buildDocxChildrenFromMarkdown(markdownContent: string) {
         bodyRows.push(parseMarkdownTableCells(rowLine));
         rowIndex++;
       }
-      children.push(buildDocxTableFromRows(headerCells, bodyRows));
+      children.push(buildDocxTableFromRows(headerCells, bodyRows, docx));
       index = rowIndex - 1;
       continue;
     }
 
     const normalized = stripHtmlTags(line).trim();
     if (!normalized) {
-      children.push(new DocxParagraph({ text: '' }));
+      children.push(new Paragraph({ text: '' }));
       continue;
     }
 
     if (normalized === '---') {
-      children.push(new DocxParagraph({ text: '────────────────────────' }));
+      children.push(new Paragraph({ text: '────────────────────────' }));
       continue;
     }
 
     if (normalized.startsWith('# ')) {
       children.push(
-        new DocxParagraph({
+        new Paragraph({
           text: normalized.slice(2).trim(),
-          heading: DocxHeadingLevel.HEADING_1,
+          heading: HeadingLevel.HEADING_1,
         }),
       );
       continue;
@@ -3466,9 +3487,9 @@ function buildDocxChildrenFromMarkdown(markdownContent: string) {
 
     if (normalized.startsWith('## ')) {
       children.push(
-        new DocxParagraph({
+        new Paragraph({
           text: normalized.slice(3).trim(),
-          heading: DocxHeadingLevel.HEADING_2,
+          heading: HeadingLevel.HEADING_2,
         }),
       );
       continue;
@@ -3476,9 +3497,9 @@ function buildDocxChildrenFromMarkdown(markdownContent: string) {
 
     if (normalized.startsWith('### ')) {
       children.push(
-        new DocxParagraph({
+        new Paragraph({
           text: normalized.slice(4).trim(),
-          heading: DocxHeadingLevel.HEADING_3,
+          heading: HeadingLevel.HEADING_3,
         }),
       );
       continue;
@@ -3486,9 +3507,9 @@ function buildDocxChildrenFromMarkdown(markdownContent: string) {
 
     if (normalized.startsWith('#### ')) {
       children.push(
-        new DocxParagraph({
+        new Paragraph({
           text: normalized.slice(5).trim(),
-          heading: DocxHeadingLevel.HEADING_4,
+          heading: HeadingLevel.HEADING_4,
         }),
       );
       continue;
@@ -3496,9 +3517,9 @@ function buildDocxChildrenFromMarkdown(markdownContent: string) {
 
     if (normalized.startsWith('##### ')) {
       children.push(
-        new DocxParagraph({
+        new Paragraph({
           text: normalized.slice(6).trim(),
-          heading: DocxHeadingLevel.HEADING_5,
+          heading: HeadingLevel.HEADING_5,
         }),
       );
       continue;
@@ -3506,9 +3527,9 @@ function buildDocxChildrenFromMarkdown(markdownContent: string) {
 
     if (normalized.startsWith('###### ')) {
       children.push(
-        new DocxParagraph({
+        new Paragraph({
           text: normalized.slice(7).trim(),
-          heading: DocxHeadingLevel.HEADING_6,
+          heading: HeadingLevel.HEADING_6,
         }),
       );
       continue;
@@ -3516,7 +3537,7 @@ function buildDocxChildrenFromMarkdown(markdownContent: string) {
 
     if (normalized.startsWith('- ')) {
       children.push(
-        new DocxParagraph({
+        new Paragraph({
           text: normalized.slice(2).trim(),
           bullet: { level: 0 },
         }),
@@ -3524,7 +3545,7 @@ function buildDocxChildrenFromMarkdown(markdownContent: string) {
       continue;
     }
 
-    children.push(new DocxParagraph({ text: normalized }));
+    children.push(new Paragraph({ text: normalized }));
   }
 
   return children;
@@ -3818,17 +3839,18 @@ async function exportDocument() {
   try {
     switch (exportFormat.value) {
       case 'docx': {
-        const docxDocument = new DocxDocument({
+        const docx = await loadDocxModule();
+        const docxDocument = new docx.Document({
           title,
           sections: [
             {
-              children: buildDocxChildrenFromMarkdown(markdownContent),
+              children: buildDocxChildrenFromMarkdown(markdownContent, docx),
             },
           ],
         });
         const mimeType =
           'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-        const docxBlob = await DocxPacker.toBlob(docxDocument);
+        const docxBlob = await docx.Packer.toBlob(docxDocument);
         downloadFile(docxBlob, `${title}.docx`, mimeType);
         return true;
       }
@@ -3897,6 +3919,14 @@ async function confirmExportDocument() {
 }
 
 function scheduleAutoPreview() {
+  if (
+    previewAutoIdleHandle !== null &&
+    'cancelIdleCallback' in window &&
+    typeof window.cancelIdleCallback === 'function'
+  ) {
+    window.cancelIdleCallback(previewAutoIdleHandle);
+    previewAutoIdleHandle = null;
+  }
   if (previewAutoTimer) {
     window.clearTimeout(previewAutoTimer);
   }
@@ -3904,19 +3934,37 @@ function scheduleAutoPreview() {
     scopeMode.value === 'all'
       ? operations.value.length
       : selectedOperationItems.value.length;
+  const isInitialPreview =
+    previewHtml.value === '' && previewChunks.value.length === 0;
   previewGenerationToken += 1;
-  previewAutoTimer = window.setTimeout(
-    () => {
-      previewAutoTimer = null;
-      if (loading.value) {
-        return;
-      }
-      void generatePreview(true);
-    },
-    previewOperationCount > PREVIEW_LARGE_DATA_THRESHOLD
-      ? PREVIEW_AUTO_DELAY_LARGE
-      : PREVIEW_AUTO_DELAY,
-  );
+  const generate = () => {
+    previewAutoIdleHandle = null;
+    if (loading.value) {
+      return;
+    }
+    void generatePreview(true);
+  };
+  const scheduleGeneration = () => {
+    previewAutoTimer = null;
+    if (
+      isInitialPreview &&
+      'requestIdleCallback' in window &&
+      typeof window.requestIdleCallback === 'function'
+    ) {
+      previewAutoIdleHandle = window.requestIdleCallback(generate, {
+        timeout: PREVIEW_INITIAL_IDLE_TIMEOUT,
+      });
+      return;
+    }
+    generate();
+  };
+  let previewDelay = PREVIEW_AUTO_DELAY;
+  if (isInitialPreview) {
+    previewDelay = PREVIEW_INITIAL_DELAY;
+  } else if (previewOperationCount > PREVIEW_LARGE_DATA_THRESHOLD) {
+    previewDelay = PREVIEW_AUTO_DELAY_LARGE;
+  }
+  previewAutoTimer = window.setTimeout(scheduleGeneration, previewDelay);
 }
 
 watch(
@@ -3957,6 +4005,14 @@ watch(loading, (value) => {
 });
 
 onBeforeUnmount(() => {
+  if (
+    previewAutoIdleHandle !== null &&
+    'cancelIdleCallback' in window &&
+    typeof window.cancelIdleCallback === 'function'
+  ) {
+    window.cancelIdleCallback(previewAutoIdleHandle);
+    previewAutoIdleHandle = null;
+  }
   if (previewAutoTimer) {
     window.clearTimeout(previewAutoTimer);
     previewAutoTimer = null;

@@ -71,6 +71,8 @@ const items = ref<MenuProvider['items']>({});
 const subMenus = ref<MenuProvider['subMenus']>({});
 const mouseInChild = ref(false);
 const itemPathsKey = computed(() => Object.keys(items.value).join('|'));
+// 用户主动开合菜单后，旧路由的同步结果不能覆盖本次操作。
+let userAdjustedMenus = false;
 
 const isMenuPopup = computed<MenuProvider['isMenuPopup']>(() => {
   return (
@@ -104,7 +106,7 @@ watch(
 watch(
   () => props.defaultOpeneds,
   (value) => {
-    if (!props.collapse) {
+    if (!props.collapse && !userAdjustedMenus) {
       openedMenus.value = value
         ? value.filter((path) => !manuallyClosedMenus.has(path))
         : [];
@@ -122,7 +124,7 @@ watch(
       // 才自动展开到激活项。子菜单懒挂载只会注册被展开分组的子项，激活项注册状态不变，
       // 此时不应重新展开——否则手风琴模式下会把用户刚展开的同级分组立即收起。
       const registered = !!(activePath.value && items.value[activePath.value]);
-      if (registered && !activeItemRegistered) {
+      if (registered && !activeItemRegistered && !userAdjustedMenus) {
         initMenu();
       }
       activeItemRegistered = registered;
@@ -134,6 +136,7 @@ watch(
 watch(
   () => props.defaultActive,
   (currentActive = '') => {
+    userAdjustedMenus = false;
     manuallyClosedMenus.forEach((path) => {
       if (currentActive !== path && !currentActive.startsWith(`${path}/`)) {
         manuallyClosedMenus.delete(path);
@@ -305,6 +308,7 @@ function handleMenuItemClick(data: MenuItemClicked) {
 }
 
 function handleSubMenuClick({ parentPaths, path }: MenuItemRegistered) {
+  userAdjustedMenus = true;
   const isOpened = openedMenus.value.includes(path);
 
   // 用户点击分组标题：开合事件标记 fromClick=true，供上层区分自动展开。
