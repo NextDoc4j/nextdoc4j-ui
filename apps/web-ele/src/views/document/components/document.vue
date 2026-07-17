@@ -86,6 +86,7 @@ const props = defineProps<{
 }>();
 
 const emits = defineEmits<{
+  preloadTest: [];
   test: [data: DebugPayload];
 }>();
 
@@ -1601,6 +1602,12 @@ const handleTest = () => {
   }
 };
 
+const handleTestIntent = () => {
+  if (!props.showTest) {
+    emits('preloadTest');
+  }
+};
+
 const handleResponseExampleSelect = (code: string, value: string) => {
   responseExampleSelection.value = {
     ...responseExampleSelection.value,
@@ -1697,8 +1704,10 @@ defineExpose({
               <ElButton
                 class="hero-panel__debug-button"
                 :style="methodStyle"
-                @click="handleTest"
                 :disabled="showTest"
+                @click="handleTest"
+                @focus="handleTestIntent"
+                @mouseenter="handleTestIntent"
               >
                 {{ showTest ? '调试中' : '在线调试' }}
                 <ApiTestRunning

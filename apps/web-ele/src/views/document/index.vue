@@ -75,6 +75,12 @@ const documentRef = shallowRef<DocumentExpose | null>(null);
 let apiTestPanelPreloadPromise: null | Promise<unknown> = null;
 let debugPreloadTimer: null | number = null;
 let debugPreloadIdleHandle: null | number = null;
+let debugPreloadLoadHandler: (() => void) | null = null;
+
+interface NetworkInformationLike {
+  effectiveType?: string;
+  saveData?: boolean;
+}
 
 const preloadApiTestPanel = () => {
   apiTestPanelPreloadPromise ||= loadApiTestPanel();
@@ -95,30 +101,83 @@ const clearDebugPreloadTask = () => {
     window.cancelIdleCallback(debugPreloadIdleHandle);
     debugPreloadIdleHandle = null;
   }
+
+  if (debugPreloadLoadHandler) {
+    window.removeEventListener('load', debugPreloadLoadHandler);
+    debugPreloadLoadHandler = null;
+  }
+};
+
+const canAutoPreloadDebugPanel = () => {
+  if (
+    document.visibilityState !== 'visible' ||
+    isOverview.value ||
+    navigator.onLine === false
+  ) {
+    return false;
+  }
+
+  const connection = (
+    navigator as Navigator & { connection?: NetworkInformationLike }
+  ).connection;
+  return (
+    !connection?.saveData &&
+    connection?.effectiveType !== 'slow-2g' &&
+    connection?.effectiveType !== '2g'
+  );
+};
+
+const preloadDebugPanelOnIntent = () => {
+  clearDebugPreloadTask();
+  void preloadApiTestPanel();
 };
 
 const scheduleDebugPanelPreload = () => {
-  if (typeof window === 'undefined' || apiTestPanelPreloadPromise) {
+  if (
+    typeof window === 'undefined' ||
+    apiTestPanelPreloadPromise ||
+    isOverview.value
+  ) {
     return;
   }
 
-  const warmUp = () => {
-    debugPreloadTimer = null;
+  const warmUpWhenIdle = () => {
     debugPreloadIdleHandle = null;
+    if (!canAutoPreloadDebugPanel() || apiTestPanelPreloadPromise) {
+      return;
+    }
     void preloadApiTestPanel();
   };
 
-  if (
-    'requestIdleCallback' in window &&
-    typeof window.requestIdleCallback === 'function'
-  ) {
-    debugPreloadIdleHandle = window.requestIdleCallback(warmUp, {
-      timeout: 1200,
-    });
+  const scheduleWhenIdle = () => {
+    debugPreloadTimer = null;
+    if (!canAutoPreloadDebugPanel() || apiTestPanelPreloadPromise) {
+      return;
+    }
+
+    if (
+      'requestIdleCallback' in window &&
+      typeof window.requestIdleCallback === 'function'
+    ) {
+      debugPreloadIdleHandle = window.requestIdleCallback(warmUpWhenIdle);
+      return;
+    }
+
+    debugPreloadTimer = window.setTimeout(warmUpWhenIdle, 3000);
+  };
+
+  const scheduleAfterPageLoad = () => {
+    debugPreloadLoadHandler = null;
+    debugPreloadTimer = window.setTimeout(scheduleWhenIdle, 2000);
+  };
+
+  if (document.readyState === 'complete') {
+    scheduleAfterPageLoad();
     return;
   }
 
-  debugPreloadTimer = window.setTimeout(warmUp, 360);
+  debugPreloadLoadHandler = scheduleAfterPageLoad;
+  window.addEventListener('load', debugPreloadLoadHandler, { once: true });
 };
 
 const syncDebugState = (
@@ -210,6 +269,13 @@ onMounted(() => {
   }
 });
 
+watch(isOverview, (overview) => {
+  clearDebugPreloadTask();
+  if (!overview) {
+    scheduleDebugPanelPreload();
+  }
+});
+
 onBeforeUnmount(() => {
   clearDebugPreloadTask();
 });
@@ -242,6 +308,7 @@ onBeforeUnmount(() => {
           <DocumentPanel
             ref="documentRef"
             @test="handleTest"
+            @preload-test="preloadDebugPanelOnIntent"
             :show-test="activeView === 'debug'"
           />
         </template>
