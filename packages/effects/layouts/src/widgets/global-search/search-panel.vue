@@ -1217,9 +1217,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div
-    class="flex h-[70vh] max-h-[520px] min-h-[340px] min-w-0 flex-col overflow-hidden px-2"
-  >
+  <div class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden px-2">
     <div class="bg-background sticky top-0 z-10 shrink-0 py-1">
       <div v-if="sourceItems.length > 0" class="mb-2 flex flex-wrap gap-2 px-1">
         <button
@@ -1253,7 +1251,7 @@ onMounted(() => {
     </div>
 
     <VbenScrollbar class="min-h-0 flex-1">
-      <div class="w-full pb-2">
+      <div class="search-results-content w-full pb-2">
         <!-- 无搜索结果 -->
         <div
           v-if="isSearching && displayItems.length === 0"
@@ -1389,6 +1387,10 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.search-results-content {
+  padding-right: 20px;
+}
+
 .search-hit {
   padding: 0 2px;
   background: color-mix(in oklab, var(--el-color-warning-light-7), #fff 45%);
