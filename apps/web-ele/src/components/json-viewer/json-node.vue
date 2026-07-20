@@ -748,16 +748,18 @@ onBeforeUnmount(() => {
           <span>{{ keyName }}</span>
           <span>:&nbsp;</span>
         </span>
-        <span
-          v-if="valueType === 'number'"
-          :class="valueClass"
-          v-html="formattedValue"
-        ></span>
-        <span v-else :class="valueClass">{{ formattedValue }}</span>
-        <span v-if="!isLastItem" class="comma">,</span>
-        <span v-if="fieldDescription" class="field-description">
-          <span class="comment-prefix">//</span>
-          <span class="comment-content">{{ fieldDescription }}</span>
+        <span class="primitive-content">
+          <span
+            v-if="valueType === 'number'"
+            :class="valueClass"
+            v-html="formattedValue"
+          ></span>
+          <span v-else :class="valueClass">{{ formattedValue }}</span>
+          <span v-if="!isLastItem" class="comma">,</span>
+          <span v-if="fieldDescription" class="field-description">
+            <span class="comment-prefix">//</span>
+            <span class="comment-content">{{ fieldDescription }}</span>
+          </span>
         </span>
       </div>
     </template>
@@ -811,6 +813,12 @@ onBeforeUnmount(() => {
 .node-primitive {
   display: flex;
   align-items: center;
+}
+
+.primitive-content {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
 }
 
 .key-wrapper {

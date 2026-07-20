@@ -2992,6 +2992,7 @@ onBeforeUnmount(() => {
                         :enable-chunked-render="true"
                         :initial-render-count="60"
                         :render-chunk-size="60"
+                        :wrap-long-values="true"
                         class="response-body app-json-schema-viewer"
                       />
                     </template>

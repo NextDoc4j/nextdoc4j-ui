@@ -21,6 +21,7 @@ const props = withDefaults(
     renderChunkSize?: number;
     schema?: any;
     value?: unknown;
+    wrapLongValues?: boolean;
   }>(),
   {
     autoExpandDepth: Number.POSITIVE_INFINITY,
@@ -31,6 +32,7 @@ const props = withDefaults(
     renderChunkSize: 120,
     schema: undefined,
     value: undefined,
+    wrapLongValues: false,
   },
 );
 
@@ -111,7 +113,10 @@ defineExpose({
   <div
     ref="scrollHostRef"
     class="json-viewer-scroll-host overflow-auto rounded p-4 font-mono text-sm"
-    :class="`theme-${resolvedThemeMode}`"
+    :class="[
+      `theme-${resolvedThemeMode}`,
+      { 'json-viewer-scroll-host--wrap-values': wrapLongValues },
+    ]"
   >
     <div class="json-viewer-content">
       <div v-if="parseError" class="json-error">
@@ -178,6 +183,48 @@ defineExpose({
 .json-viewer-content {
   width: max-content;
   min-width: 100%;
+}
+
+.json-viewer-scroll-host--wrap-values .json-viewer-content {
+  width: 100%;
+  min-width: 0;
+}
+
+.json-viewer-scroll-host--wrap-values :deep(.json-node),
+.json-viewer-scroll-host--wrap-values :deep(.node-virtual-block) {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.json-viewer-scroll-host--wrap-values :deep(.node-primitive) {
+  align-items: flex-start;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.json-viewer-scroll-host--wrap-values :deep(.node-primitive > .key-wrapper),
+.json-viewer-scroll-host--wrap-values
+  :deep(.node-primitive > .primitive-content) {
+  flex: none;
+}
+
+.json-viewer-scroll-host--wrap-values
+  :deep(.node-primitive > .primitive-content) {
+  display: block;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.json-viewer-scroll-host--wrap-values
+  :deep(.primitive-content > .value-string) {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.json-viewer-scroll-host--wrap-values
+  :deep(.primitive-content > .field-description) {
+  display: inline-flex;
+  white-space: nowrap;
 }
 
 .json-viewer-scroll-host :deep(*) {
