@@ -8,13 +8,16 @@ import '@vben/styles';
 import '@vben/styles/ele';
 
 import { useTitle } from '@vueuse/core';
-import { ElLoading } from 'element-plus';
+import { ElLoading, useTooltipProps } from 'element-plus';
 
 import { $t, setupI18n } from '#/locales';
 
 import App from './app.vue';
 import Directives from './directive/index';
 import { router } from './router';
+
+// Element Plus does not expose tooltip defaults through ElConfigProvider.
+(useTooltipProps.hideAfter as { default: number }).default = 0;
 
 async function bootstrap(namespace: string) {
   const app = createApp(App);
