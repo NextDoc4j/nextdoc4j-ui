@@ -2230,14 +2230,26 @@ async function sendRequest() {
     }
     const bodyType = bodyTabRef.value?.bodyType as DebugBodyType | undefined;
     const actualRequestBody = resolveActualRequestBody(bodyType, bodyData);
+    const requestMethod = props.method.toUpperCase();
+    const canSendBody = !['GET', 'HEAD'].includes(requestMethod);
+    let requestBody: BodyInit | undefined;
+    if (canSendBody) {
+      if (['binary', 'form-data'].includes(bodyType || '')) {
+        requestBody = formData;
+      } else if (bodyType === 'x-www-form-urlencoded') {
+        requestBody = searchParams;
+      } else {
+        requestBody = bodyData || undefined;
+      }
+    }
     actualRequestSnapshot.value = {
-      bodyText: actualRequestBody.bodyText,
-      bodyType: actualRequestBody.bodyType,
+      bodyText: canSendBody ? actualRequestBody.bodyText : '',
+      bodyType: canSendBody ? actualRequestBody.bodyType : 'none',
       headers: [...requestHeaders.entries()].map(([name, value]) => ({
         name,
         value,
       })),
-      method: props.method.toUpperCase(),
+      method: requestMethod,
       pathParams: pathParams.value
         .filter((item) => normalizeParamName(item.name || ''))
         .map((item) => ({
@@ -2256,17 +2268,10 @@ async function sendRequest() {
 
     // 发送请求
     const response = await fetch(finalUrl, {
-      method: props.method.toUpperCase(),
+      method: requestMethod,
       headers: requestHeaders,
       signal: abortController.signal,
-      body:
-        props.method.toLowerCase() !== 'get' &&
-        ['binary', 'form-data'].includes(bodyType || '')
-          ? formData
-          : // eslint-disable-next-line unicorn/no-nested-ternary
-            bodyType === 'x-www-form-urlencoded'
-            ? searchParams
-            : bodyData || undefined,
+      body: requestBody,
     });
 
     // 响应头到达即可展示状态与头信息（SSE 与普通响应共用）
@@ -2325,7 +2330,8 @@ async function sendRequest() {
     const errorMessage =
       error?.name === 'AbortError'
         ? ONLINE_DEBUG_TIMEOUT_MESSAGE
-        : error?.msg || '请求失败';
+        : error?.message || error?.msg || '请求失败';
+    responseTime.value = Number((performance.now() - startTime).toFixed(2));
     ElMessage.error(errorMessage);
     responseStatus.value = {
       code: 0,
