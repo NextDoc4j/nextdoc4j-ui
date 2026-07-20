@@ -1977,6 +1977,7 @@ defineExpose({
                 :enable-chunked-render="true"
                 :initial-render-count="60"
                 :render-chunk-size="60"
+                :wrap-long-values="true"
               />
             </div>
           </section>
@@ -2050,6 +2051,7 @@ defineExpose({
                 :enable-chunked-render="true"
                 :initial-render-count="60"
                 :render-chunk-size="60"
+                :wrap-long-values="true"
               />
               <div v-else class="example-card__empty">暂无可展示的响应示例</div>
             </div>
