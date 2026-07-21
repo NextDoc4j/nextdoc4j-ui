@@ -12,6 +12,7 @@ import {
 } from 'vue';
 import { useRoute } from 'vue-router';
 
+import { useAppConfig } from '@vben/hooks';
 import {
   ApiTestRun,
   ApiTestRunning,
@@ -37,9 +38,11 @@ import MarkdownCodeBlock from '#/components/markdown-code-block.vue';
 import SchemaView from '#/components/schema-view.vue';
 import { getMethodStyle } from '#/constants/methods';
 import { useApiStore } from '#/store';
+import { useAggregationStore } from '#/store/aggregation';
 import { buildApiDocPrompt } from '#/utils/ai-copy';
 import { renderTypeDefinitions } from '#/utils/api-code-example';
 import { copyText } from '#/utils/clipboard';
+import { resolveGatewayBaseUrl } from '#/utils/openapi-url';
 import {
   adaptSchemaForView,
   hasRenderableSchema,
@@ -93,8 +96,10 @@ const emits = defineEmits<{
 const documentUiStateCache = new Map<string, DocumentUiState>();
 
 const { isDark } = usePreferences();
+const { apiURL } = useAppConfig(import.meta.env, import.meta.env.PROD);
 const route = useRoute();
 const apiStore = useApiStore();
+const aggregationStore = useAggregationStore();
 
 const baseUrl = ref('');
 const apiInfo = ref({} as ApiInfo);
@@ -245,7 +250,10 @@ const restoreDocumentUiState = () => {
 
 const loadCurrentDocument = () => {
   const routeName = route.name;
-  baseUrl.value = apiStore.openApi?.servers?.[0]?.url || '';
+  const serverUrl = apiStore.openApi?.servers?.[0]?.url || '';
+  baseUrl.value = aggregationStore.isAggregation
+    ? resolveGatewayBaseUrl(serverUrl, apiURL, window.origin)
+    : serverUrl;
 
   if (!routeName || typeof routeName !== 'string') {
     console.warn('Route name is not available');

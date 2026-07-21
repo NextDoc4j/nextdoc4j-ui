@@ -27,6 +27,7 @@ import { baseRequestClient } from '#/api/request';
 import { useApiStore, useApiTestCacheStore } from '#/store';
 import { useAggregationStore } from '#/store/aggregation';
 import { compareOperationLike, compareTagNames } from '#/utils/openapi-sort';
+import { resolveServiceGroupDocumentUrl } from '#/utils/openapi-url';
 
 interface TagGroups {
   [tag: string]: Record<string, PathMenuItem[]>;
@@ -427,15 +428,16 @@ export const fetchAggregationRoutesImpl: () => Promise<
       });
 
       if (filterUrls.length > 0) {
-        // 获取服务前缀（如 "/file" from "/file/v3/api-docs"）
-        const servicePrefix = selectedService.url.replace('/v3/api-docs', '');
+        const docPath = gatewayOpenApi?.['x-nextdoc4j-aggregation']?.docPath;
 
         // 使用缓存并行请求所有分组的文档
         const dataList = await Promise.all(
           filterUrls.map(({ url }) => {
-            // url 格式: "/v3/api-docs/user"
-            // 需要拼接为: "/file/v3/api-docs/user"
-            const fullUrl = `${servicePrefix}${url}`;
+            const fullUrl = resolveServiceGroupDocumentUrl(
+              selectedService.url,
+              url,
+              docPath,
+            );
             return aggregationStore.getServiceGroupDoc(
               selectedService,
               fullUrl,

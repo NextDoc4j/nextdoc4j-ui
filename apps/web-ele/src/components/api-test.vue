@@ -70,6 +70,10 @@ import {
   formatDetectedImageSize,
 } from '#/utils/base64-image';
 import { copyText } from '#/utils/clipboard';
+import {
+  resolveGatewayBaseUrl,
+  resolveServiceDocumentPrefix,
+} from '#/utils/openapi-url';
 import { adaptSchemaForView, hasRenderableSchema } from '#/utils/schema';
 
 import bodyParams from './body-params.vue';
@@ -2080,9 +2084,11 @@ async function sendRequest() {
     // 获取聚合模式下的服务前缀
     let servicePrefix = '';
     if (aggregationStore.isAggregation && aggregationStore.currentService) {
-      // 从服务 URL 中提取前缀，如 "/file/v3/api-docs" -> "/file"
       const serviceUrl = aggregationStore.currentService.url;
-      servicePrefix = serviceUrl.replace('/v3/api-docs', '');
+      const docPath =
+        aggregationStore.mainConfigCache.openApi?.['x-nextdoc4j-aggregation']
+          ?.docPath;
+      servicePrefix = resolveServiceDocumentPrefix(serviceUrl, docPath);
     }
 
     const finalUrl = new URL(window.origin + apiURL + servicePrefix + url);
@@ -2423,7 +2429,10 @@ const urlEncodedParams = ref<Array<ParamsType>>([]);
 
 onMounted(async () => {
   const openApi = apiStore.openApi;
-  baseUrl.value = openApi?.servers?.[0]?.url;
+  const serverUrl = openApi?.servers?.[0]?.url || '';
+  baseUrl.value = aggregationStore.isAggregation
+    ? resolveGatewayBaseUrl(serverUrl, apiURL, window.origin)
+    : serverUrl;
   syncNarrowLayoutState();
   window.addEventListener('pagehide', handlePageHide);
   window.addEventListener('resize', syncNarrowLayoutState);

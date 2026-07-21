@@ -56,6 +56,7 @@ import {
   compareTagLike,
   compareTagNames,
 } from '#/utils/openapi-sort';
+import { resolveServiceGroupDocumentUrl } from '#/utils/openapi-url';
 
 defineOptions({ name: 'DocManageExport' });
 
@@ -2005,13 +2006,18 @@ async function loadGroupDocsForService(
 ) {
   const urls = config.urls || [];
   const docs: GroupDocItem[] = [];
+  const docPath =
+    aggregationGatewayOpenApi.value?.['x-nextdoc4j-aggregation']?.docPath;
 
-  const servicePrefix = service.url.replace('/v3/api-docs', '');
   for (const item of urls) {
     const code = parseGroupCode(item.url);
     if (code === 'all') continue;
 
-    const fullUrl = `${servicePrefix}${item.url}`;
+    const fullUrl = resolveServiceGroupDocumentUrl(
+      service.url,
+      item.url,
+      docPath,
+    );
     const openApi = await aggregationStore.getServiceGroupDoc(service, fullUrl);
     const tagMeta = resolveGroupTagMeta(openApi, item.name?.trim());
     docs.push({
