@@ -230,6 +230,14 @@ const getObjectContainerSchema = (item: any, path: string): any => {
 };
 
 const isExpandable = (item: any, path: string) => {
+  // multi-branch oneOf/anyOf must expand so nested variant tabs match response SchemaView
+  const compositionKeyword = getCompositionKeyword(item);
+  if (
+    (compositionKeyword === 'oneOf' || compositionKeyword === 'anyOf') &&
+    getCompositionItems(item, compositionKeyword).length > 1
+  ) {
+    return true;
+  }
   const schema = getDisplaySchema(item, path);
   if (schema?.type === 'object' && schema?.properties) {
     return Object.keys(schema.properties).length > 0;
@@ -282,11 +290,65 @@ const getPropertyEnumItems = (value: any, path: string) => {
 
 const getTypeLabel = (value: any, path: string) => {
   const schema = getDisplaySchema(value, path);
-  return getSchemaTypeLabel(schema);
+  const label = getSchemaTypeLabel(schema);
+  // 纯 oneOf/anyOf 合并后若类型仍为 any，回退到当前选中分支类型
+  if (label && label !== 'any' && label !== '-') {
+    return label;
+  }
+  const keyword = getCompositionKeyword(value);
+  if (keyword === 'oneOf' || keyword === 'anyOf') {
+    const options = getCompositionItems(value, keyword);
+    const selected =
+      options[getSelectedVariantIndex(value, path)] ?? options[0];
+    if (selected) {
+      return getSchemaTypeLabel(selected);
+    }
+  }
+  return label;
+};
+
+/**
+ * 从 schema / examples 中取首个可用示例（忽略 null）
+ */
+const pickUsableExample = (source: any): unknown => {
+  if (!source || typeof source !== 'object') {
+    return undefined;
+  }
+  if (source.example !== undefined && source.example !== null) {
+    return source.example;
+  }
+  if (Array.isArray(source.examples) && source.examples.length > 0) {
+    const first = source.examples[0];
+    if (first === undefined || first === null) {
+      return undefined;
+    }
+    if (typeof first === 'object' && first !== null && 'value' in first) {
+      return (first as { value: unknown }).value ?? undefined;
+    }
+    return first;
+  }
+  return undefined;
 };
 
 const getExampleValue = (value: any, path: string) => {
-  return getDisplaySchema(value, path)?.example;
+  const display = getDisplaySchema(value, path);
+  const fromDisplay = pickUsableExample(display);
+  if (fromDisplay !== undefined) {
+    return fromDisplay;
+  }
+  const fromRaw = pickUsableExample(value);
+  if (fromRaw !== undefined) {
+    return fromRaw;
+  }
+  // 合并后可能丢失分支 example：直接读当前选中分支
+  const keyword = getCompositionKeyword(value);
+  if (keyword === 'oneOf' || keyword === 'anyOf') {
+    const options = getCompositionItems(value, keyword);
+    const selected =
+      options[getSelectedVariantIndex(value, path)] ?? options[0];
+    return pickUsableExample(selected);
+  }
+  return undefined;
 };
 
 const getPatternValue = (value: any, path: string) => {
@@ -369,11 +431,53 @@ const getVariantOptions = (item: any) => {
 };
 
 /**
- * 获取 oneOf/anyOf 分支的显示标题
- * 用于分段选择器按钮文本
+ * 分支 tab 主文案：实体保留 title；标量直接显示类型（不再用「方案 N」）
  */
-const getVariantButtonLabel = (option: any, index: number) => {
-  return option?.title || `方案 ${index + 1}`;
+const getVariantButtonLabel = (option: any, _index?: number) => {
+  const title = `${option?.title || ''}`.trim();
+  if (title && !/^方案\s*\d+$/u.test(title)) {
+    return title;
+  }
+  return getSchemaTypeLabel(option) || option?.type || '-';
+};
+
+/**
+ * 主文案已是类型时不再重复展示 type chip
+ */
+const shouldShowVariantTypeChip = (option: any) => {
+  if (!option?.type) {
+    return false;
+  }
+  const label = getVariantButtonLabel(option);
+  const typeLabel = getSchemaTypeLabel(option);
+  return label !== option.type && label !== typeLabel;
+};
+
+/** 分支描述非空才启用 tooltip，避免空浮窗 */
+const hasTooltipContent = (text?: string) => Boolean(`${text || ''}`.trim());
+
+/**
+ * 选中分支是否仍有可嵌套展示的对象/数组结构（纯标量则不再渲染子 SchemaView）
+ */
+const hasNestedSchemaStructure = (item: any, path: string) => {
+  const schema = getDisplaySchema(item, path);
+  if (!schema || typeof schema !== 'object') {
+    return false;
+  }
+  if (
+    schema.type === 'object' &&
+    schema.properties &&
+    Object.keys(schema.properties).length > 0
+  ) {
+    return true;
+  }
+  if (schema.type === 'array' && schema.items) {
+    if (schema.items?.type === 'object' && schema.items?.properties) {
+      return true;
+    }
+    return hasVariantSelector(schema.items);
+  }
+  return hasVariantSelector(schema);
 };
 
 /**
@@ -430,12 +534,12 @@ const rootHasVariantSelector = computed(() => {
   return hasVariantSelector(props.data);
 });
 
+// 纯 oneOf/anyOf 标量：类型随 tab 在字段 type chip 上变化，不再单独展示「结构/根」pill
 const showRootHeader = computed(() => {
-  return (
-    showRootArrayPill.value ||
-    showRootPrimitivePill.value ||
-    rootHasVariantSelector.value
-  );
+  if (rootHasVariantSelector.value) {
+    return showRootArrayPill.value;
+  }
+  return showRootArrayPill.value || showRootPrimitivePill.value;
 });
 
 const showSchemaStack = computed(() => {
@@ -456,6 +560,9 @@ const showSchemaStack = computed(() => {
   <div v-if="rootHasVariantSelector" class="schema-root-variant">
     <ElTooltip
       :content="getCompositionTooltip(getCompositionKeyword(data))"
+      :disabled="
+        !hasTooltipContent(getCompositionTooltip(getCompositionKeyword(data)))
+      "
       placement="top"
     >
       <span class="schema-root-variant__label">
@@ -467,6 +574,7 @@ const showSchemaStack = computed(() => {
         v-for="(option, index) in getVariantOptions(data)"
         :key="`${rootPath}-${index}`"
         :content="option?.description || ''"
+        :disabled="!hasTooltipContent(option?.description)"
         placement="top"
       >
         <button
@@ -481,7 +589,10 @@ const showSchemaStack = computed(() => {
           <span class="variant-tab__title">
             {{ getVariantButtonLabel(option, index) }}
           </span>
-          <span v-if="option?.type" class="variant-tab__type">
+          <span
+            v-if="shouldShowVariantTypeChip(option)"
+            class="variant-tab__type"
+          >
             {{ option.type }}
           </span>
         </button>
@@ -613,7 +724,8 @@ const showSchemaStack = computed(() => {
               getConstraintTokens(value, getNodePath(String(key))).length > 0 ||
               getPropertyEnumItems(value, getNodePath(String(key))).length >
                 0 ||
-              getExampleValue(value, getNodePath(String(key))) !== undefined ||
+              (getExampleValue(value, getNodePath(String(key))) !== undefined &&
+                getExampleValue(value, getNodePath(String(key))) !== null) ||
               getPatternValue(value, getNodePath(String(key)))
             "
             class="schema-item__details"
@@ -683,7 +795,9 @@ const showSchemaStack = computed(() => {
 
             <div
               v-if="
-                getExampleValue(value, getNodePath(String(key))) !== undefined
+                getExampleValue(value, getNodePath(String(key))) !==
+                  undefined &&
+                getExampleValue(value, getNodePath(String(key))) !== null
               "
               class="schema-item__detail-row"
             >
@@ -726,6 +840,11 @@ const showSchemaStack = computed(() => {
         >
           <ElTooltip
             :content="getCompositionTooltip(getCompositionKeyword(value))"
+            :disabled="
+              !hasTooltipContent(
+                getCompositionTooltip(getCompositionKeyword(value)),
+              )
+            "
             placement="top"
           >
             <span class="schema-item__variant-label">
@@ -737,6 +856,7 @@ const showSchemaStack = computed(() => {
               v-for="(option, index) in getVariantOptions(value)"
               :key="`${getNodePath(String(key))}-${index}`"
               :content="option?.description || ''"
+              :disabled="!hasTooltipContent(option?.description)"
               placement="top"
             >
               <button
@@ -752,14 +872,19 @@ const showSchemaStack = computed(() => {
                 <span class="variant-tab__title">
                   {{ getVariantButtonLabel(option, index) }}
                 </span>
-                <span v-if="option?.type" class="variant-tab__type">
+                <span
+                  v-if="shouldShowVariantTypeChip(option)"
+                  class="variant-tab__type"
+                >
                   {{ option.type }}
                 </span>
               </button>
             </ElTooltip>
           </div>
         </div>
+        <!-- 仅对象/数组结构嵌套渲染；纯标量分支只保留 tabs，类型在父级 type chip 更新 -->
         <SchemaView
+          v-if="hasNestedSchemaStructure(value, getNodePath(String(key)))"
           :data="getDisplaySchema(value, getNodePath(String(key)))"
           :mode="mode"
           :path-prefix="getNodePath(String(key))"
@@ -1174,11 +1299,7 @@ const showSchemaStack = computed(() => {
 
 .schema-item__required-tag--response {
   color: var(--el-color-info);
-  background: color-mix(
-    in srgb,
-    var(--el-color-info-light-9) 88%,
-    transparent
-  );
+  background: color-mix(in srgb, var(--el-color-info-light-9) 88%, transparent);
   border-color: color-mix(
     in srgb,
     var(--el-color-info-light-7) 86%,

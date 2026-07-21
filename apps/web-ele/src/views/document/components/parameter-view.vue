@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import type { Parameter } from '#/typings/openApi';
 
-import { computed } from 'vue';
+import { computed, ref, watch } from 'vue';
 
+import SchemaView from '#/components/schema-view.vue';
 import { getEnumItems } from '#/utils/enumexpand';
 import { getSchemaTypeLabel, resolveSchema } from '#/utils/schema';
 
@@ -18,8 +19,98 @@ const schema = computed(() => {
   return props.parameter.schema ? resolveSchema(props.parameter.schema) : null;
 });
 
+/**
+ * query/path 参数 schema 是否为多分支 oneOf/anyOf，需复用 SchemaView 分支切换
+ */
+const hasCompositionVariants = computed(() => {
+  const source = schema.value;
+  if (!source || typeof source !== 'object') {
+    return false;
+  }
+  if (Array.isArray(source.oneOf) && source.oneOf.length > 1) {
+    return true;
+  }
+  if (Array.isArray(source.anyOf) && source.anyOf.length > 1) {
+    return true;
+  }
+  return false;
+});
+
+/** 当前选中的 oneOf/anyOf 分支下标（与嵌入的 SchemaView 根 tabs 同步） */
+const selectedVariantIndex = ref(0);
+
+watch(
+  () => props.parameter.name,
+  () => {
+    selectedVariantIndex.value = 0;
+  },
+);
+
+/**
+ * 多分支 composition 的选项列表
+ */
+const compositionOptions = computed(() => {
+  const source = schema.value;
+  if (!source || typeof source !== 'object') {
+    return [] as any[];
+  }
+  if (Array.isArray(source.oneOf) && source.oneOf.length > 1) {
+    return source.oneOf as any[];
+  }
+  if (Array.isArray(source.anyOf) && source.anyOf.length > 1) {
+    return source.anyOf as any[];
+  }
+  return [] as any[];
+});
+
+/**
+ * 当前展示用 schema：多分支时取选中分支，与 body SchemaView 类型/示例一致
+ */
+const displaySchema = computed(() => {
+  const options = compositionOptions.value;
+  if (options.length > 0) {
+    const idx = selectedVariantIndex.value;
+    const safe =
+      typeof idx === 'number' && idx >= 0 && idx < options.length ? idx : 0;
+    return options[safe] ?? options[0] ?? schema.value;
+  }
+  return schema.value;
+});
+
+/** SchemaView 根路径为 $ 的分支切换才驱动参数头类型/示例 */
+const handleVariantChange = (payload: { index: number; path: string }) => {
+  if (!payload.path || payload.path === '$') {
+    selectedVariantIndex.value = Number.isFinite(payload.index)
+      ? payload.index
+      : 0;
+  }
+};
+
+/**
+ * 从 schema / examples 取可用示例（null 视为未提供）
+ */
+const pickUsableExample = (source: any): unknown => {
+  if (!source || typeof source !== 'object') {
+    return undefined;
+  }
+  if (source.example !== undefined && source.example !== null) {
+    return source.example;
+  }
+  if (Array.isArray(source.examples) && source.examples.length > 0) {
+    const first = source.examples[0];
+    if (first === undefined || first === null) {
+      return undefined;
+    }
+    if (typeof first === 'object' && first !== null && 'value' in first) {
+      return (first as { value: unknown }).value ?? undefined;
+    }
+    return first;
+  }
+  return undefined;
+};
+
 const constraintTokens = computed(() => {
-  const source = schema.value || props.parameter;
+  const source = displaySchema.value || props.parameter;
   const parts: string[] = [];
 
   if (source.minLength !== undefined) {
@@ -58,22 +149,36 @@ const htmlDescription = computed(() => {
 });
 
 const enumItems = computed(() => {
-  const schemaSource = schema.value || props.parameter.schema;
+  const schemaSource = displaySchema.value || props.parameter.schema;
   if (!schemaSource) return [];
 
   return getEnumItems(schemaSource);
 });
 
 const typeLabel = computed(() => {
-  return getSchemaTypeLabel(schema.value);
+  // 多分支时用选中分支类型，避免 composition 根始终显示 any
+  return getSchemaTypeLabel(displaySchema.value);
 });
 
 const exampleValue = computed(() => {
-  return props.parameter.example ?? schema.value?.example;
+  // 参数级示例优先
+  if (
+    props.parameter.example !== undefined &&
+    props.parameter.example !== null
+  ) {
+    return props.parameter.example;
+  }
+  // 选中分支 / 展示 schema
+  const fromDisplay = pickUsableExample(displaySchema.value);
+  if (fromDisplay !== undefined) {
+    return fromDisplay;
+  }
+  // 回退原始 schema 根（非 null）
+  return pickUsableExample(schema.value);
 });
 
 const patternValue = computed(() => {
-  return schema.value?.pattern || '';
+  return displaySchema.value?.pattern || '';
 });
 
 const formatValue = (value: unknown) => {
@@ -94,11 +199,11 @@ const formatValue = (value: unknown) => {
           :class="{ 'parameter-item__name--required': parameter.required }"
         >
           {{ parameter.name }}
-          <span v-if="parameter.required" class="parameter-item__required-tag">
-            必填
-          </span>
         </div>
         <div class="parameter-item__type">{{ typeLabel }}</div>
+        <span v-if="parameter.required" class="parameter-item__required-tag">
+          必填
+        </span>
         <div v-if="plainDescription" class="parameter-item__summary">
           {{ plainDescription }}
         </div>
@@ -166,6 +271,18 @@ const formatValue = (value: unknown) => {
           <span class="meta-chip meta-chip--mono">{{ patternValue }}</span>
         </div>
       </div>
+    </div>
+
+    <!-- 多分支 oneOf/anyOf：复用 SchemaView 根级分支切换；类型/示例随 variant-change 同步 -->
+    <div
+      v-if="hasCompositionVariants && schema"
+      class="parameter-item__composition"
+    >
+      <SchemaView
+        :data="schema"
+        mode="request"
+        @variant-change="handleVariantChange"
+      />
     </div>
   </div>
 </template>
@@ -235,6 +352,7 @@ const formatValue = (value: unknown) => {
 
 .parameter-item__required-tag {
   display: inline-flex;
+  flex: none;
   align-items: center;
   min-height: 18px;
   padding: 0 6px;
@@ -256,6 +374,11 @@ const formatValue = (value: unknown) => {
   border: 1px solid
     color-mix(in srgb, var(--el-color-danger-light-7) 86%, transparent);
   border-radius: 6px;
+}
+
+.parameter-item__composition {
+  padding: 0 20px 4px;
+  margin-top: 10px;
 }
 
 .parameter-item__type {
