@@ -7,11 +7,16 @@ import type {
   UploadRawFile,
 } from 'element-plus';
 
-import { computed, watch } from 'vue';
-
-import { SvgCloseIcon } from '@vben/icons';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 
 import {
+  SvgCloseIcon,
+  SvgDocumentDocTrashBinIcon,
+  SvgExpandEditorIcon,
+} from '@vben/icons';
+
+import {
+  ElAutocomplete,
   ElButton,
   ElCheckbox,
   ElInput,
@@ -21,6 +26,8 @@ import {
   ElUpload,
   genFileId,
 } from 'element-plus';
+
+import { getEnumDescription } from '#/utils/enumexpand';
 
 interface ParamItem {
   __rowKey?: string;
@@ -32,18 +39,26 @@ interface ParamItem {
   type?: string;
   format?: string;
   required?: boolean;
-  enum?: number[] | string[];
+  enum?: Array<number | string>;
   contentType?: string;
   schema?: {
-    enum?: number[] | string[];
+    enum?: Array<number | string>;
     format?: string;
     items?: {
-      enum?: number[] | string[];
+      enum?: Array<number | string>;
       format?: string;
+      'x-nextdoc4j-enum'?: {
+        items?: Array<{ description?: string; value: number | string }>;
+      };
     };
     type?: string;
+    'x-nextdoc4j-enum'?: {
+      items?: Array<{ description?: string; value: number | string }>;
+    };
   };
 }
+
+type DraftInputField = 'description' | 'name' | 'value';
 
 const props = withDefaults(
   defineProps<{
@@ -66,12 +81,30 @@ const props = withDefaults(
 );
 
 const contentTypeOptions = [
-  { label: 'application/octet-stream', value: 'application/octet-stream' },
-  { label: 'application/json', value: 'application/json' },
-  { label: 'application/xml', value: 'application/xml' },
-  { label: 'text/plain', value: 'text/plain' },
-  { label: 'text/html', value: 'text/html' },
+  { value: 'application/octet-stream' },
+  { value: 'application/json' },
+  { value: 'application/xml' },
+  { value: 'text/plain' },
+  { value: 'text/html' },
 ];
+
+/**
+ * Content-Type 输入框的候选建议：按已输入内容做子串过滤，空输入时返回全部内置项。
+ * 交由 ElAutocomplete 作为搜索提示使用，不限制自由输入。
+ */
+const queryContentTypeSuggestions = (
+  queryString: string,
+  callback: (suggestions: Array<{ value: string }>) => void,
+) => {
+  const keyword = queryString.trim().toLowerCase();
+  callback(
+    keyword
+      ? contentTypeOptions.filter((option) =>
+          option.value.toLowerCase().includes(keyword),
+        )
+      : contentTypeOptions,
+  );
+};
 
 const showInlineDelete = computed(() => {
   return props.allowDelete && !props.showDeleteInDescription;
@@ -137,22 +170,31 @@ function handleChange(value: CheckboxValueType) {
   allChecked.value = value as boolean;
 }
 
-function isEnumParam(row: ParamItem) {
-  return (
-    (row.enum && row.enum.length > 0) ||
-    (row.schema?.enum && row.schema.enum.length > 0) ||
-    (row.schema?.items?.enum && row.schema.items.enum.length > 0)
-  );
+function getEnumSchema(row: ParamItem) {
+  const itemSchema = row.schema?.items;
+  const hasItemEnum =
+    (itemSchema?.enum && itemSchema.enum.length > 0) ||
+    (itemSchema?.['x-nextdoc4j-enum']?.items?.length ?? 0) > 0;
+  return hasItemEnum ? itemSchema : row.schema;
 }
 
 function getEnumOptions(row: ParamItem) {
-  const enumValues: (number | string)[] =
-    row.enum || row.schema?.enum || row.schema?.items?.enum || [];
+  const enumSchema = getEnumSchema(row);
+  const extendedItems = enumSchema?.['x-nextdoc4j-enum']?.items || [];
+  const enumValues: Array<number | string> =
+    row.enum || enumSchema?.enum || extendedItems.map((item) => item.value);
+
   return enumValues.map((value) => ({
     label: String(value),
     value,
-    description: undefined,
+    description: extendedItems.find(
+      (item) => String(item.value) === String(value),
+    )?.description,
   }));
+}
+
+function isEnumParam(row: ParamItem) {
+  return getEnumOptions(row).length > 0;
 }
 
 function getPlaceholder(row: ParamItem) {
@@ -162,7 +204,32 @@ function getPlaceholder(row: ParamItem) {
 }
 
 function getDescription(row: ParamItem) {
-  return row.description?.trim() || '';
+  // 拼接原始描述与扩展枚举（x-nextdoc4j-enum）说明，便于在调试表格中完整查看
+  const enumDesc = getEnumDescription(
+    row.description?.trim() || '',
+    getEnumSchema(row),
+  ).trim();
+  return enumDesc;
+}
+
+// 描述列文案是否溢出（仅在文本被省略号截断时才展示浮窗），key 为行的 __rowKey
+const descriptionTruncated = ref<Record<string, boolean>>({});
+
+/** 鼠标进入描述文本时测量是否发生截断，决定是否需要展示浮窗 */
+function handleDescriptionHover(
+  event: MouseEvent,
+  row: ParamItem,
+  index: number,
+) {
+  const target = event.currentTarget as HTMLElement | null;
+  if (!target) {
+    return;
+  }
+  const key = getRowKey(row, index);
+  descriptionTruncated.value = {
+    ...descriptionTruncated.value,
+    [key]: target.scrollWidth > target.clientWidth,
+  };
 }
 
 function normalizeEnumRowValue(row: ParamItem) {
@@ -201,17 +268,219 @@ function remove(index: number) {
   props.tableData.splice(index, 1);
 }
 
-function add() {
-  // eslint-disable-next-line vue/no-mutating-props
-  props.tableData.push({
-    __rowKey: createParamRowKey(),
-    name: '',
-    value: '',
-    enabled: true,
-    fileList: [],
-    contentType: undefined,
+// ===== 参数值编辑弹窗：长参数值在内联输入框中体验差，提供大文本域编辑 =====
+const valueEditorVisible = ref(false);
+const valueEditorDraft = ref('');
+// 仅持有当前编辑行引用，确认后写回该行 value；不跨行复用，避免错位
+const valueEditorRow = ref<null | ParamItem>(null);
+// 组件根节点引用，用于向上查找「请求参数」内容区作为覆盖层挂载点
+const wrapRef = ref<HTMLElement | null>(null);
+// 覆盖层 Teleport 目标：优先挂到整个调试布局，未找到时回退到「请求参数」内容区
+const editorTeleportTarget = ref<HTMLElement | null>(null);
+
+/**
+ * 用途：打开参数值编辑覆盖层，并将当前行参数值载入草稿。
+ * 参数说明：row 为当前需要编辑的参数行数据。
+ * 返回值说明：无返回值，仅更新编辑覆盖层状态。
+ */
+function openValueEditor(row: ParamItem) {
+  valueEditorRow.value = row;
+  valueEditorDraft.value = `${row.value ?? ''}`;
+  const debugLayout = wrapRef.value?.closest<HTMLElement>('.debug-layout');
+  const tabsWrap = wrapRef.value?.closest<HTMLElement>('.debug-tabs-wrap');
+  editorTeleportTarget.value = debugLayout ?? tabsWrap ?? null;
+  valueEditorVisible.value = true;
+}
+
+/**
+ * 用途：关闭参数值编辑覆盖层并清理临时编辑状态。
+ * 参数说明：无参数。
+ * 返回值说明：无返回值。
+ */
+function closeValueEditor() {
+  valueEditorVisible.value = false;
+  valueEditorRow.value = null;
+  valueEditorDraft.value = '';
+}
+
+/**
+ * 用途：确认参数值编辑，将草稿写回当前行。
+ * 参数说明：无参数。
+ * 返回值说明：无返回值，写回后自动关闭编辑覆盖层。
+ */
+function confirmValueEditor() {
+  if (valueEditorRow.value) {
+    valueEditorRow.value.value = valueEditorDraft.value;
+  }
+  closeValueEditor();
+}
+
+// 末尾草稿行：替代「添加参数」按钮，用户在末尾空白行任意填写即自动新增正式行。
+// 草稿行独立于 tableData，避免空行干扰参数数量统计与缓存持久化。
+/**
+ * 用途：创建末尾草稿行数据。
+ * 参数说明：无参数。
+ * 返回值说明：返回带唯一行标识的空参数行。
+ */
+const createDraftRow = (): ParamItem => ({
+  __rowKey: createParamRowKey(),
+  name: '',
+  value: '',
+  enabled: true,
+  fileList: [],
+});
+
+const draftRow = ref<ParamItem>(createDraftRow());
+let focusRetryTimers: number[] = [];
+
+const displayRows = computed(() => {
+  return props.showAddButton
+    ? [...props.tableData, draftRow.value]
+    : props.tableData;
+});
+
+/**
+ * 用途：判断草稿行是否已经填写了可提交内容。
+ * 参数说明：row 为当前末尾草稿行数据。
+ * 返回值说明：存在参数名或参数值时返回 true。
+ */
+function hasDraftRowContent(row: ParamItem) {
+  return Boolean(row.name?.trim() || `${row.value ?? ''}`.trim());
+}
+
+/**
+ * 用途：判断当前行是否为末尾草稿行。
+ * 参数说明：row 为当前渲染行数据。
+ * 返回值说明：当前行是草稿行对象时返回 true。
+ */
+function isDraftRow(row: ParamItem) {
+  return props.showAddButton && row === draftRow.value;
+}
+
+/**
+ * 用途：清理提交草稿行后的焦点重试计时器。
+ * 参数说明：无参数。
+ * 返回值说明：无返回值，仅取消尚未执行的焦点重试。
+ */
+function clearFocusRetryTimers() {
+  focusRetryTimers.forEach((timer) => {
+    window.clearTimeout(timer);
+  });
+  focusRetryTimers = [];
+}
+
+/**
+ * 用途：查找刚由草稿行提交出来的正式参数行输入框。
+ * 参数说明：rowKey 为正式行唯一标识，field 为需要定位的字段。
+ * 返回值说明：找到时返回对应原生 input 元素，否则返回 null。
+ */
+function findCommittedDraftInput(rowKey: string, field: DraftInputField) {
+  return (
+    wrapRef.value?.querySelector<HTMLInputElement>(
+      `[data-param-row-key="${rowKey}"][data-param-field="${field}"] input`,
+    ) ?? null
+  );
+}
+
+/**
+ * 用途：将焦点恢复到刚由草稿行提交出来的正式参数行字段。
+ * 参数说明：rowKey 为正式行唯一标识，field 为需要恢复焦点的字段。
+ * 返回值说明：无返回值，仅在 DOM 更新后恢复输入焦点和光标位置。
+ */
+function focusCommittedDraftField(rowKey: string, field: DraftInputField) {
+  clearFocusRetryTimers();
+  const focusInput = () => {
+    const input = findCommittedDraftInput(rowKey, field);
+    if (!input) {
+      return false;
+    }
+    input.focus();
+    const cursorPosition = input.value.length;
+    input.setSelectionRange(cursorPosition, cursorPosition);
+    clearFocusRetryTimers();
+    return true;
+  };
+
+  void nextTick(() => {
+    if (focusInput()) {
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      if (focusInput()) {
+        return;
+      }
+      [30, 80, 160].forEach((delay) => {
+        const timer = window.setTimeout(() => {
+          focusInput();
+        }, delay);
+        focusRetryTimers.push(timer);
+      });
+    });
   });
 }
+
+/**
+ * 用途：更新正式参数行字段。
+ * 参数说明：row 为当前正式行，field 为字段名，value 为输入后的字段值。
+ * 返回值说明：无返回值，仅更新当前字段。
+ */
+function handleCommittedInput(
+  row: ParamItem,
+  field: DraftInputField,
+  value: string,
+) {
+  row[field] = value;
+}
+
+/**
+ * 用途：将草稿行提交为正式行，并重置草稿行以便继续录入。
+ * 参数说明：field 为触发提交的字段，用于提交后恢复焦点。
+ * 返回值说明：无返回值，会向参数列表追加一行并重置草稿行。
+ */
+function commitDraftRow(field: DraftInputField) {
+  const rowKey = draftRow.value.__rowKey || createParamRowKey();
+  const row = {
+    ...draftRow.value,
+    __rowKey: rowKey,
+  };
+  // eslint-disable-next-line vue/no-mutating-props
+  props.tableData.push(row);
+  draftRow.value = createDraftRow();
+  focusCommittedDraftField(rowKey, field);
+}
+
+/**
+ * 用途：处理草稿行字段输入，首次填写后自动提交成正式行。
+ * 参数说明：field 为正在输入的字段，value 为输入后的字段值。
+ * 返回值说明：无返回值，会在草稿行有内容时自动新增下一空行。
+ */
+function handleDraftInput(field: DraftInputField, value: string) {
+  draftRow.value[field] = value;
+  if (hasDraftRowContent(draftRow.value)) {
+    commitDraftRow(field);
+  }
+}
+
+/**
+ * 用途：处理参数表字段输入，草稿行负责自动提交，正式行直接更新字段。
+ * 参数说明：row 为当前行数据，index 为行索引，field 为字段名，value 为输入后的字段值。
+ * 返回值说明：无返回值，会根据行类型更新草稿行或正式参数行。
+ */
+function handleParamFieldInput(
+  row: ParamItem,
+  field: DraftInputField,
+  value: string,
+) {
+  if (isDraftRow(row)) {
+    handleDraftInput(field, value);
+    return;
+  }
+  handleCommittedInput(row, field, value);
+}
+
+onBeforeUnmount(() => {
+  clearFocusRetryTimers();
+});
 
 function handleUpload(
   _uploadFile: UploadFile,
@@ -276,7 +545,7 @@ watch(
 </script>
 
 <template>
-  <div class="params-table-wrap">
+  <div ref="wrapRef" class="params-table-wrap">
     <div class="params-table-shell">
       <div class="params-grid-table">
         <div
@@ -310,20 +579,29 @@ watch(
         </div>
 
         <div
-          v-for="(row, index) in tableData"
+          v-for="(row, index) in displayRows"
           :key="getRowKey(row, index)"
           class="params-grid-table__row"
+          :class="{ 'params-grid-table__row--draft': isDraftRow(row) }"
           :style="rowStyle"
         >
           <div
             v-if="showSelectionColumn"
             class="params-grid-table__cell params-grid-table__cell--selection params-grid-table__cell--body"
           >
-            <ElCheckbox v-model="row.enabled" />
+            <ElCheckbox v-model="row.enabled" :disabled="isDraftRow(row)" />
           </div>
 
           <div class="params-grid-table__cell params-grid-table__cell--body">
-            <ElInput v-model="row.name" placeholder="参数名" />
+            <ElInput
+              :model-value="row.name"
+              :placeholder="isDraftRow(row) ? '添加参数名' : '参数名'"
+              :data-param-row-key="row.__rowKey"
+              data-param-field="name"
+              @update:model-value="
+                (value) => handleParamFieldInput(row, 'name', value)
+              "
+            />
           </div>
 
           <div class="params-grid-table__cell params-grid-table__cell--body">
@@ -435,9 +713,28 @@ watch(
             </div>
 
             <div v-else class="params-grid-table__control">
-              <ElInput v-model="row.value" :placeholder="getPlaceholder(row)" />
+              <ElInput
+                :model-value="row.value"
+                :placeholder="
+                  isDraftRow(row) ? '添加参数值' : getPlaceholder(row)
+                "
+                :data-param-row-key="row.__rowKey"
+                data-param-field="value"
+                @update:model-value="
+                  (value) => handleParamFieldInput(row, 'value', value)
+                "
+              />
               <button
-                v-if="showInlineDelete"
+                v-if="!isDraftRow(row)"
+                type="button"
+                class="param-edit-button"
+                title="编辑参数值"
+                @click="openValueEditor(row)"
+              >
+                <SvgExpandEditorIcon class="param-edit-icon" />
+              </button>
+              <button
+                v-if="showInlineDelete && !isDraftRow(row)"
                 type="button"
                 class="param-inline-delete"
                 @click="remove(index)"
@@ -451,34 +748,45 @@ watch(
             v-if="showContentType"
             class="params-grid-table__cell params-grid-table__cell--body"
           >
-            <ElSelect
+            <ElAutocomplete
+              v-if="!isDraftRow(row)"
               v-model="row.contentType"
               placeholder="自动"
+              :fetch-suggestions="queryContentTypeSuggestions"
+              :trigger-on-focus="true"
+              value-key="value"
               clearable
               size="small"
               class="w-full"
-            >
-              <ElOption
-                v-for="option in contentTypeOptions"
-                :key="option.value"
-                :label="option.label"
-                :value="option.value"
-              />
-            </ElSelect>
+            />
           </div>
 
           <div
             v-if="showDescriptionColumn"
             class="params-grid-table__cell params-grid-table__cell--body"
           >
-            <div class="param-description-cell">
+            <ElInput
+              v-if="isDraftRow(row)"
+              :model-value="row.description"
+              placeholder="可选说明"
+              :data-param-row-key="row.__rowKey"
+              data-param-field="description"
+              @update:model-value="
+                (value) => handleParamFieldInput(row, 'description', value)
+              "
+            />
+            <div v-else class="param-description-cell">
               <span class="param-description-main">
                 <ElTooltip
                   v-if="getDescription(row)"
                   :content="getDescription(row)"
                   placement="top"
+                  :disabled="!descriptionTruncated[getRowKey(row, index)]"
                 >
-                  <span class="param-description-text">
+                  <span
+                    class="param-description-text"
+                    @mouseenter="handleDescriptionHover($event, row, index)"
+                  >
                     {{ getDescription(row) }}
                   </span>
                 </ElTooltip>
@@ -490,34 +798,7 @@ watch(
                 class="param-delete-button"
                 @click="remove(index)"
               >
-                <svg
-                  class="param-delete-icon"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  xmlns="http://www.w3.org/2000/svg"
-                >
-                  <path
-                    d="M3 6.38597C3 5.90152 3.34538 5.50879 3.77143 5.50879L6.43567 5.50832C6.96502 5.49306 7.43202 5.11033 7.61214 4.54412C7.61688 4.52923 7.62232 4.51087 7.64185 4.44424L7.75665 4.05256C7.8269 3.81241 7.8881 3.60318 7.97375 3.41617C8.31209 2.67736 8.93808 2.16432 9.66147 2.03297C9.84457 1.99972 10.0385 1.99986 10.2611 2.00002H13.7391C13.9617 1.99986 14.1556 1.99972 14.3387 2.03297C15.0621 2.16432 15.6881 2.67736 16.0264 3.41617C16.1121 3.60318 16.1733 3.81241 16.2435 4.05256L16.3583 4.44424C16.3778 4.51087 16.3833 4.52923 16.388 4.54412C16.5682 5.11033 17.1278 5.49353 17.6571 5.50879H20.2286C20.6546 5.50879 21 5.90152 21 6.38597C21 6.87043 20.6546 7.26316 20.2286 7.26316H3.77143C3.34538 7.26316 3 6.87043 3 6.38597Z"
-                    fill="currentColor"
-                  />
-                  <path
-                    fill-rule="evenodd"
-                    clip-rule="evenodd"
-                    d="M9.42543 11.4815C9.83759 11.4381 10.2051 11.7547 10.2463 12.1885L10.7463 17.4517C10.7875 17.8855 10.4868 18.2724 10.0747 18.3158C9.66253 18.3592 9.29499 18.0426 9.25378 17.6088L8.75378 12.3456C8.71256 11.9118 9.01327 11.5249 9.42543 11.4815Z"
-                    fill="currentColor"
-                  />
-                  <path
-                    fill-rule="evenodd"
-                    clip-rule="evenodd"
-                    d="M14.5747 11.4815C14.9868 11.5249 15.2875 11.9118 15.2463 12.3456L14.7463 17.6088C14.7051 18.0426 14.3376 18.3592 13.9254 18.3158C13.5133 18.2724 13.2126 17.8855 13.2538 17.4517L13.7538 12.1885C13.795 11.7547 14.1625 11.4381 14.5747 11.4815Z"
-                    fill="currentColor"
-                  />
-                  <path
-                    opacity="0.5"
-                    d="M11.5956 22.0001H12.4044C15.1871 22.0001 16.5785 22.0001 17.4831 21.1142C18.3878 20.2283 18.4803 18.7751 18.6654 15.8686L18.9321 11.6807C19.0326 10.1037 19.0828 9.31524 18.6289 8.81558C18.1751 8.31592 17.4087 8.31592 15.876 8.31592H8.12405C6.59127 8.31592 5.82488 8.31592 5.37105 8.81558C4.91722 9.31524 4.96744 10.1037 5.06788 11.6807L5.33459 15.8686C5.5197 18.7751 5.61225 20.2283 6.51689 21.1142C7.42153 22.0001 8.81289 22.0001 11.5956 22.0001Z"
-                    fill="currentColor"
-                  />
-                </svg>
+                <SvgDocumentDocTrashBinIcon class="param-delete-icon" />
               </button>
             </div>
           </div>
@@ -525,14 +806,31 @@ watch(
       </div>
     </div>
 
-    <ElButton v-if="showAddButton" class="params-table-add" @click="add">
-      添加参数
-    </ElButton>
+    <!-- 参数值编辑覆盖层：覆盖整个在线调试区，避免请求参数面板过窄时挤压编辑器。 -->
+    <Teleport :to="editorTeleportTarget" :disabled="!editorTeleportTarget">
+      <div v-if="valueEditorVisible" class="param-editor-overlay">
+        <div class="param-editor">
+          <div class="param-editor__header">编辑参数值</div>
+          <textarea
+            v-model="valueEditorDraft"
+            class="param-editor__textarea"
+            placeholder="在此输入或粘贴完整的参数值"
+          ></textarea>
+          <div class="param-editor__footer">
+            <ElButton size="small" @click="closeValueEditor">取消</ElButton>
+            <ElButton size="small" type="primary" @click="confirmValueEditor">
+              确定
+            </ElButton>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <style lang="scss" scoped>
 .params-table-wrap {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -560,6 +858,13 @@ watch(
   width: 100%;
   min-width: 0;
   background: var(--debug-surface, var(--el-bg-color));
+  transition: background-color 0.2s ease;
+}
+
+.params-grid-table__row:not(.params-grid-table__row--header):not(
+    .params-grid-table__row--draft
+  ):hover {
+  background: var(--el-table-row-hover-bg-color, var(--el-fill-color));
 }
 
 .params-grid-table__row--header {
@@ -740,15 +1045,18 @@ watch(
   --el-checkbox-input-height: 14px;
 }
 
-.params-table-add {
-  width: 100%;
-  min-width: 0;
-  min-height: 32px;
-  font-size: 12px;
+/* 末尾草稿行：弱化展示，提示用户此处可直接输入新增参数 */
+.params-grid-table__row--draft {
+  background: color-mix(
+    in srgb,
+    var(--debug-soft-bg-strong, var(--el-fill-color-light)) 50%,
+    transparent
+  );
 }
 
-.params-table-add :deep(span) {
-  line-height: 1;
+.params-grid-table__row--draft .param-description-text,
+.params-grid-table__row--draft :deep(.el-input__inner::placeholder) {
+  color: var(--el-text-color-placeholder);
 }
 
 .param-description-cell {
@@ -842,5 +1150,102 @@ watch(
 .param-delete-icon {
   width: 12px;
   height: 12px;
+}
+
+/* 参数值编辑按钮：与行内删除按钮同款尺寸/交互，hover 用主题色区分 */
+.param-edit-button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  border-radius: calc(var(--radius) * 0.62);
+}
+
+.param-edit-button:hover {
+  color: var(--el-color-primary);
+  background: color-mix(
+    in srgb,
+    var(--el-color-primary-light-9) 70%,
+    transparent
+  );
+}
+
+.param-edit-icon {
+  width: 12px;
+  height: 12px;
+}
+
+/* 编辑覆盖层：absolute 铺满「请求参数」内容区（Teleport 目标），永不超出面板 */
+.param-editor-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  background: color-mix(in srgb, var(--el-bg-color) 55%, transparent);
+  backdrop-filter: blur(2px);
+}
+
+.param-editor {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 560px;
+  min-height: 0;
+
+  /* 限制在覆盖层内（已含 padding），卡片高度自适应且不溢出面板 */
+  max-height: 100%;
+  padding: 16px;
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color);
+  border-radius: calc(var(--radius) * 0.94);
+  box-shadow: var(--el-box-shadow-light);
+}
+
+.param-editor__header {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.param-editor__textarea {
+  box-sizing: border-box;
+
+  /* flex 撑满受限的卡片高度，超出时内部滚动；禁用手动 resize 以免拖出面板 */
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 180px;
+  padding: 10px 12px;
+  overflow: auto;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--el-text-color-primary);
+  resize: none;
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color);
+  border-radius: calc(var(--radius) * 0.72);
+}
+
+.param-editor__textarea:focus {
+  outline: none;
+  border-color: var(--el-color-primary);
+}
+
+.param-editor__footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
 }
 </style>

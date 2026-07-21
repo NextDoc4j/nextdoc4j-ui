@@ -3,7 +3,14 @@ import type { HoverCardContentProps } from '@vben-core/shadcn-ui';
 
 import type { MenuItemRegistered, MenuProvider, SubMenuProps } from '../types';
 
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import {
+  computed,
+  onBeforeUnmount,
+  onMounted,
+  reactive,
+  ref,
+  watch,
+} from 'vue';
 
 import { useNamespace } from '@vben-core/composables';
 import { VbenHoverCard } from '@vben-core/shadcn-ui';
@@ -53,6 +60,37 @@ createSubMenuContext({
 const opened = computed(() => {
   return rootMenu?.openedMenus.includes(props.path);
 });
+
+/**
+ * 子项懒挂载标记。
+ *
+ * 垂直展开分支用 v-show 控制显隐（不卸载），若直接渲染全部子项，
+ * 侧栏从折叠切到展开时会一次性同步挂载所有分组的子项（含未展开分组），
+ * 接口很多时主线程被阻塞、展开过渡卡顿。
+ *
+ * 这里只在分组「展开过」或「处于当前激活路径上」时才挂载子项，挂载后保持，
+ * 后续显隐交给 v-show 的 CSS 过渡。激活路径前缀判断可保证刷新/深链时
+ * 激活分组的子项被预挂载，从而正常注册并自动展开。
+ */
+const childrenRendered = ref(false);
+
+// 当前分组是否在激活项的路径上（含自身），用于预挂载激活分组子项
+const isOnActivePath = computed(() => {
+  const active = rootMenu?.activePath;
+  return (
+    !!active && (active === props.path || active.startsWith(`${props.path}/`))
+  );
+});
+
+watch(
+  () => opened.value || isOnActivePath.value,
+  (need) => {
+    if (need) {
+      childrenRendered.value = true;
+    }
+  },
+  { immediate: true },
+);
 const isTopLevelMenuSubmenu = computed(
   () => parentMenu.value?.type.name === 'Menu',
 );
@@ -74,6 +112,12 @@ const contentProps = computed((): HoverCardContentProps => {
 });
 
 const active = computed(() => {
+  // 分组概览页的 activePath 即分组自身 path：此时分组标题需高亮为激活态，
+  // 与「选中接口时级联高亮祖先分组」保持一致的视觉。
+  if (rootMenu?.activePath && rootMenu.activePath === props.path) {
+    return true;
+  }
+
   let isActive = false;
 
   Object.values(items.value).forEach((item) => {
@@ -208,7 +252,7 @@ onBeforeUnmount(() => {
           'max-h-[calc(var(--radix-hover-card-content-available-height)-20px)]',
         ]"
         :content-props="contentProps"
-        :open="true"
+        :open="opened"
         :open-delay="0"
       >
         <template #trigger>
@@ -265,7 +309,7 @@ onBeforeUnmount(() => {
           :class="[nsMenu.b(), is('rounded', rounded)]"
           :style="subMenuStyle"
         >
-          <slot></slot>
+          <slot v-if="childrenRendered"></slot>
         </ul>
       </CollapseTransition>
     </template>

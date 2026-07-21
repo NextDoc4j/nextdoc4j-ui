@@ -21,15 +21,19 @@ import {
 
 import { useAppConfig } from '@vben/hooks';
 import {
+  ApiTestRun,
+  SvgAiCopyIcon,
   SvgApiPrefixIcon,
   SvgDocumentLayoutIcon,
   SvgDocumentOmittedIcon,
   SvgDocumentResetIcon,
+  SvgGlobalConfigIcon,
 } from '@vben/icons';
 import { usePreferences } from '@vben/preferences';
 
 import {
   ElButton,
+  ElDialog,
   ElDrawer,
   ElDropdown,
   ElDropdownItem,
@@ -45,6 +49,8 @@ import {
 } from 'element-plus';
 
 import JsonViewer from '#/components/json-viewer/index.vue';
+import MarkdownCodeBlock from '#/components/markdown-code-block.vue';
+import XmlView from '#/components/xml-view.vue';
 import { getMethodStyle } from '#/constants/methods';
 import {
   ONLINE_DEBUG_TIMEOUT_MESSAGE,
@@ -57,16 +63,36 @@ import {
   useTokenStore,
 } from '#/store';
 import { useAggregationStore } from '#/store/aggregation';
+import { buildDebugPrompt } from '#/utils/ai-copy';
 import {
   buildDetectedImageFileName,
   detectBase64ImagesInData,
   formatDetectedImageSize,
 } from '#/utils/base64-image';
 import { copyText } from '#/utils/clipboard';
+import {
+  resolveGatewayBaseUrl,
+  resolveServiceDocumentPrefix,
+} from '#/utils/openapi-url';
 import { adaptSchemaForView, hasRenderableSchema } from '#/utils/schema';
 
 import bodyParams from './body-params.vue';
+import GlobalConfigPanel from './global-config-panel.vue';
 import paramsTable from './params-table.vue';
+import SseEventList from './sse-event-list.vue';
+
+const props = defineProps<{
+  method: string;
+  parameters: ParameterObject[];
+  path: string;
+  requestBody: any;
+  requestBodyType: string;
+  requestBodyVariantState?: Record<string, number>;
+  responses?: Record<string, ResponseObject>;
+  security: any;
+}>();
+
+defineEmits(['cancel']);
 
 interface TableParamsObject {
   __rowKey?: string;
@@ -97,6 +123,7 @@ interface DebugRequestStateSnapshot {
   bodyContent?: string;
   bodyDrafts?: Partial<Record<'json' | 'raw' | 'xml', string>>;
   bodyType?: string;
+  cacheVersion?: number;
   cookies: TableParamsObject[];
   formDataParams: TableParamsObject[];
   headers: TableParamsObject[];
@@ -122,9 +149,26 @@ interface DebugInlineTab {
   label: string;
 }
 
+// SSE（text/event-stream）单条事件的结构化表示
+interface SseEvent {
+  // data 字段原始文本（多行 data 以 \n 拼接）
+  data: string;
+  // event 字段名，缺省为 message
+  event: string;
+  // id 字段，可能不存在
+  id?: string;
+  // data 能被 JSON.parse 时的结构化结果，否则为 undefined
+  parsed?: unknown;
+  // 到达顺序序号，从 1 开始
+  seq: number;
+  // 到达时间，格式 HH:mm:ss.SSS
+  time: string;
+}
+
 interface DebugBodyTabExpose {
   bodyType?: string;
   fileList?: any[];
+  focusEditor?: () => void;
   getExample?: () => string;
   getTextBodyDrafts?: () => Partial<Record<'json' | 'raw' | 'xml', string>>;
   setEditorValue?: (value: string) => Promise<void> | void;
@@ -135,20 +179,11 @@ interface DebugBodyTabExpose {
     forceBodyType?: boolean;
     preserveValue?: boolean;
   }) => Promise<void> | void;
+  validateCurrentBody?: () => {
+    message: string;
+    valid: boolean;
+  };
 }
-
-const props = defineProps<{
-  method: string;
-  parameters: ParameterObject[];
-  path: string;
-  requestBody: any;
-  requestBodyType: string;
-  requestBodyVariantState?: Record<string, number>;
-  responses?: Record<string, ResponseObject>;
-  security: any;
-}>();
-
-defineEmits(['cancel']);
 
 const { apiURL } = useAppConfig(import.meta.env, import.meta.env.PROD);
 const { isDark } = usePreferences();
@@ -164,6 +199,7 @@ const realtimeResponseScrollTop = ref(0);
 const paneLayout = ref<'horizontal' | 'vertical'>('horizontal');
 const paneRatio = ref(0.52);
 const debugLayoutRef = ref<HTMLElement>();
+const isNarrowLayout = ref(false);
 const isPaneResizing = ref(false);
 const actualRequestSnapshot = ref<DebugActualRequestSnapshot | null>(null);
 let removePaneResizeListeners: (() => void) | null = null;
@@ -184,6 +220,8 @@ const headers = ref<Array<TableParamsObject>>([]);
 const cookies = ref<Array<TableParamsObject>>([]);
 const isRestoringCache = ref(false);
 const defaultRequestState = ref<DebugRequestStateSnapshot | null>(null);
+// 全局配置弹窗（全局参数 + 全局认证）显示状态
+const globalConfigVisible = ref(false);
 let persistTimer: null | number = null;
 
 const methodPillStyle = computed(() => {
@@ -193,6 +231,8 @@ const methodPillStyle = computed(() => {
 const normalizeParamName = (name: string) => name.trim();
 const normalizeHeaderName = (name: string) => name.trim().toLowerCase();
 const PATH_PLACEHOLDER_SEGMENT_RE = /^\{[^/{}]+\}$/;
+const DEBUG_STACKED_BREAKPOINT = 720;
+const DEBUG_REQUEST_CACHE_VERSION = 1;
 let tableRowKeySeed = 0;
 
 const createTableRowKey = () => `api-test-row-${tableRowKeySeed++}`;
@@ -353,9 +393,25 @@ const mergeCachedRequestState = (cachedState: DebugRequestStateSnapshot) => {
   const cachedLocalQueryParams = cachedState.queryParams.filter(
     (item) => !item.fromGlobal && !item.fromSecurity,
   );
+  const shouldRestoreGeneratedJson =
+    cachedState.cacheVersion !== DEBUG_REQUEST_CACHE_VERSION &&
+    cachedState.bodyType === 'json' &&
+    !cachedState.bodyContent?.trim() &&
+    !cachedState.bodyDrafts?.json?.trim() &&
+    Boolean(latestState.bodyContent?.trim());
 
   return {
     ...cachedState,
+    bodyContent: shouldRestoreGeneratedJson
+      ? latestState.bodyContent
+      : cachedState.bodyContent,
+    bodyDrafts: shouldRestoreGeneratedJson
+      ? {
+          ...cachedState.bodyDrafts,
+          json: latestState.bodyDrafts?.json ?? latestState.bodyContent,
+        }
+      : cachedState.bodyDrafts,
+    cacheVersion: DEBUG_REQUEST_CACHE_VERSION,
     formDataParams: mergeCachedTableParamsWithLatest(
       latestState.formDataParams,
       cachedState.formDataParams,
@@ -391,10 +447,14 @@ const resetResponseState = () => {
   responseTime.value = 0;
   responseSize.value = '0 B';
   responseData.value = null;
+  responseLanguage.value = 'json';
   base64ImageDrawerVisible.value = false;
   responseMimeType.value = '';
   responseHeaders.value = [];
   actualRequestSnapshot.value = null;
+  isStreaming.value = false;
+  sseAborted.value = false;
+  sseEvents.value = [];
 };
 
 const resolveBodyContent = () => {
@@ -411,6 +471,7 @@ const buildCurrentSnapshot = (): DebugRequestStateSnapshot => {
     bodyContent: resolveBodyContent(),
     bodyDrafts: bodyTabRef.value?.getTextBodyDrafts?.() ?? {},
     bodyType: bodyTabRef.value?.bodyType,
+    cacheVersion: DEBUG_REQUEST_CACHE_VERSION,
     cookies: cloneTableParams(cookies.value),
     formDataParams: cloneTableParams(formDataParams.value),
     headers: cloneTableParams(headers.value),
@@ -567,6 +628,7 @@ watch(
               type,
               format,
               enum: enumValues,
+              'x-nextdoc4j-enum': (schema as any)['x-nextdoc4j-enum'],
               items: items
                 ? {
                     enum: items.enum,
@@ -621,10 +683,19 @@ const responseStatus = ref({ code: 0, text: '-', type: 'default' });
 const responseTime = ref(0);
 const responseSize = ref('0 B');
 const responseData = shallowRef<any>(null);
+// 响应体高亮语言（json/xml/html/yaml/plaintext…），驱动实时响应的展示方式
+const responseLanguage = ref('json');
 const responseMimeType = ref('');
 const responseHeaders = ref<
   Array<{ enabled: boolean; name: string; value: string }>
 >([]);
+
+// SSE 流式响应状态
+const isStreaming = ref(false); // 是否正在接收 text/event-stream 流
+const sseAborted = ref(false); // 是否被用户主动停止
+const sseEvents = shallowRef<SseEvent[]>([]); // 已接收的 SSE 事件
+// 当前进行中请求的中止控制器，供停止按钮及卸载时释放连接
+let activeAbortController: AbortController | null = null;
 
 const realtimeDetectedBase64Images = computed<DetectedBase64Image[]>(() => {
   if (responseStatus.value.type === 'default') {
@@ -703,6 +774,26 @@ const responseSchemaForViewer = computed(() => {
   return resolved && hasRenderableSchema(resolved) ? resolved : null;
 });
 
+// XML 响应用原样 XML 树视图展示（保留标签/缩进，支持节点折叠与复制、背景透明）
+const showResponseAsXml = computed(() => {
+  return (
+    responseLanguage.value === 'xml' &&
+    typeof responseData.value === 'string' &&
+    responseData.value !== ''
+  );
+});
+
+// 其余字符串类响应（HTML/YAML/纯文本等）用代码块高亮展示；
+// 对象类响应（JSON、form-urlencoded、二进制提示）走 JsonViewer 树形展示
+const showResponseAsCode = computed(() => {
+  return (
+    !showResponseAsXml.value &&
+    typeof responseData.value === 'string' &&
+    responseData.value !== '' &&
+    responseLanguage.value !== 'json'
+  );
+});
+
 const activeGlobalQueryCount = computed(() => {
   return docManageStore
     .getMergedQueryParams(aggregationStore.currentService?.url)
@@ -753,12 +844,23 @@ const requestInlineTabs = computed<DebugInlineTab[]>(() => {
   ];
 });
 
+// 是否为 SSE 响应：接收中或已接收到事件时以事件流形式展示
+const isSseResponse = computed(
+  () => isStreaming.value || sseEvents.value.length > 0,
+);
+
 const responseInlineTabs = computed<DebugInlineTab[]>(() => {
   return [
-    {
-      key: 'RealtimeResponse',
-      label: '实时响应',
-    },
+    isSseResponse.value
+      ? {
+          key: 'EventStream',
+          label: '事件流',
+          count: sseEvents.value.length,
+        }
+      : {
+          key: 'RealtimeResponse',
+          label: '实时响应',
+        },
     {
       key: 'ResponseHeaders',
       label: '响应头',
@@ -775,11 +877,11 @@ const requestTabsHostRef = ref<HTMLElement>();
 const responseTabsHostRef = ref<HTMLElement>();
 const requestMoreMeasureRef = ref<HTMLElement>();
 const responseMoreMeasureRef = ref<HTMLElement>();
-const requestVisibleTabKeys = ref<string[]>([]);
-const responseVisibleTabKeys = ref<string[]>([]);
+const requestVisibleTabKeys = ref<null | string[]>(null);
+const responseVisibleTabKeys = ref<null | string[]>(null);
 const requestTabMeasureRefs = new Map<string, HTMLElement>();
 const responseTabMeasureRefs = new Map<string, HTMLElement>();
-const TAB_OVERFLOW_GAP = 4;
+const TAB_OVERFLOW_GAP = 6;
 let tabOverflowObserver: null | ResizeObserver = null;
 let overflowRaf: null | number = null;
 
@@ -799,6 +901,11 @@ const setResponseTabMeasureRef = (key: string, el: null | unknown) => {
   }
 };
 
+/**
+ * 用途：计算内联 Tab 在当前容器宽度下可直接展示的 key。
+ * 参数说明：options 包含激活项、容器元素、测量节点、更多按钮节点和完整 Tab 列表。
+ * 返回值说明：返回可直接展示的 Tab key；空数组表示当前宽度仅展示更多按钮。
+ */
 const resolveOverflowVisibleKeys = (options: {
   activeKey: string;
   hostElement?: HTMLElement;
@@ -868,7 +975,7 @@ const resolveOverflowVisibleKeys = (options: {
     if (canFitWithMoreButton([...adjustedKeys, activeKey])) {
       adjustedKeys.push(activeKey);
     } else {
-      adjustedKeys.splice(0, adjustedKeys.length, activeKey);
+      return [];
     }
 
     const keyIndexMap = new Map(keys.map((key, index) => [key, index]));
@@ -882,11 +989,11 @@ const resolveOverflowVisibleKeys = (options: {
 };
 
 const requestVisibleTabs = computed(() => {
-  const visibleKeySet = new Set(requestVisibleTabKeys.value);
   const tabs = requestInlineTabs.value;
-  if (visibleKeySet.size === 0) {
+  if (!requestVisibleTabKeys.value) {
     return tabs;
   }
+  const visibleKeySet = new Set(requestVisibleTabKeys.value);
   return tabs.filter((tab) => visibleKeySet.has(tab.key));
 });
 
@@ -896,11 +1003,11 @@ const requestHiddenTabs = computed(() => {
 });
 
 const responseVisibleTabs = computed(() => {
-  const visibleKeySet = new Set(responseVisibleTabKeys.value);
   const tabs = responseInlineTabs.value;
-  if (visibleKeySet.size === 0) {
+  if (!responseVisibleTabKeys.value) {
     return tabs;
   }
+  const visibleKeySet = new Set(responseVisibleTabKeys.value);
   return tabs.filter((tab) => visibleKeySet.has(tab.key));
 });
 
@@ -1019,8 +1126,16 @@ watch([() => requestTabsHostRef.value, () => responseTabsHostRef.value], () => {
   scheduleTabOverflowUpdate();
 });
 
-const isStackedLayout = computed(() => paneLayout.value === 'vertical');
+const isStackedLayout = computed(
+  () => isNarrowLayout.value || paneLayout.value === 'vertical',
+);
+watch([paneRatio, isStackedLayout], () => {
+  scheduleTabOverflowUpdate();
+});
 const layoutTooltipText = computed(() => {
+  if (isNarrowLayout.value) {
+    return '窄屏固定上下布局';
+  }
   return isStackedLayout.value ? '切换为左右布局' : '切换为上下布局';
 });
 const responseStatusTone = computed(() => {
@@ -1055,6 +1170,50 @@ async function handleCopyBaseUrl() {
   ElMessage.error('Base URL 复制失败');
 }
 
+/**
+ * 复制在线调试的请求 / 响应 / 错误信息，便于粘贴给 Coding Agent 排查并修复代码
+ */
+async function handleCopyForAi() {
+  const snapshot = actualRequestSnapshot.value;
+  const hasResponse = responseStatus.value.type !== 'default';
+
+  const resolveResponseBody = () => {
+    if (responseData.value === null || responseData.value === undefined) {
+      return '';
+    }
+    return typeof responseData.value === 'string'
+      ? responseData.value
+      : toPrettyJson(responseData.value);
+  };
+  const responseBody = resolveResponseBody();
+
+  const prompt = buildDebugPrompt({
+    method: props.method,
+    url:
+      snapshot?.url ||
+      applyPathParamsToRequestUrl(requestUrl.value || props.path),
+    headers: snapshot?.headers,
+    queryParams: snapshot?.queryParams,
+    pathParams: snapshot?.pathParams,
+    bodyText: snapshot?.bodyText,
+    bodyType: snapshot?.bodyType,
+    responseStatus: hasResponse ? responseStatus.value.text : '',
+    responseTime: hasResponse ? responseTime.value : '',
+    responseSize: hasResponse ? responseSize.value : '',
+    responseMime: hasResponse ? responseMimeType.value : '',
+    responseBody,
+    errorMessage:
+      responseStatus.value.type === 'error' ? responseStatus.value.text : '',
+  });
+
+  const copied = await copyText(prompt);
+  if (copied) {
+    ElMessage.success('已复制调试信息，可粘贴给 Coding Agent');
+    return;
+  }
+  ElMessage.error('复制失败');
+}
+
 const normalizeResizeRatio = (value: number) => {
   if (Number.isNaN(value)) return paneRatio.value;
   return Math.min(0.85, Math.max(0.15, value));
@@ -1066,6 +1225,19 @@ const clearPaneResizeListeners = () => {
     removePaneResizeListeners = null;
   }
 };
+
+/**
+ * 用途：根据当前视口宽度同步调试面板是否强制上下布局。
+ * 参数说明：无参数，方法内部读取浏览器窗口宽度。
+ * 返回值说明：无返回值，仅更新窄屏布局状态。
+ */
+function syncNarrowLayoutState() {
+  if (typeof window === 'undefined') {
+    isNarrowLayout.value = false;
+    return;
+  }
+  isNarrowLayout.value = window.innerWidth <= DEBUG_STACKED_BREAKPOINT;
+}
 
 const startPaneResize = (event: PointerEvent) => {
   if (!debugLayoutRef.value) return;
@@ -1434,6 +1606,9 @@ const handleRestoreDefault = async () => {
 };
 
 const togglePaneLayout = () => {
+  if (isNarrowLayout.value) {
+    return;
+  }
   paneLayout.value = isStackedLayout.value ? 'horizontal' : 'vertical';
 };
 
@@ -1514,55 +1689,6 @@ const looksLikeJson = (text: string) => {
     (value.startsWith('{') && value.endsWith('}')) ||
     (value.startsWith('[') && value.endsWith(']'))
   );
-};
-
-const prettyFormatXml = (xmlString: string) => {
-  const xml = xmlString.replaceAll(/>\s*</g, '><').trim();
-  if (!xml) return xmlString;
-
-  const parts = xml.replaceAll(/(>)(<)(\/*)/g, '$1\n$2$3').split('\n');
-  let indent = 0;
-
-  return parts
-    .map((part) => {
-      const line = part.trim();
-      if (!line) return '';
-
-      if (line.startsWith('</')) {
-        indent = Math.max(indent - 1, 0);
-      }
-
-      const padding = '  '.repeat(indent);
-      const result = `${padding}${line}`;
-
-      if (
-        line.startsWith('<') &&
-        !line.startsWith('</') &&
-        !line.endsWith('/>') &&
-        !line.includes('</')
-      ) {
-        indent += 1;
-      }
-      return result;
-    })
-    .filter(Boolean)
-    .join('\n');
-};
-
-const formatXml = (text: string) => {
-  if (!text) return '';
-  try {
-    const parser = new DOMParser();
-    const xmlDoc = parser.parseFromString(text, 'application/xml');
-    const parseError = xmlDoc.querySelector('parsererror');
-    if (parseError) {
-      return text;
-    }
-    const serialized = new XMLSerializer().serializeToString(xmlDoc);
-    return prettyFormatXml(serialized);
-  } catch {
-    return text;
-  }
 };
 
 const parseUrlEncodedBody = (text: string) => {
@@ -1744,9 +1870,10 @@ async function parseResponseBody(response: Response, requestUrl: string) {
   }
 
   if (isXmlContentType(contentType) || looksLikeXml(rawText)) {
+    // 保留原始文本（含 <?xml?> 声明），由 XmlView 自行解析并排版，保真展示
     return {
       contentType,
-      data: formatXml(rawText),
+      data: rawText,
       language: 'xml',
     };
   }
@@ -1805,11 +1932,147 @@ const downloadDetectedBase64Image = (
   link.remove();
 };
 
+// 生成 SSE 事件到达时间，格式 HH:mm:ss.SSS
+const formatSseTime = () => {
+  const now = new Date();
+  const pad = (value: number, len = 2) => String(value).padStart(len, '0');
+  return `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(
+    now.getSeconds(),
+  )}.${pad(now.getMilliseconds(), 3)}`;
+};
+
+/**
+ * 解析单个 SSE 事件块（以空行分隔的一段文本）为结构化事件。
+ * @param block - 事件块原始文本，可能包含多行 data/event/id 字段
+ * @param seq - 该事件的到达序号
+ * @returns 解析后的事件；不含任何 data 字段时返回 null
+ */
+const parseSseEventBlock = (block: string, seq: number): null | SseEvent => {
+  const dataLines: string[] = [];
+  let event = 'message';
+  let id: string | undefined;
+
+  for (const line of block.split('\n')) {
+    // 忽略空行与注释行（以冒号开头）
+    if (!line || line.startsWith(':')) {
+      continue;
+    }
+    const colonIndex = line.indexOf(':');
+    const field = colonIndex === -1 ? line : line.slice(0, colonIndex);
+    let value = colonIndex === -1 ? '' : line.slice(colonIndex + 1);
+    // 规范：字段值前的单个空格需去除
+    if (value.startsWith(' ')) {
+      value = value.slice(1);
+    }
+    switch (field) {
+      case 'data': {
+        dataLines.push(value);
+        break;
+      }
+      case 'event': {
+        event = value || 'message';
+        break;
+      }
+      case 'id': {
+        id = value;
+        break;
+      }
+      // retry 字段与其他字段调试场景无需展示，忽略
+    }
+  }
+
+  if (dataLines.length === 0) {
+    return null;
+  }
+  const data = dataLines.join('\n');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(data);
+  } catch {
+    parsed = undefined;
+  }
+  return { data, event, id, parsed, seq, time: formatSseTime() };
+};
+
+/**
+ * 增量消费 text/event-stream 响应流，按 SSE 协议分帧并实时追加到 sseEvents。
+ * @param response - fetch 返回的流式响应对象
+ * @param startTime - 请求开始时间戳，用于持续更新耗时
+ */
+async function consumeEventStream(response: Response, startTime: number) {
+  if (!response.body) {
+    isStreaming.value = false;
+    return;
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let seq = 0;
+  let totalBytes = 0;
+
+  // 追加事件：shallowRef 需替换数组引用以触发视图更新，并同步耗时
+  const appendEvent = (block: string) => {
+    const parsedEvent = parseSseEventBlock(block, seq + 1);
+    if (!parsedEvent) {
+      return;
+    }
+    seq += 1;
+    sseEvents.value = [...sseEvents.value, parsedEvent];
+    responseTime.value = Number((performance.now() - startTime).toFixed(2));
+  };
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      totalBytes += value.byteLength;
+      responseSize.value = formatSize(totalBytes);
+      buffer = (buffer + decoder.decode(value, { stream: true })).replaceAll(
+        '\r\n',
+        '\n',
+      );
+      // 按空行切分出完整事件块，保留末尾不完整片段等待后续数据
+      const blocks = buffer.split('\n\n');
+      buffer = blocks.pop() ?? '';
+      blocks.forEach((block) => appendEvent(block));
+    }
+    // 处理流结束时残留在缓冲区的最后一个事件块
+    if (buffer.trim()) {
+      appendEvent(buffer);
+    }
+  } finally {
+    reader.releaseLock();
+    isStreaming.value = false;
+  }
+}
+
+// 停止当前请求，主要用于中止 SSE 长连接并保留已接收事件
+const stopRequest = () => {
+  sseAborted.value = true;
+  activeAbortController?.abort();
+};
+
 async function sendRequest() {
+  const bodyValidation = bodyTabRef.value?.validateCurrentBody?.();
+  if (bodyValidation && !bodyValidation.valid) {
+    activeTab.value = 'Body';
+    ElMessage.error(bodyValidation.message || 'Body 参数校验失败');
+    await nextTick();
+    bodyTabRef.value?.focusEditor?.();
+    return;
+  }
+
   loading.value = true;
   responseLoading.value = true;
+  // 每次请求都是新的：清空上一次的流式事件，避免旧数据残留
+  sseEvents.value = [];
+  sseAborted.value = false;
+  isStreaming.value = false;
   const startTime = performance.now(); // 记录开始时间;
   const abortController = new AbortController();
+  activeAbortController = abortController;
   const timeoutId = window.setTimeout(() => {
     abortController.abort();
   }, REQUEST_TIMEOUTS.onlineDebug);
@@ -1821,9 +2084,11 @@ async function sendRequest() {
     // 获取聚合模式下的服务前缀
     let servicePrefix = '';
     if (aggregationStore.isAggregation && aggregationStore.currentService) {
-      // 从服务 URL 中提取前缀，如 "/file/v3/api-docs" -> "/file"
       const serviceUrl = aggregationStore.currentService.url;
-      servicePrefix = serviceUrl.replace('/v3/api-docs', '');
+      const docPath =
+        aggregationStore.mainConfigCache.openApi?.['x-nextdoc4j-aggregation']
+          ?.docPath;
+      servicePrefix = resolveServiceDocumentPrefix(serviceUrl, docPath);
     }
 
     const finalUrl = new URL(window.origin + apiURL + servicePrefix + url);
@@ -1971,14 +2236,26 @@ async function sendRequest() {
     }
     const bodyType = bodyTabRef.value?.bodyType as DebugBodyType | undefined;
     const actualRequestBody = resolveActualRequestBody(bodyType, bodyData);
+    const requestMethod = props.method.toUpperCase();
+    const canSendBody = !['GET', 'HEAD'].includes(requestMethod);
+    let requestBody: BodyInit | undefined;
+    if (canSendBody) {
+      if (['binary', 'form-data'].includes(bodyType || '')) {
+        requestBody = formData;
+      } else if (bodyType === 'x-www-form-urlencoded') {
+        requestBody = searchParams;
+      } else {
+        requestBody = bodyData || undefined;
+      }
+    }
     actualRequestSnapshot.value = {
-      bodyText: actualRequestBody.bodyText,
-      bodyType: actualRequestBody.bodyType,
+      bodyText: canSendBody ? actualRequestBody.bodyText : '',
+      bodyType: canSendBody ? actualRequestBody.bodyType : 'none',
       headers: [...requestHeaders.entries()].map(([name, value]) => ({
         name,
         value,
       })),
-      method: props.method.toUpperCase(),
+      method: requestMethod,
       pathParams: pathParams.value
         .filter((item) => normalizeParamName(item.name || ''))
         .map((item) => ({
@@ -1997,33 +2274,20 @@ async function sendRequest() {
 
     // 发送请求
     const response = await fetch(finalUrl, {
-      method: props.method.toUpperCase(),
+      method: requestMethod,
       headers: requestHeaders,
       signal: abortController.signal,
-      body:
-        props.method.toLowerCase() !== 'get' &&
-        ['binary', 'form-data'].includes(bodyType || '')
-          ? formData
-          : // eslint-disable-next-line unicorn/no-nested-ternary
-            bodyType === 'x-www-form-urlencoded'
-            ? searchParams
-            : bodyData || undefined,
+      body: requestBody,
     });
-    // 处理响应：按 content-type 自动解析 JSON/XML/Text/Form/Binary
-    const parsedResponse = await parseResponseBody(
-      response,
-      finalUrl.toString(),
-    );
 
-    responseTime.value = Number((performance.now() - startTime).toFixed(2));
+    // 响应头到达即可展示状态与头信息（SSE 与普通响应共用）
     responseStatus.value = {
       code: response.status,
       text: `${response.status} ${response.statusText}`,
       type: response.ok ? 'success' : 'error',
     };
-    responseData.value = parsedResponse.data;
-    responseMimeType.value = parsedResponse.contentType || '-';
-
+    responseMimeType.value =
+      normalizeContentType(response.headers.get('content-type')) || '-';
     const header = Object.fromEntries(response.headers.entries());
     responseHeaders.value = [];
     for (const key in header) {
@@ -2033,6 +2297,31 @@ async function sendRequest() {
         enabled: true,
       });
     }
+
+    // text/event-stream 走流式分支：首字节已到达，取消建连超时后持续接收
+    if (
+      normalizeContentType(response.headers.get('content-type')) ===
+      'text/event-stream'
+    ) {
+      window.clearTimeout(timeoutId);
+      isStreaming.value = true;
+      responseLoading.value = false;
+      responseTab.value = 'EventStream';
+      await consumeEventStream(response, startTime);
+      return;
+    }
+
+    // 处理响应：按 content-type 自动解析 JSON/XML/Text/Form/Binary
+    const parsedResponse = await parseResponseBody(
+      response,
+      finalUrl.toString(),
+    );
+
+    responseTime.value = Number((performance.now() - startTime).toFixed(2));
+    responseData.value = parsedResponse.data;
+    responseLanguage.value = parsedResponse.language || 'plaintext';
+    responseMimeType.value = parsedResponse.contentType || '-';
+
     // 计算响应大小
     const size =
       typeof parsedResponse.data === 'string'
@@ -2040,10 +2329,15 @@ async function sendRequest() {
         : JSON.stringify(parsedResponse.data ?? '').length * 2;
     responseSize.value = formatSize(size);
   } catch (error: any) {
+    // 用户主动停止 SSE 时保留已接收事件，不提示错误
+    if (error?.name === 'AbortError' && sseAborted.value) {
+      return;
+    }
     const errorMessage =
       error?.name === 'AbortError'
         ? ONLINE_DEBUG_TIMEOUT_MESSAGE
-        : error?.msg || '请求失败';
+        : error?.message || error?.msg || '请求失败';
+    responseTime.value = Number((performance.now() - startTime).toFixed(2));
     ElMessage.error(errorMessage);
     responseStatus.value = {
       code: 0,
@@ -2054,6 +2348,8 @@ async function sendRequest() {
     responseMimeType.value = '-';
   } finally {
     window.clearTimeout(timeoutId);
+    isStreaming.value = false;
+    activeAbortController = null;
     loading.value = false;
     responseLoading.value = false;
   }
@@ -2133,8 +2429,13 @@ const urlEncodedParams = ref<Array<ParamsType>>([]);
 
 onMounted(async () => {
   const openApi = apiStore.openApi;
-  baseUrl.value = openApi?.servers?.[0]?.url;
+  const serverUrl = openApi?.servers?.[0]?.url || '';
+  baseUrl.value = aggregationStore.isAggregation
+    ? resolveGatewayBaseUrl(serverUrl, apiURL, window.origin)
+    : serverUrl;
+  syncNarrowLayoutState();
   window.addEventListener('pagehide', handlePageHide);
+  window.addEventListener('resize', syncNarrowLayoutState);
   syncSecurityParamsToDebugTable();
   syncGlobalParamsToDebugTable();
   await captureDefaultRequestState();
@@ -2229,7 +2530,10 @@ watch(
 );
 
 onBeforeUnmount(() => {
+  // 卸载时中止进行中的请求，释放 SSE 长连接
+  activeAbortController?.abort();
   window.removeEventListener('pagehide', handlePageHide);
+  window.removeEventListener('resize', syncNarrowLayoutState);
   flushPersistCache();
   clearPaneResizeListeners();
   tabOverflowObserver?.disconnect();
@@ -2244,58 +2548,112 @@ onBeforeUnmount(() => {
 <template>
   <div class="debug-console">
     <div class="debug-console__top">
-      <div class="debug-console__request-row">
-        <ElInput
-          v-model="requestUrlDisplay"
-          placeholder="请输入正确的URL"
-          class="debug-request-input"
-        >
-          <template #prefix>
-            <span class="method-pill" :style="methodPillStyle">
-              {{ method?.toUpperCase() }}
-            </span>
-            <ElTooltip v-if="baseUrl" placement="top" :content="baseUrl">
-              <ElButton
-                text
-                class="debug-prefix-button"
+      <div class="debug-console__toolbar">
+        <div class="debug-back-button-wrap">
+          <ElButton class="debug-back-button" @click="$emit('cancel')">
+            <svg
+              class="debug-back-button__icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="m15 18-6-6 6-6" />
+            </svg>
+            <span class="debug-back-button__label">接口详情</span>
+          </ElButton>
+        </div>
+
+        <div class="debug-console__request-row">
+          <ElInput
+            v-model="requestUrlDisplay"
+            placeholder="请输入正确的URL"
+            class="debug-request-input"
+          >
+            <template #prefix>
+              <span class="method-pill" :style="methodPillStyle">
+                {{ method?.toUpperCase() }}
+              </span>
+              <button
+                v-if="baseUrl"
+                type="button"
+                class="debug-base-url"
                 @click="handleCopyBaseUrl"
               >
-                <SvgApiPrefixIcon class="debug-prefix-button__icon" />
-              </ElButton>
-            </ElTooltip>
-          </template>
-        </ElInput>
-        <div class="debug-console__request-actions">
-          <ElButton
-            type="primary"
-            class="debug-send-button"
-            :loading="loading"
-            @click="sendRequest"
-          >
-            发送
-          </ElButton>
-          <ElTooltip content="恢复默认" placement="top">
+                <SvgApiPrefixIcon class="debug-base-url__icon" />
+                <span class="debug-base-url__text">{{ baseUrl }}</span>
+              </button>
+            </template>
+          </ElInput>
+          <div class="debug-console__request-actions">
             <ElButton
-              text
-              class="debug-icon-button"
-              @click="handleRestoreDefault"
+              v-if="isStreaming"
+              type="danger"
+              class="debug-send-button"
+              @click="stopRequest"
             >
-              <SvgDocumentResetIcon class="size-4" />
+              <span>停止</span>
             </ElButton>
-          </ElTooltip>
-          <ElTooltip :content="layoutTooltipText" placement="top">
             <ElButton
-              text
-              class="debug-icon-button"
-              :class="{ 'debug-icon-button--active': !isStackedLayout }"
-              @click="togglePaneLayout"
+              v-else
+              type="primary"
+              class="debug-send-button"
+              :loading="loading"
+              @click="sendRequest"
             >
-              <SvgDocumentLayoutIcon
-                class="size-4 transition-transform"
-                :class="{ 'rotate-90': !isStackedLayout }"
-              />
+              <ApiTestRun v-if="!loading" class="debug-send-button__icon" />
+              <span>发送</span>
             </ElButton>
-          </ElTooltip>
+            <div class="debug-console__icon-group">
+              <ElTooltip content="全局配置管理" placement="top">
+                <ElButton
+                  text
+                  class="debug-icon-button"
+                  @click="globalConfigVisible = true"
+                >
+                  <SvgGlobalConfigIcon class="size-4" />
+                </ElButton>
+              </ElTooltip>
+              <ElTooltip
+                content="一键复制请求信息、响应内容、错误信息，粘贴到 claude code 等 AI 编程工具，让 AI 排查和修复代码"
+                placement="top"
+                :enterable="false"
+              >
+                <ElButton
+                  text
+                  class="debug-icon-button"
+                  @click="handleCopyForAi"
+                >
+                  <SvgAiCopyIcon class="size-4" />
+                </ElButton>
+              </ElTooltip>
+              <ElTooltip content="恢复默认" placement="top">
+                <ElButton
+                  text
+                  class="debug-icon-button"
+                  @click="handleRestoreDefault"
+                >
+                  <SvgDocumentResetIcon class="size-4" />
+                </ElButton>
+              </ElTooltip>
+              <ElTooltip :content="layoutTooltipText" placement="top">
+                <ElButton
+                  text
+                  class="debug-icon-button"
+                  :class="{ 'debug-icon-button--active': !isStackedLayout }"
+                  @click="togglePaneLayout"
+                >
+                  <SvgDocumentLayoutIcon
+                    class="size-4 transition-transform"
+                    :class="{ 'rotate-90': !isStackedLayout }"
+                  />
+                </ElButton>
+              </ElTooltip>
+            </div>
+          </div>
         </div>
       </div>
       <div
@@ -2387,36 +2745,27 @@ onBeforeUnmount(() => {
               <ElTabs v-model="activeTab" class="debug-tabs debug-tabs--inline">
                 <ElTabPane name="Params" label="Params">
                   <div class="params-tab-sections">
-                    <div v-if="pathParams.length > 0">
-                      <div class="actual-request__block params-table-block">
-                        <div class="params-table-block__header">
-                          <h3 class="actual-request__title">Path 参数</h3>
-                        </div>
-                        <div class="params-table-block__body">
-                          <params-table
-                            :table-data="pathParams"
-                            :allow-delete="false"
-                            :show-add-button="false"
-                            :show-selection-column="false"
-                            show-description-column
-                          />
-                        </div>
-                      </div>
+                    <div
+                      v-if="pathParams.length > 0"
+                      class="actual-request__block"
+                    >
+                      <h3 class="actual-request__title">Path 参数</h3>
+                      <params-table
+                        :table-data="pathParams"
+                        :allow-delete="false"
+                        :show-add-button="false"
+                        :show-selection-column="false"
+                        show-description-column
+                      />
                     </div>
 
-                    <div>
-                      <div class="actual-request__block params-table-block">
-                        <div class="params-table-block__header">
-                          <h3 class="actual-request__title">Query 参数</h3>
-                        </div>
-                        <div class="params-table-block__body">
-                          <params-table
-                            :table-data="queryParams"
-                            show-description-column
-                            show-delete-in-description
-                          />
-                        </div>
-                      </div>
+                    <div class="actual-request__block">
+                      <h3 class="actual-request__title">Query 参数</h3>
+                      <params-table
+                        :table-data="queryParams"
+                        show-description-column
+                        show-delete-in-description
+                      />
                     </div>
                   </div>
                 </ElTabPane>
@@ -2434,28 +2783,18 @@ onBeforeUnmount(() => {
                 />
 
                 <ElTabPane name="Headers" label="Headers">
-                  <div class="actual-request__block params-table-block">
-                    <div class="params-table-block__header">
-                      <h3 class="actual-request__title">Headers</h3>
-                    </div>
-                    <div class="params-table-block__body">
-                      <params-table
-                        :table-data="headers"
-                        show-description-column
-                        show-delete-in-description
-                      />
-                    </div>
-                  </div>
+                  <params-table
+                    :table-data="headers"
+                    show-description-column
+                    show-delete-in-description
+                  />
                 </ElTabPane>
                 <ElTabPane name="Cookies" label="Cookies">
-                  <div class="actual-request__block params-table-block">
-                    <div class="params-table-block__header">
-                      <h3 class="actual-request__title">Cookies</h3>
-                    </div>
-                    <div class="params-table-block__body">
-                      <params-table :table-data="cookies" />
-                    </div>
-                  </div>
+                  <params-table
+                    :table-data="cookies"
+                    show-description-column
+                    show-delete-in-description
+                  />
                 </ElTabPane>
               </ElTabs>
             </div>
@@ -2628,9 +2967,39 @@ onBeforeUnmount(() => {
                   v-model="responseTab"
                   class="debug-response-tabs debug-response-tabs--inline"
                 >
-                  <ElTabPane name="RealtimeResponse" label="实时响应" lazy>
+                  <ElTabPane
+                    v-if="isSseResponse"
+                    name="EventStream"
+                    label="事件流"
+                  >
+                    <SseEventList
+                      :events="sseEvents"
+                      :streaming="isStreaming"
+                      class="response-body"
+                    />
+                  </ElTabPane>
+                  <ElTabPane
+                    v-else
+                    name="RealtimeResponse"
+                    label="实时响应"
+                    lazy
+                  >
                     <template v-if="responseStatus.type !== 'default'">
+                      <XmlView
+                        v-if="showResponseAsXml"
+                        :xml="responseData"
+                        :dark="isDark"
+                        class="response-body"
+                      />
+                      <MarkdownCodeBlock
+                        v-else-if="showResponseAsCode"
+                        :code="responseData"
+                        :language="responseLanguage"
+                        :dark="isDark"
+                        class="response-body response-body--code"
+                      />
                       <JsonViewer
+                        v-else
                         ref="realtimeResponseJsonRef"
                         :value="responseData"
                         :schema="responseSchemaForViewer"
@@ -2638,6 +3007,7 @@ onBeforeUnmount(() => {
                         :enable-chunked-render="true"
                         :initial-render-count="60"
                         :render-chunk-size="60"
+                        :wrap-long-values="true"
                         class="response-body app-json-schema-viewer"
                       />
                     </template>
@@ -2889,6 +3259,21 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </div>
+
+    <!-- 全局配置弹窗：左侧全局参数、右侧全局认证，与文档管理共用数据 -->
+    <ElDialog
+      v-model="globalConfigVisible"
+      title="全局配置管理"
+      align-center
+      append-to-body
+      class="global-config-dialog"
+      modal-class="global-config-dialog-overlay"
+      width="min(1180px, calc(100vw - 80px))"
+    >
+      <GlobalConfigPanel
+        params-table-max-height="min(384px, calc(100vh - 360px))"
+      />
+    </ElDialog>
   </div>
 </template>
 
@@ -2911,14 +3296,44 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 1024px) {
+  /* 中等宽度：保持单行，收起返回按钮文案为图标，避免换行 */
+  .debug-back-button__label {
+    display: none;
+  }
+
+  .debug-back-button {
+    width: 52px;
+    padding: 0;
+  }
+
+  .debug-send-button {
+    min-width: 64px;
+  }
+
+  .debug-base-url {
+    max-width: 160px;
+  }
+}
+
+@media (max-width: 720px) {
+  /* 窄屏：返回按钮独立占位，请求条内部按空间换行，图标组保持在一行不再拆散 */
+  .debug-console__toolbar {
+    align-items: flex-start;
+  }
+
   .debug-console__request-row {
-    flex-direction: column;
-    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .debug-request-input {
+    flex: 1 1 auto;
+    min-width: 0;
   }
 
   .debug-console__request-actions {
-    justify-content: flex-end;
-    padding-left: 0;
+    flex: 1 0 auto;
+    justify-content: space-between;
+    width: 100%;
   }
 
   .debug-console__request-actions::before {
@@ -2926,7 +3341,23 @@ onBeforeUnmount(() => {
   }
 
   .debug-send-button {
-    min-width: 92px;
+    flex: 1;
+    min-width: 72px;
+    max-width: 120px;
+  }
+
+  .debug-console__icon-group {
+    flex: 0 0 auto;
+  }
+
+  .debug-base-url {
+    justify-content: center;
+    width: 30px;
+    padding: 0;
+  }
+
+  .debug-base-url__text {
+    display: none;
   }
 
   .debug-status-list {
@@ -2934,67 +3365,41 @@ onBeforeUnmount(() => {
   }
 }
 
+@media (max-width: 768px) {
+  :global(.global-config-dialog) {
+    width: calc(100vw - 32px) !important;
+    height: calc(100vh - 48px);
+    max-height: calc(100vh - 48px);
+  }
+}
+
 .debug-console {
   --debug-chip-radius: var(--radius);
-  --debug-radius-xs: var(--radius);
-  --debug-radius-sm: calc(var(--radius) * 1.08);
-  --debug-radius-md: calc(var(--radius) * 1.16);
-  --debug-radius-lg: calc(var(--radius) * 1.24);
+  --debug-radius-xs: calc(var(--radius) * 0.56);
+  --debug-radius-sm: calc(var(--radius) * 0.72);
+  --debug-radius-md: calc(var(--radius) * 0.94);
+  --debug-radius-lg: calc(var(--radius) * 1.18);
   --debug-count-radius: var(--radius);
   --debug-menu-radius: calc(var(--radius) * 1.12);
-  --el-border-radius-base: var(--radius);
-  --el-border-radius-small: var(--radius);
-  --debug-surface: var(--el-bg-color);
-  --debug-soft-bg: color-mix(
-    in srgb,
-    var(--el-bg-color) 92%,
-    var(--el-fill-color-light) 8%
-  );
-  --debug-soft-bg-strong: color-mix(
-    in srgb,
-    var(--el-bg-color) 86%,
-    var(--el-fill-color-light) 14%
-  );
-  --debug-border: color-mix(
-    in srgb,
-    var(--el-text-color-primary) 12%,
-    transparent
-  );
-  --debug-border-strong: color-mix(
-    in srgb,
-    var(--el-text-color-primary) 22%,
-    transparent
-  );
-  --debug-request-shell-bg: color-mix(
-    in srgb,
-    var(--debug-surface) 88%,
-    var(--el-fill-color-light) 12%
-  );
-  --debug-request-shell-top-line: color-mix(in srgb, #8d97a7 34%, transparent);
-  --debug-request-shell-bottom-line: color-mix(
-    in srgb,
-    #8d97a7 20%,
-    transparent
-  );
-  --debug-request-shell-shadow:
-    inset 0 1px 0 var(--debug-request-shell-top-line),
-    inset 0 -1px 0 var(--debug-request-shell-bottom-line),
-    0 0 0 1px color-mix(in srgb, #9aa3b2 20%, transparent),
-    0 9px 18px -15px color-mix(in srgb, #7f8899 42%, transparent),
-    0 -9px 18px -15px color-mix(in srgb, #8e97a6 44%, transparent);
-  --debug-request-shell-shadow-hover:
-    inset 0 1px 0 color-mix(in srgb, #8692a5 42%, transparent),
-    inset 0 -1px 0 color-mix(in srgb, #8692a5 24%, transparent),
-    0 0 0 1px color-mix(in srgb, #8d97a7 24%, transparent),
-    0 11px 22px -15px color-mix(in srgb, #738093 48%, transparent),
-    0 -11px 22px -15px color-mix(in srgb, #8d97a7 50%, transparent);
-  --debug-shadow: 0 6px 14px
-    color-mix(in srgb, var(--el-text-color-primary) 3%, transparent);
+  --el-border-radius-base: calc(var(--radius) * 0.75);
+  --el-border-radius-small: calc(var(--radius) * 0.62);
+  --debug-page-bg: #f8fafc;
+  --debug-surface: #fff;
+  --debug-soft-bg: #f8fafc;
+  --debug-soft-bg-strong: #f1f5f9;
+  --debug-border: #e2e8f0;
+  --debug-border-strong: #cbd5e1;
+  --debug-text-muted: #64748b;
+  --debug-request-shell-bg: #fff;
+  --debug-shadow: 0 8px 18px rgb(15 23 42 / 4%);
+  --debug-shadow-strong: 0 12px 26px rgb(15 23 42 / 7%);
 
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  padding: 16px;
+  background: var(--debug-page-bg);
 }
 
 /* --- Base64 图片抽屉增强样式 --- */
@@ -3184,29 +3589,51 @@ onBeforeUnmount(() => {
 .debug-console__top {
   display: grid;
   flex: none;
-  gap: 9px;
+  gap: 10px;
   padding: 0;
-  margin-bottom: 10px;
+  margin-bottom: 14px;
   background: transparent;
   border: none;
   box-shadow: none;
 }
 
+.debug-console__toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+  margin: 0;
+}
+
 .debug-console__request-row {
   display: flex;
+  flex: 1 1 auto;
   gap: 10px;
   align-items: center;
-  padding: 7px 10px;
-  margin: 0 2px;
+  min-width: 0;
+  min-height: 52px;
+  padding: 8px 10px;
+  margin: 0;
   background: var(--debug-request-shell-bg);
+  border: 1px solid var(--debug-border);
   border-radius: var(--debug-radius-md);
-  box-shadow: var(--debug-request-shell-shadow);
-  transition: box-shadow 0.16s ease;
+  box-shadow: var(--debug-shadow);
+  transition:
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.debug-back-button-wrap {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
 }
 
 .debug-console__request-row:hover,
 .debug-console__request-row:focus-within {
-  box-shadow: var(--debug-request-shell-shadow-hover);
+  border-color: color-mix(in srgb, var(--el-color-primary) 34%, transparent);
+  box-shadow: var(--debug-shadow-strong);
 }
 
 .debug-console__hint {
@@ -3214,21 +3641,21 @@ onBeforeUnmount(() => {
   align-items: center;
   min-height: 22px;
   padding: 0 10px;
-  margin: 0 2px;
+  margin: 0;
   font-size: 11px;
   font-weight: 500;
-  color: var(--el-text-color-secondary);
+  color: var(--debug-text-muted);
   background: var(--debug-soft-bg-strong);
   border: 1px solid var(--debug-border);
   border-radius: var(--debug-chip-radius);
 }
 
 .debug-console__request-actions {
-  display: inline-flex;
+  display: flex;
   flex: none;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
-  padding-left: 8px;
 }
 
 .debug-console__request-actions::before {
@@ -3238,12 +3665,21 @@ onBeforeUnmount(() => {
   background: var(--debug-border);
 }
 
+/* 图标按钮组：响应式布局时保证按钮不换行 */
+.debug-console__icon-group {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+  align-items: center;
+}
+
 .debug-console__body {
   flex: 1;
   min-height: 0;
 }
 
 .debug-layout {
+  position: relative;
   display: grid;
   grid-template-rows: minmax(0, 1fr) 10px minmax(0, 1fr);
   grid-template-columns: minmax(0, 1fr);
@@ -3318,7 +3754,7 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   min-height: 42px;
   padding: 0 14px;
-  background: var(--debug-soft-bg);
+  background: var(--debug-surface);
   border-bottom: 1px solid var(--debug-border);
 }
 
@@ -3337,6 +3773,17 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 
+.debug-pane--response .debug-pane__header--inline-tabs {
+  flex-wrap: wrap;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.debug-pane--response .debug-pane__header-main {
+  flex: 1 1 220px;
+  max-width: 100%;
+}
+
 .debug-pane__title {
   font-size: 13px;
   font-weight: 800;
@@ -3346,36 +3793,48 @@ onBeforeUnmount(() => {
 .debug-pane__meta {
   font-size: 11px;
   font-weight: 500;
-  color: var(--el-text-color-secondary);
+  color: var(--debug-text-muted);
 }
 
 .debug-inline-tabs {
   display: inline-flex;
   flex: 1;
   flex-wrap: nowrap;
-  gap: 4px;
+  gap: 6px;
   align-items: center;
   min-width: 0;
   overflow: hidden;
 }
 
 .debug-inline-tab {
+  position: relative;
   display: inline-flex;
   flex: none;
-  gap: 3px;
+  gap: 5px;
   align-items: center;
   justify-content: center;
   max-width: 146px;
-  min-height: 23px;
-  padding: 0 7px;
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--el-text-color-secondary);
+  min-height: 42px;
+  padding: 0 1px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--debug-text-muted);
   cursor: pointer;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: var(--debug-radius-xs);
+  border-radius: 0;
   transition: all 0.14s ease;
+}
+
+.debug-inline-tab::after {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  content: '';
+  background: transparent;
+  border-radius: 999px 999px 0 0;
 }
 
 .debug-inline-tab__label {
@@ -3386,18 +3845,18 @@ onBeforeUnmount(() => {
 
 .debug-inline-tab:hover {
   color: var(--el-text-color-primary);
-  background: var(--debug-soft-bg-strong);
-  border-color: var(--debug-border);
+  background: transparent;
+  border-color: transparent;
 }
 
 .debug-inline-tab--active {
   color: var(--el-color-primary);
-  background: color-mix(
-    in srgb,
-    var(--el-color-primary-light-9) 70%,
-    var(--debug-surface) 30%
-  );
-  border-color: color-mix(in srgb, var(--el-color-primary) 28%, transparent);
+  background: transparent;
+  border-color: transparent;
+}
+
+.debug-inline-tab--active::after {
+  background: var(--el-color-primary);
 }
 
 .debug-inline-tab__count {
@@ -3410,17 +3869,25 @@ onBeforeUnmount(() => {
   padding: 0 3px;
   font-size: 9.5px;
   font-weight: 700;
-  color: #fff;
-  background: var(--el-color-primary);
+  color: var(--debug-text-muted);
+  background: var(--debug-soft-bg-strong);
+  border: 1px solid var(--debug-border);
   border-radius: var(--radius);
 }
 
 .debug-inline-tab--image {
   flex: none;
   max-width: none;
+  min-height: 24px;
+  padding: 0 8px;
   margin-left: 4px;
   border-color: var(--debug-border);
   border-radius: var(--radius);
+}
+
+.debug-inline-tab--image::after,
+.debug-inline-tab--more::after {
+  display: none;
 }
 
 .debug-inline-tab--image:disabled {
@@ -3438,6 +3905,7 @@ onBeforeUnmount(() => {
 .debug-inline-tab--more {
   width: 22px;
   min-width: 22px;
+  min-height: 24px;
   padding: 0;
   background: transparent;
   border: none;
@@ -3515,7 +3983,7 @@ onBeforeUnmount(() => {
   font-weight: 700;
   color: #fff;
   background: var(--el-color-primary);
-  border-radius: var(--debug-count-radius);
+  border-radius: var(--radius, var(--el-border-radius-base, 4px));
 }
 
 .debug-icon-button {
@@ -3570,7 +4038,8 @@ onBeforeUnmount(() => {
   --el-input-focus-border-color: transparent;
   --el-input-hover-border-color: transparent;
 
-  flex: 1;
+  flex: 1 1 200px;
+  min-width: 0;
 }
 
 :deep(.debug-request-input .el-input__wrapper) {
@@ -3603,6 +4072,7 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 8px;
   align-items: center;
+  min-width: 0;
 }
 
 .method-pill {
@@ -3617,29 +4087,55 @@ onBeforeUnmount(() => {
   border-radius: var(--debug-chip-radius);
 }
 
-.debug-prefix-button {
-  width: 30px;
+.debug-base-url {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  max-width: clamp(120px, 22vw, 280px);
   height: 30px;
-  color: var(--el-text-color-secondary);
+  padding: 0 8px;
+  color: var(--debug-text-muted);
+  cursor: pointer;
+  background: var(--debug-soft-bg);
+  border: 1px solid var(--debug-border);
   border-radius: var(--debug-chip-radius);
-  transition: all 0.16s ease;
+  transition:
+    color 0.16s ease,
+    background-color 0.16s ease,
+    border-color 0.16s ease;
 }
 
-.debug-prefix-button__icon {
-  width: 18px;
-  height: 18px;
+.debug-base-url__icon {
+  flex: none;
+  width: 12px;
+  height: 12px;
 }
 
-.debug-prefix-button:hover {
+.debug-base-url__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.debug-base-url:hover {
   color: var(--el-color-primary);
   background: color-mix(
     in srgb,
-    var(--el-color-primary-light-9) 65%,
-    transparent
+    var(--el-color-primary-light-9) 76%,
+    var(--debug-surface) 24%
   );
+  border-color: color-mix(in srgb, var(--el-color-primary) 32%, transparent);
 }
 
 .debug-send-button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
   min-width: 78px;
   height: 32px;
   padding: 0 14px;
@@ -3655,13 +4151,83 @@ onBeforeUnmount(() => {
   transform: translateY(-1px);
 }
 
+.debug-send-button__icon {
+  width: 14px;
+  height: 14px;
+}
+
+.debug-back-button {
+  --el-button-bg-color: var(--debug-surface);
+  --el-button-border-color: var(--debug-border);
+  --el-button-hover-bg-color: color-mix(
+    in srgb,
+    var(--el-color-primary-light-9) 62%,
+    transparent
+  );
+  --el-button-hover-border-color: color-mix(
+    in srgb,
+    var(--el-color-primary) 34%,
+    transparent
+  );
+  --el-button-active-bg-color: var(--el-color-primary-light-9);
+  --el-button-active-border-color: color-mix(
+    in srgb,
+    var(--el-color-primary) 40%,
+    transparent
+  );
+  --el-button-text-color: var(--el-text-color-regular);
+  --el-button-hover-text-color: var(--el-color-primary);
+
+  display: inline-flex;
+  flex: none;
+  gap: 7px;
+  align-items: center;
+  height: 52px;
+  padding: 0 16px;
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--el-text-color-regular);
+  background: var(--debug-surface);
+  border: 1px solid var(--debug-border);
+  border-radius: var(--debug-radius-md);
+  box-shadow: 0 3px 9px
+    color-mix(in srgb, var(--el-text-color-primary) 5%, transparent);
+  transition:
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    color 0.16s ease,
+    background-color 0.16s ease;
+}
+
+.debug-back-button:hover {
+  color: var(--el-color-primary);
+  background: color-mix(
+    in srgb,
+    var(--el-color-primary-light-9) 62%,
+    transparent
+  );
+  border-color: color-mix(in srgb, var(--el-color-primary) 34%, transparent);
+  box-shadow: 0 5px 14px
+    color-mix(in srgb, var(--el-color-primary) 9%, transparent);
+}
+
+.debug-back-button__icon {
+  width: 18px;
+  height: 18px;
+}
+
 .debug-tabs-wrap,
 .debug-response-wrap {
   flex: 1;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: var(--debug-soft-bg);
+  background: var(--debug-surface);
+}
+
+/* 作为参数值编辑覆盖层（Teleport 自 params-table）的定位上下文，使其填满请求参数区 */
+.debug-tabs-wrap {
+  position: relative;
 }
 
 .debug-section-title {
@@ -3672,39 +4238,9 @@ onBeforeUnmount(() => {
   color: var(--el-text-color-secondary);
 }
 
-.params-table-block {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  padding: 0;
-  overflow: hidden;
-}
-
 .params-tab-sections {
   display: grid;
-  gap: 12px;
-}
-
-.params-table-block__header {
-  display: flex;
-  align-items: center;
-  min-height: 36px;
-  padding: 8px 12px;
-  background: var(--debug-soft-bg-strong);
-  border-bottom: 1px solid var(--debug-border);
-}
-
-.params-table-block__body {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-  padding: 8px 12px 10px;
-  overflow: hidden;
-}
-
-.params-table-block__header .actual-request__title {
-  margin-bottom: 0;
+  gap: 16px;
 }
 
 .response-body {
@@ -3712,24 +4248,39 @@ onBeforeUnmount(() => {
   min-height: 0;
 }
 
+.response-body--code {
+  overflow: auto;
+}
+
 :deep(.response-body.theme-light),
 :deep(.response-body.theme-dark) {
   height: 100%;
   min-height: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
 }
 
 .debug-status-list {
   display: flex;
+  flex: 0 1 auto;
   flex-wrap: wrap;
   gap: 6px;
+  align-items: center;
   justify-content: flex-end;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .debug-status-chip {
   display: inline-flex;
   align-items: center;
+  min-width: 0;
+  max-width: 100%;
   min-height: 22px;
   padding: 0 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 10.5px;
   font-weight: 600;
   color: var(--el-text-color-secondary);
@@ -3765,38 +4316,38 @@ onBeforeUnmount(() => {
 
 .actual-request {
   display: grid;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
 }
 
 .actual-request__block {
   min-width: 0;
-  padding: 10px;
-  overflow-x: auto;
-  background: var(--debug-surface);
-  border: 1px solid var(--debug-border);
-  border-radius: var(--debug-radius-xs);
 }
 
-.actual-request__block.params-table-block {
-  padding: 0;
-  overflow: hidden;
-}
-
+/* 去掉外层包裹框，仅以左侧强调条 + 标签区分分组，内部表格/代码块自带唯一边框 */
 .actual-request__title {
-  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  padding-left: 8px;
+  margin: 0 0 8px;
   font-size: 12px;
   font-weight: 700;
-  color: var(--el-text-color-primary);
+  line-height: 1.3;
+  color: var(--debug-text-muted);
+  border-left: 3px solid var(--el-color-primary);
 }
 
 .actual-request__code {
+  padding: 10px;
   margin: 0;
   font-size: 12px;
   line-height: 1.6;
-  color: var(--el-text-color-regular);
+  color: var(--el-text-color-primary);
   word-break: break-all;
   white-space: pre-wrap;
+  background: var(--debug-soft-bg);
+  border: 1px solid var(--debug-border);
+  border-radius: var(--debug-radius-xs);
 }
 
 :deep(.actual-request__block .el-table) {
@@ -3909,26 +4460,173 @@ onBeforeUnmount(() => {
   color: var(--el-text-color-secondary);
 }
 
-:deep(.document-page--dark .debug-console),
-:deep(html.dark .debug-console) {
-  --debug-surface: #1c1e23;
-  --debug-soft-bg: #1c1e23;
-  --debug-soft-bg-strong: #23272e;
-  --debug-border: color-mix(in srgb, #fff 6%, transparent);
-  --debug-border-strong: color-mix(in srgb, #fff 9%, transparent);
-  --debug-request-shell-bg: #20242b;
-  --debug-request-shell-top-line: color-mix(in srgb, #fff 18%, transparent);
-  --debug-request-shell-bottom-line: color-mix(in srgb, #fff 10%, transparent);
-  --debug-request-shell-shadow:
-    inset 0 1px 0 var(--debug-request-shell-top-line),
-    inset 0 -1px 0 var(--debug-request-shell-bottom-line),
-    0 8px 18px -14px color-mix(in srgb, #000 58%, transparent),
-    0 -8px 18px -14px color-mix(in srgb, #fff 12%, transparent);
-  --debug-request-shell-shadow-hover:
-    inset 0 1px 0 color-mix(in srgb, #fff 24%, transparent),
-    inset 0 -1px 0 color-mix(in srgb, #fff 14%, transparent),
-    0 10px 22px -14px color-mix(in srgb, #000 62%, transparent),
-    0 -10px 22px -14px color-mix(in srgb, #fff 16%, transparent);
+:global(.document-page--dark .debug-console),
+:global(html.dark .debug-console) {
+  --debug-page-bg: var(--el-bg-color);
+  --debug-surface: color-mix(in srgb, var(--el-bg-color) 92%, #fff 8%);
+  --debug-soft-bg: color-mix(
+    in srgb,
+    var(--el-bg-color) 86%,
+    var(--el-fill-color-light) 14%
+  );
+  --debug-soft-bg-strong: color-mix(
+    in srgb,
+    var(--el-bg-color) 76%,
+    var(--el-fill-color-light) 24%
+  );
+  --debug-border: color-mix(
+    in srgb,
+    var(--el-text-color-primary) 16%,
+    transparent
+  );
+  --debug-border-strong: color-mix(
+    in srgb,
+    var(--el-text-color-primary) 24%,
+    transparent
+  );
+  --debug-text-muted: var(--el-text-color-secondary);
+  --debug-request-shell-bg: color-mix(
+    in srgb,
+    var(--el-bg-color) 88%,
+    #fff 12%
+  );
   --debug-shadow: 0 8px 20px color-mix(in srgb, #000 45%, transparent);
+  --debug-shadow-strong: 0 12px 26px color-mix(in srgb, #000 52%, transparent);
+}
+
+:global(.document-page--dark .debug-base-url:hover),
+:global(html.dark .debug-base-url:hover),
+:global(.document-page--dark .debug-back-button:hover),
+:global(html.dark .debug-back-button:hover) {
+  background: color-mix(in srgb, var(--el-color-primary) 14%, transparent);
+}
+
+:global(.document-page--dark .debug-status-chip--success),
+:global(html.dark .debug-status-chip--success) {
+  color: #34d399;
+  background: rgb(16 185 129 / 12%);
+  border-color: rgb(16 185 129 / 32%);
+}
+
+:global(.document-page--dark .debug-status-chip--error),
+:global(html.dark .debug-status-chip--error) {
+  color: #fb7185;
+  background: rgb(244 63 94 / 12%);
+  border-color: rgb(244 63 94 / 32%);
+}
+
+:global(.document-page--dark .debug-status-chip--metric),
+:global(html.dark .debug-status-chip--metric),
+:global(.document-page--dark .actual-request__code),
+:global(html.dark .actual-request__code) {
+  color: var(--el-text-color-primary);
+}
+
+:global(.document-page--dark .debug-base64-card__preview-stage),
+:global(html.dark .debug-base64-card__preview-stage) {
+  background-color: color-mix(in srgb, var(--el-bg-color) 78%, #fff 10%);
+  background-image:
+    linear-gradient(45deg, rgb(255 255 255 / 7%) 25%, transparent 25%),
+    linear-gradient(-45deg, rgb(255 255 255 / 7%) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgb(255 255 255 / 7%) 75%),
+    linear-gradient(-45deg, transparent 75%, rgb(255 255 255 / 7%) 75%);
+}
+
+/* 全局配置弹窗样式：弹窗固定高度，整体不滚动；参数表格约 8 行后在右侧卡片内滚动 */
+:global(.global-config-dialog-overlay) {
+  overflow: hidden;
+}
+
+:global(.global-config-dialog-overlay .el-overlay-dialog) {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  overflow: hidden;
+}
+
+:global(.global-config-dialog) {
+  display: flex;
+  flex-direction: column;
+  height: 760px;
+  max-height: calc(100vh - 80px);
+  margin: 0 !important;
+  overflow: hidden;
+}
+
+:global(.global-config-dialog .el-dialog__header) {
+  flex: none;
+}
+
+:global(.global-config-dialog .el-dialog__body) {
+  flex: 1;
+  min-height: 0;
+
+  /* body 不滚动，滚动交给内部参数表格和认证列表 */
+  padding: 16px 20px 20px;
+  overflow: hidden;
+}
+
+:global(.global-config-dialog .global-config-panel) {
+  grid-template-columns: 180px minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+}
+
+:global(.global-config-dialog .gcp-content) {
+  min-height: 0;
+  overflow: hidden;
+}
+
+:global(.global-config-dialog .gcp-section--params) {
+  overflow: hidden !important;
+}
+
+:global(.global-config-dialog .gcp-section--params .config-card) {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+:global(.global-config-dialog .gcp-section--params .el-card__header) {
+  flex: none;
+}
+
+:global(.global-config-dialog .gcp-section--params .el-card__body) {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: 18px 20px 20px;
+  overflow: hidden;
+}
+
+:global(.global-config-dialog .gcp-section--params .el-alert),
+:global(.global-config-dialog .gcp-section--params .el-form) {
+  flex: none;
+}
+
+:global(.global-config-dialog .gcp-section--params .el-tabs) {
+  flex: 1;
+  min-height: 0;
+}
+
+:global(.global-config-dialog .gcp-section--params .el-tab-pane) {
+  min-height: 0;
+  overflow: hidden;
+}
+
+:global(.global-config-dialog .gcp-section--params .el-table) {
+  width: 100%;
+}
+
+:global(.global-config-dialog .gcp-section--params .el-table__inner-wrapper) {
+  min-width: 0;
+}
+
+:global(.global-config-dialog .gcp-section--params .el-table__cell .cell) {
+  white-space: nowrap;
 }
 </style>

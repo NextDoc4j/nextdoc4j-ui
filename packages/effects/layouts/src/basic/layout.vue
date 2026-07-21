@@ -103,6 +103,7 @@ const showHeaderNav = computed(() => {
 const {
   handleMenuSelect,
   handleMenuOpen,
+  handleMenuClose,
   headerActive,
   headerMenus,
   sidebarActive,
@@ -343,6 +344,7 @@ const headerSlots = computed(() => {
         :rounded="isMenuRounded"
         :theme="sidebarTheme"
         mode="vertical"
+        @close="handleMenuClose"
         @open="handleMenuOpen"
         @select="handleMenuSelect"
       />

@@ -106,6 +106,14 @@ interface RouteMeta {
    */
   maxNumOfOpenTab?: number;
   /**
+   * 点击菜单分组时跳转的目标地址
+   */
+  menuGroupTarget?: string;
+  /**
+   * 是否启用菜单分组跳转，函数形式可用于运行时配置
+   */
+  menuGroupTargetEnabled?: (() => boolean) | boolean;
+  /**
    * 菜单可以看到，但是访问会被重定向到403
    */
   menuVisibleWithForbidden?: boolean;

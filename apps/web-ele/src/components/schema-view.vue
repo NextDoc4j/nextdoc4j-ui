@@ -3,7 +3,7 @@ import { computed, ref } from 'vue';
 
 import { SvgCaretRightIcon } from '@vben/icons';
 
-import { ElButton, ElTooltip } from 'element-plus';
+import { ElTooltip } from 'element-plus';
 
 import { getEnumItems } from '#/utils/enumexpand';
 import { getSchemaTypeLabel } from '#/utils/schema';
@@ -35,6 +35,10 @@ const variantState = ref<Record<string, number>>({});
 
 const mode = computed(() => props.mode);
 const rootPath = computed(() => props.pathPrefix || '$');
+
+const requiredLabel = computed(() => {
+  return mode.value === 'response' ? '必含' : '必填';
+});
 
 const hasHtmlDescription = (desc?: string) => Boolean(desc?.includes('<'));
 
@@ -226,6 +230,14 @@ const getObjectContainerSchema = (item: any, path: string): any => {
 };
 
 const isExpandable = (item: any, path: string) => {
+  // multi-branch oneOf/anyOf must expand so nested variant tabs match response SchemaView
+  const compositionKeyword = getCompositionKeyword(item);
+  if (
+    (compositionKeyword === 'oneOf' || compositionKeyword === 'anyOf') &&
+    getCompositionItems(item, compositionKeyword).length > 1
+  ) {
+    return true;
+  }
   const schema = getDisplaySchema(item, path);
   if (schema?.type === 'object' && schema?.properties) {
     return Object.keys(schema.properties).length > 0;
@@ -278,11 +290,65 @@ const getPropertyEnumItems = (value: any, path: string) => {
 
 const getTypeLabel = (value: any, path: string) => {
   const schema = getDisplaySchema(value, path);
-  return getSchemaTypeLabel(schema);
+  const label = getSchemaTypeLabel(schema);
+  // 纯 oneOf/anyOf 合并后若类型仍为 any，回退到当前选中分支类型
+  if (label && label !== 'any' && label !== '-') {
+    return label;
+  }
+  const keyword = getCompositionKeyword(value);
+  if (keyword === 'oneOf' || keyword === 'anyOf') {
+    const options = getCompositionItems(value, keyword);
+    const selected =
+      options[getSelectedVariantIndex(value, path)] ?? options[0];
+    if (selected) {
+      return getSchemaTypeLabel(selected);
+    }
+  }
+  return label;
+};
+
+/**
+ * 从 schema / examples 中取首个可用示例（忽略 null）
+ */
+const pickUsableExample = (source: any): unknown => {
+  if (!source || typeof source !== 'object') {
+    return undefined;
+  }
+  if (source.example !== undefined && source.example !== null) {
+    return source.example;
+  }
+  if (Array.isArray(source.examples) && source.examples.length > 0) {
+    const first = source.examples[0];
+    if (first === undefined || first === null) {
+      return undefined;
+    }
+    if (typeof first === 'object' && first !== null && 'value' in first) {
+      return (first as { value: unknown }).value ?? undefined;
+    }
+    return first;
+  }
+  return undefined;
 };
 
 const getExampleValue = (value: any, path: string) => {
-  return getDisplaySchema(value, path)?.example;
+  const display = getDisplaySchema(value, path);
+  const fromDisplay = pickUsableExample(display);
+  if (fromDisplay !== undefined) {
+    return fromDisplay;
+  }
+  const fromRaw = pickUsableExample(value);
+  if (fromRaw !== undefined) {
+    return fromRaw;
+  }
+  // 合并后可能丢失分支 example：直接读当前选中分支
+  const keyword = getCompositionKeyword(value);
+  if (keyword === 'oneOf' || keyword === 'anyOf') {
+    const options = getCompositionItems(value, keyword);
+    const selected =
+      options[getSelectedVariantIndex(value, path)] ?? options[0];
+    return pickUsableExample(selected);
+  }
+  return undefined;
 };
 
 const getPatternValue = (value: any, path: string) => {
@@ -364,13 +430,78 @@ const getVariantOptions = (item: any) => {
   return getCompositionItems(item, keyword);
 };
 
-const getVariantOptionLabel = (option: any, index: number) => {
-  const title = option?.title || '';
-  const type = option?.type ? ` · ${option.type}` : '';
-  if (title) {
-    return `${index + 1}. ${title}${type}`;
+/**
+ * 分支 tab 主文案：实体保留 title；标量直接显示类型（不再用「方案 N」）
+ */
+const getVariantButtonLabel = (option: any, _index?: number) => {
+  const title = `${option?.title || ''}`.trim();
+  if (title && !/^方案\s*\d+$/u.test(title)) {
+    return title;
   }
-  return `方案 ${index + 1}${type}`;
+  return getSchemaTypeLabel(option) || option?.type || '-';
+};
+
+/**
+ * 主文案已是类型时不再重复展示 type chip
+ */
+const shouldShowVariantTypeChip = (option: any) => {
+  if (!option?.type) {
+    return false;
+  }
+  const label = getVariantButtonLabel(option);
+  const typeLabel = getSchemaTypeLabel(option);
+  return label !== option.type && label !== typeLabel;
+};
+
+/** 分支描述非空才启用 tooltip，避免空浮窗 */
+const hasTooltipContent = (text?: string) => Boolean(`${text || ''}`.trim());
+
+/**
+ * 选中分支是否仍有可嵌套展示的对象/数组结构（纯标量则不再渲染子 SchemaView）
+ */
+const hasNestedSchemaStructure = (item: any, path: string) => {
+  const schema = getDisplaySchema(item, path);
+  if (!schema || typeof schema !== 'object') {
+    return false;
+  }
+  if (
+    schema.type === 'object' &&
+    schema.properties &&
+    Object.keys(schema.properties).length > 0
+  ) {
+    return true;
+  }
+  if (schema.type === 'array' && schema.items) {
+    if (schema.items?.type === 'object' && schema.items?.properties) {
+      return true;
+    }
+    return hasVariantSelector(schema.items);
+  }
+  return hasVariantSelector(schema);
+};
+
+/**
+ * 获取组合关键字的显示标签（英文）
+ */
+const getCompositionLabel = (keyword: '' | CompositionKeyword) => {
+  const labels: Record<CompositionKeyword, string> = {
+    oneOf: 'oneOf',
+    anyOf: 'anyOf',
+    allOf: 'allOf',
+  };
+  return keyword ? labels[keyword] : '';
+};
+
+/**
+ * 获取组合关键字的中文说明（用于 tooltip）
+ */
+const getCompositionTooltip = (keyword: '' | CompositionKeyword) => {
+  const tooltips: Record<CompositionKeyword, string> = {
+    oneOf: '选择其中之一',
+    anyOf: '可能是以下之一',
+    allOf: '合并所有',
+  };
+  return keyword ? tooltips[keyword] : '';
 };
 
 const resolvedRootSchema = computed(() => {
@@ -403,12 +534,12 @@ const rootHasVariantSelector = computed(() => {
   return hasVariantSelector(props.data);
 });
 
+// 纯 oneOf/anyOf 标量：类型随 tab 在字段 type chip 上变化，不再单独展示「结构/根」pill
 const showRootHeader = computed(() => {
-  return (
-    showRootArrayPill.value ||
-    showRootPrimitivePill.value ||
-    rootHasVariantSelector.value
-  );
+  if (rootHasVariantSelector.value) {
+    return showRootArrayPill.value;
+  }
+  return showRootArrayPill.value || showRootPrimitivePill.value;
 });
 
 const showSchemaStack = computed(() => {
@@ -424,24 +555,47 @@ const showSchemaStack = computed(() => {
     <span class="schema-root-pill__value">
       {{ getTypeLabel(resolvedRootSchema, rootPath) }}
     </span>
-    <div v-if="rootHasVariantSelector" class="composition-switch__buttons">
+  </div>
+
+  <div v-if="rootHasVariantSelector" class="schema-root-variant">
+    <ElTooltip
+      :content="getCompositionTooltip(getCompositionKeyword(data))"
+      :disabled="
+        !hasTooltipContent(getCompositionTooltip(getCompositionKeyword(data)))
+      "
+      placement="top"
+    >
+      <span class="schema-root-variant__label">
+        {{ getCompositionLabel(getCompositionKeyword(data)) }}:
+      </span>
+    </ElTooltip>
+    <div class="schema-root-variant__tabs">
       <ElTooltip
         v-for="(option, index) in getVariantOptions(data)"
         :key="`${rootPath}-${index}`"
-        :content="getVariantOptionLabel(option, index)"
+        :content="option?.description || ''"
+        :disabled="!hasTooltipContent(option?.description)"
         placement="top"
       >
-        <ElButton
-          size="small"
-          class="variant-switch-button"
+        <button
+          type="button"
+          class="variant-tab"
           :class="{
-            'variant-switch-button--active':
+            'variant-tab--active':
               getSelectedVariantIndex(data, rootPath) === index,
           }"
           @click="updateVariant(rootPath, index)"
         >
-          {{ index + 1 }}
-        </ElButton>
+          <span class="variant-tab__title">
+            {{ getVariantButtonLabel(option, index) }}
+          </span>
+          <span
+            v-if="shouldShowVariantTypeChip(option)"
+            class="variant-tab__type"
+          >
+            {{ option.type }}
+          </span>
+        </button>
       </ElTooltip>
     </div>
   </div>
@@ -465,11 +619,7 @@ const showSchemaStack = computed(() => {
               :class="{ 'rotate-90': !foldState[getNodePath(String(key))] }"
             />
           </button>
-          <span
-            v-else
-            class="schema-item__control-spacer"
-            aria-hidden="true"
-          ></span>
+          <span v-else class="schema-item__leaf-indicator"></span>
         </div>
 
         <div class="schema-item__content">
@@ -514,51 +664,25 @@ const showSchemaStack = computed(() => {
                 }"
               >
                 {{ key }}
-                <sup
-                  v-if="
-                    isRequired(resolvedRootObjectSchema, String(key), value)
-                  "
-                  class="schema-item__required-star"
-                >
-                  *
-                </sup>
               </div>
               <div class="schema-item__type">
                 {{ getTypeLabel(value, getNodePath(String(key))) }}
               </div>
+              <span
+                v-if="isRequired(resolvedRootObjectSchema, String(key), value)"
+                class="schema-item__required-tag"
+                :class="{
+                  'schema-item__required-tag--response': mode === 'response',
+                }"
+              >
+                {{ requiredLabel }}
+              </span>
               <div
                 v-if="getPlainDescription(value, getNodePath(String(key)))"
                 class="schema-item__summary"
               >
                 {{ getPlainDescription(value, getNodePath(String(key))) }}
               </div>
-            </div>
-
-            <div
-              v-if="hasVariantSelector(value)"
-              class="schema-item__meta-variant"
-            >
-              <ElTooltip
-                v-for="(option, index) in getVariantOptions(value)"
-                :key="`${getNodePath(String(key))}-${index}`"
-                :content="getVariantOptionLabel(option, index)"
-                placement="top"
-              >
-                <ElButton
-                  size="small"
-                  class="variant-switch-button"
-                  :class="{
-                    'variant-switch-button--active':
-                      getSelectedVariantIndex(
-                        value,
-                        getNodePath(String(key)),
-                      ) === index,
-                  }"
-                  @click="updateVariant(getNodePath(String(key)), index)"
-                >
-                  {{ index + 1 }}
-                </ElButton>
-              </ElTooltip>
             </div>
           </div>
 
@@ -600,7 +724,8 @@ const showSchemaStack = computed(() => {
               getConstraintTokens(value, getNodePath(String(key))).length > 0 ||
               getPropertyEnumItems(value, getNodePath(String(key))).length >
                 0 ||
-              getExampleValue(value, getNodePath(String(key))) !== undefined ||
+              (getExampleValue(value, getNodePath(String(key))) !== undefined &&
+                getExampleValue(value, getNodePath(String(key))) !== null) ||
               getPatternValue(value, getNodePath(String(key)))
             "
             class="schema-item__details"
@@ -670,7 +795,9 @@ const showSchemaStack = computed(() => {
 
             <div
               v-if="
-                getExampleValue(value, getNodePath(String(key))) !== undefined
+                getExampleValue(value, getNodePath(String(key))) !==
+                  undefined &&
+                getExampleValue(value, getNodePath(String(key))) !== null
               "
               class="schema-item__detail-row"
             >
@@ -698,33 +825,126 @@ const showSchemaStack = computed(() => {
               </div>
             </div>
           </div>
-
-          <div
-            v-if="
-              isExpandable(value, getNodePath(String(key))) &&
-              !foldState[getNodePath(String(key))]
+        </div>
+      </div>
+      <div
+        v-if="
+          isExpandable(value, getNodePath(String(key))) &&
+          !foldState[getNodePath(String(key))]
+        "
+        class="schema-item__children"
+      >
+        <div
+          v-if="hasVariantSelector(value)"
+          class="schema-item__variant-selector"
+        >
+          <ElTooltip
+            :content="getCompositionTooltip(getCompositionKeyword(value))"
+            :disabled="
+              !hasTooltipContent(
+                getCompositionTooltip(getCompositionKeyword(value)),
+              )
             "
-            class="schema-item__children"
+            placement="top"
           >
-            <SchemaView
-              :data="getDisplaySchema(value, getNodePath(String(key)))"
-              :mode="mode"
-              :path-prefix="getNodePath(String(key))"
-              @variant-change="handleChildVariantChange"
-            />
+            <span class="schema-item__variant-label">
+              {{ getCompositionLabel(getCompositionKeyword(value)) }}:
+            </span>
+          </ElTooltip>
+          <div class="schema-item__variant-tabs">
+            <ElTooltip
+              v-for="(option, index) in getVariantOptions(value)"
+              :key="`${getNodePath(String(key))}-${index}`"
+              :content="option?.description || ''"
+              :disabled="!hasTooltipContent(option?.description)"
+              placement="top"
+            >
+              <button
+                type="button"
+                class="variant-tab"
+                :class="{
+                  'variant-tab--active':
+                    getSelectedVariantIndex(value, getNodePath(String(key))) ===
+                    index,
+                }"
+                @click="updateVariant(getNodePath(String(key)), index)"
+              >
+                <span class="variant-tab__title">
+                  {{ getVariantButtonLabel(option, index) }}
+                </span>
+                <span
+                  v-if="shouldShowVariantTypeChip(option)"
+                  class="variant-tab__type"
+                >
+                  {{ option.type }}
+                </span>
+              </button>
+            </ElTooltip>
           </div>
         </div>
+        <!-- 仅对象/数组结构嵌套渲染；纯标量分支只保留 tabs，类型在父级 type chip 更新 -->
+        <SchemaView
+          v-if="hasNestedSchemaStructure(value, getNodePath(String(key)))"
+          :data="getDisplaySchema(value, getNodePath(String(key)))"
+          :mode="mode"
+          :path-prefix="getNodePath(String(key))"
+          @variant-change="handleChildVariantChange"
+        />
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
+@media (max-width: 768px) {
+  .schema-item__details {
+    grid-template-columns: 1fr;
+    row-gap: 4px;
+  }
+
+  .schema-item__detail-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
+  .schema-item__headline {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .schema-item__headline-main {
+    gap: 6px 8px;
+  }
+
+  .schema-item__summary {
+    min-width: 0;
+  }
+
+  .schema-item__detail-label {
+    min-width: 0;
+  }
+
+  .schema-root-variant {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .schema-root-variant__tabs,
+  .schema-item__variant-tabs {
+    width: 100%;
+  }
+
+  .variant-tab {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
 .schema-root-pill,
 .schema-stack {
   --field-chip-radius: calc(var(--radius, 12px) * 0.82);
-  --field-chip-bg: var(--el-fill-color-light);
-  --field-chip-border: var(--el-border-color);
+  --field-chip-bg: var(--doc-field-chip-bg, var(--el-fill-color-light));
+  --field-chip-border: var(--doc-field-chip-border, var(--el-border-color));
   --field-chip-text: var(--el-text-color-primary);
   --field-chip-value-weight: 600;
   --field-required: var(--el-color-danger);
@@ -765,38 +985,167 @@ const showSchemaStack = computed(() => {
 }
 
 .schema-stack > .schema-item + .schema-item {
-  border-top: 1px solid var(--el-border-color-lighter);
+  border-top: 1px solid var(--doc-row-border, var(--el-border-color-lighter));
 }
 
-.composition-switch__buttons {
+.schema-stack .schema-stack {
+  padding-left: 6px;
+}
+
+/* 根级别分支选择器 */
+.schema-root-variant {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
   align-items: center;
-  margin-left: auto;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  background: var(--doc-control-bg, var(--el-bg-color));
+  border: 1px solid var(--doc-panel-border, var(--el-border-color-light));
+  border-radius: calc(var(--radius, 12px) * 0.92);
+}
+
+.schema-root-variant__label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+  cursor: help;
+}
+
+.schema-root-variant__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+/* 字段级别分支选择器 */
+.schema-item__variant-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  background: var(--doc-control-bg, var(--el-bg-color));
+  border: 1px solid var(--doc-panel-border, var(--el-border-color-light));
+  border-radius: 6px;
+}
+
+.schema-item__variant-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+  cursor: help;
+}
+
+.schema-item__variant-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+/* 通用分段选择器样式 */
+.variant-tab {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  min-height: 28px;
+  padding: 4px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--el-text-color-regular);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.variant-tab:hover {
+  color: var(--el-color-primary);
+  background: var(--doc-control-hover-bg, var(--el-fill-color-light));
+}
+
+.variant-tab:active {
+  transform: scale(0.98);
+}
+
+.variant-tab--active {
+  color: var(--el-color-primary);
+  background: var(--doc-control-active-bg, var(--el-color-primary-light-9));
+  border-color: var(--doc-active-border, var(--el-color-primary));
+  box-shadow: var(
+    --doc-active-shadow,
+    0 0 0 2px color-mix(in srgb, var(--el-color-primary) 10%, transparent)
+  );
+}
+
+.variant-tab__title {
+  font-size: 12px;
+  font-weight: inherit;
+  line-height: 1.4;
+}
+
+.variant-tab__type {
+  font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--el-text-color-secondary);
+  opacity: 0.8;
 }
 
 .schema-item {
   box-sizing: border-box;
   width: 100%;
-  padding: 10px 0;
+  padding: 8px 0;
 }
 
 .schema-item__top {
   display: flex;
-  gap: 8px;
+  gap: 6px;
+
+  /* 顶部对齐：描述换行后内容块变高，箭头需与第一行（字段名/类型）对齐而非整块居中 */
   align-items: flex-start;
   width: 100%;
+  padding: 5px 0;
+
+  /* 不向左右负外边距溢出：外层 ElCollapse 的 __wrap 为 overflow:hidden，
+     负 margin 会使行左侧圆角被裁切；贴齐折叠内容区即可完整显示圆角 */
+  margin: 0;
+  border-radius: var(--field-chip-radius);
+  transition: background-color 0.2s ease;
+}
+
+.schema-item__top:hover {
+  background-color: var(--doc-row-hover-bg, var(--el-fill-color));
 }
 
 .schema-item__control {
   display: flex;
   flex: none;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
   width: 18px;
   min-width: 18px;
-  padding-top: 2px;
+
+  /* 与第一行（字段名/类型 chip）等高，使箭头与字段行居中对齐 */
+  height: 24px;
+}
+
+.schema-item__leaf-indicator {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  background: var(--el-border-color-lighter);
+  border-radius: 50%;
+  opacity: 0.6;
 }
 
 .schema-item__toggle {
@@ -819,26 +1168,20 @@ const showSchemaStack = computed(() => {
 
 .schema-item__toggle:hover {
   color: var(--el-color-primary);
-  background: color-mix(
-    in srgb,
-    var(--el-color-primary-light-9) 82%,
-    transparent
-  );
+  background: var(--doc-control-hover-bg, var(--el-fill-color-light));
 }
 
 .schema-item__toggle:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px
-    color-mix(in srgb, var(--el-color-primary-light-8) 75%, transparent);
+  box-shadow: var(
+    --doc-active-shadow,
+    0 0 0 2px color-mix(in srgb, var(--el-color-primary) 10%, transparent)
+  );
 }
 
 .schema-item__toggle--expanded {
   color: var(--el-color-primary);
-  background: color-mix(
-    in srgb,
-    var(--el-color-primary-light-9) 88%,
-    transparent
-  );
+  background: var(--doc-control-active-bg, var(--el-color-primary-light-9));
 }
 
 .schema-item__toggle:active {
@@ -849,7 +1192,7 @@ const showSchemaStack = computed(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
+  width: 16px;
   height: 18px;
 }
 
@@ -861,17 +1204,20 @@ const showSchemaStack = computed(() => {
 
 .schema-item__headline {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px 12px;
   align-items: start;
   min-width: 0;
 }
 
 .schema-item__headline-main {
+  /* 流式布局（对齐主流 API 文档 Redoc / Stoplight / Scalar 的做法）：
+     字段名与类型 chip 在同一行按自然宽度排列，描述另起一行占满整行；
+     避免严格等宽列被 object<LoginOperateContentReq> 等长泛型撑坏或错位 */
   display: flex;
   flex-wrap: wrap;
   gap: 4px 10px;
-  align-items: baseline;
+  align-items: center;
   min-width: 0;
 }
 
@@ -891,25 +1237,25 @@ const showSchemaStack = computed(() => {
 
 .schema-item__headline-main--interactive:hover,
 .schema-item__description--interactive:hover {
-  background: color-mix(
-    in srgb,
-    var(--el-color-primary-light-9) 56%,
-    transparent
-  );
+  background: var(--doc-row-hover-bg, var(--el-fill-color-light));
 }
 
 .schema-item__headline-main--interactive:focus-visible,
 .schema-item__description--interactive:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px
-    color-mix(in srgb, var(--el-color-primary-light-8) 70%, transparent);
+  box-shadow: var(
+    --doc-active-shadow,
+    0 0 0 2px color-mix(in srgb, var(--el-color-primary) 10%, transparent)
+  );
 }
 
 .schema-item__name {
   position: relative;
   display: inline-flex;
   flex: 0 1 auto;
-  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
   min-width: 0;
   max-width: 100%;
   font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
@@ -922,34 +1268,63 @@ const showSchemaStack = computed(() => {
 }
 
 .schema-item__name--required {
-  color: var(--field-required);
+  color: var(--el-text-color-primary);
 }
 
-.schema-item__required-star {
-  position: absolute;
-  top: 0;
-  left: -10px;
+.schema-item__required-tag {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  min-height: 18px;
+  padding: 0 6px;
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
   font-size: 10px;
-  font-style: normal;
   font-weight: 700;
-  line-height: 1;
+  line-height: 18px;
   color: var(--field-required);
-  transform: translate(0, -32%);
+  background: color-mix(
+    in srgb,
+    var(--el-color-danger-light-9) 88%,
+    transparent
+  );
+  border: 1px solid
+    color-mix(in srgb, var(--el-color-danger-light-7) 86%, transparent);
+  border-radius: 6px;
+}
+
+.schema-item__required-tag--response {
+  color: var(--el-color-info);
+  background: color-mix(in srgb, var(--el-color-info-light-9) 88%, transparent);
+  border-color: color-mix(
+    in srgb,
+    var(--el-color-info-light-7) 86%,
+    transparent
+  );
 }
 
 .schema-item__type {
   display: inline-flex;
   flex: 0 1 auto;
-  align-items: baseline;
+  align-items: center;
+  width: fit-content;
   min-width: 0;
   max-width: 100%;
+  min-height: 24px;
+  padding: 2px 8px;
   font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
   line-height: 1.5;
-  color: var(--el-text-color-secondary);
+  color: var(--el-color-primary);
   overflow-wrap: anywhere;
   white-space: normal;
+  background: var(--el-color-primary-light-9);
+  border-radius: 7px;
 }
 
 .schema-item__summary,
@@ -957,12 +1332,16 @@ const showSchemaStack = computed(() => {
   min-width: 0;
   font-size: 12px;
   line-height: 1.5;
-  color: var(--el-text-color-secondary);
+
+  /* 描述用 regular 色：比 secondary 更清晰、又比 primary 柔和；随主题自动适配深浅模式 */
+  color: var(--el-text-color-regular);
 }
 
 .schema-item__summary {
-  flex: 1 1 240px;
+  /* 流式布局中占满整行，稳定换到字段名/类型下一行显示 */
+  flex: 0 0 100%;
   min-width: 0;
+  margin-top: 2px;
 }
 
 .schema-item__description {
@@ -980,7 +1359,7 @@ const showSchemaStack = computed(() => {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
   gap: 6px 8px;
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
 .schema-item__detail-row {
@@ -1003,14 +1382,6 @@ const showSchemaStack = computed(() => {
   gap: 4px 6px;
   align-items: center;
   min-width: 0;
-}
-
-.schema-item__meta-variant {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-  justify-content: flex-end;
 }
 
 .meta-chip {
@@ -1058,67 +1429,13 @@ const showSchemaStack = computed(() => {
   white-space: normal;
 }
 
-.variant-switch-button {
-  min-width: 28px;
-  height: 24px;
-  padding: 0 8px;
-  font-size: 11px;
-  color: var(--el-text-color-secondary);
-  background: var(--field-chip-bg);
-  border: 1px solid var(--field-chip-border);
-  border-radius: var(--field-chip-radius);
-}
-
-.variant-switch-button--active {
-  color: var(--el-color-primary);
-  background: color-mix(
-    in srgb,
-    var(--el-color-primary-light-9) 78%,
-    var(--el-bg-color) 22%
-  );
-  border-color: color-mix(
-    in srgb,
-    var(--el-color-primary-light-7) 86%,
-    transparent
-  );
-}
-
 .schema-item__children {
   box-sizing: border-box;
-  width: 100%;
-  padding-left: 12px;
-  margin-top: 10px;
-  margin-left: 2px;
+  width: calc(100% - 18px);
+  padding: 0 0 0 10px;
+  margin-top: 2px;
+  margin-left: 18px;
   border-left: 1px solid
-    color-mix(in srgb, var(--el-border-color-lighter) 88%, transparent);
-}
-
-@media (max-width: 768px) {
-  .schema-item__details {
-    grid-template-columns: 1fr;
-    row-gap: 4px;
-  }
-
-  .schema-item__detail-row {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 2px;
-  }
-
-  .schema-item__headline {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .schema-item__headline-main {
-    gap: 6px 8px;
-  }
-
-  .schema-item__summary {
-    flex-basis: 240px;
-  }
-
-  .schema-item__detail-label {
-    min-width: 0;
-  }
+    color-mix(in srgb, var(--el-color-primary-light-7) 48%, transparent);
 }
 </style>

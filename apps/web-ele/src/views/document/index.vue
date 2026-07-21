@@ -15,7 +15,7 @@ import { useRoute } from 'vue-router';
 
 import { usePreferences } from '@vben/preferences';
 
-import { ElEmpty, ElTabPane, ElTabs } from 'element-plus';
+import { ElEmpty } from 'element-plus';
 
 import Loading from '#/components/loading.vue';
 import { useApiStore } from '#/store';
@@ -25,6 +25,10 @@ const ApiTestPanel = defineAsyncComponent(loadApiTestPanel);
 const DocumentPanel = defineAsyncComponent(
   () => import('./components/document.vue'),
 );
+// 分组概览页：当路由名以 __overview__ 结尾时，于本组件内直接渲染概览内容。
+// 因为详情/概览同为分组的叶子路由且共用本组件，需按 route.name 分支渲染。
+const GroupOverview = defineAsyncComponent(() => import('./overview.vue'));
+const GROUP_OVERVIEW_MARKER = '__overview__';
 
 interface DocumentExpose {
   getDebugPayload?: () => {
@@ -43,6 +47,14 @@ interface DebugTriggerPayload {
 const { isDark } = usePreferences();
 const route = useRoute();
 const apiStore = useApiStore();
+
+// 当前路由是否为分组概览页（路由名以 __overview__ 结尾）
+const isOverview = computed(() => {
+  const routeName = route.name;
+  return (
+    typeof routeName === 'string' && routeName.endsWith(GROUP_OVERVIEW_MARKER)
+  );
+});
 
 const getViewStorageKey = () => `doc:activeView:${route.fullPath}`;
 const activeView = ref<'debug' | 'detail'>(
@@ -63,6 +75,12 @@ const documentRef = shallowRef<DocumentExpose | null>(null);
 let apiTestPanelPreloadPromise: null | Promise<unknown> = null;
 let debugPreloadTimer: null | number = null;
 let debugPreloadIdleHandle: null | number = null;
+let debugPreloadLoadHandler: (() => void) | null = null;
+
+interface NetworkInformationLike {
+  effectiveType?: string;
+  saveData?: boolean;
+}
 
 const preloadApiTestPanel = () => {
   apiTestPanelPreloadPromise ||= loadApiTestPanel();
@@ -83,30 +101,83 @@ const clearDebugPreloadTask = () => {
     window.cancelIdleCallback(debugPreloadIdleHandle);
     debugPreloadIdleHandle = null;
   }
+
+  if (debugPreloadLoadHandler) {
+    window.removeEventListener('load', debugPreloadLoadHandler);
+    debugPreloadLoadHandler = null;
+  }
+};
+
+const canAutoPreloadDebugPanel = () => {
+  if (
+    document.visibilityState !== 'visible' ||
+    isOverview.value ||
+    navigator.onLine === false
+  ) {
+    return false;
+  }
+
+  const connection = (
+    navigator as Navigator & { connection?: NetworkInformationLike }
+  ).connection;
+  return (
+    !connection?.saveData &&
+    connection?.effectiveType !== 'slow-2g' &&
+    connection?.effectiveType !== '2g'
+  );
+};
+
+const preloadDebugPanelOnIntent = () => {
+  clearDebugPreloadTask();
+  void preloadApiTestPanel();
 };
 
 const scheduleDebugPanelPreload = () => {
-  if (typeof window === 'undefined' || apiTestPanelPreloadPromise) {
+  if (
+    typeof window === 'undefined' ||
+    apiTestPanelPreloadPromise ||
+    isOverview.value
+  ) {
     return;
   }
 
-  const warmUp = () => {
-    debugPreloadTimer = null;
+  const warmUpWhenIdle = () => {
     debugPreloadIdleHandle = null;
+    if (!canAutoPreloadDebugPanel() || apiTestPanelPreloadPromise) {
+      return;
+    }
     void preloadApiTestPanel();
   };
 
-  if (
-    'requestIdleCallback' in window &&
-    typeof window.requestIdleCallback === 'function'
-  ) {
-    debugPreloadIdleHandle = window.requestIdleCallback(warmUp, {
-      timeout: 1200,
-    });
+  const scheduleWhenIdle = () => {
+    debugPreloadTimer = null;
+    if (!canAutoPreloadDebugPanel() || apiTestPanelPreloadPromise) {
+      return;
+    }
+
+    if (
+      'requestIdleCallback' in window &&
+      typeof window.requestIdleCallback === 'function'
+    ) {
+      debugPreloadIdleHandle = window.requestIdleCallback(warmUpWhenIdle);
+      return;
+    }
+
+    debugPreloadTimer = window.setTimeout(warmUpWhenIdle, 3000);
+  };
+
+  const scheduleAfterPageLoad = () => {
+    debugPreloadLoadHandler = null;
+    debugPreloadTimer = window.setTimeout(scheduleWhenIdle, 2000);
+  };
+
+  if (document.readyState === 'complete') {
+    scheduleAfterPageLoad();
     return;
   }
 
-  debugPreloadTimer = window.setTimeout(warmUp, 360);
+  debugPreloadLoadHandler = scheduleAfterPageLoad;
+  window.addEventListener('load', debugPreloadLoadHandler, { once: true });
 };
 
 const syncDebugState = (
@@ -198,6 +269,13 @@ onMounted(() => {
   }
 });
 
+watch(isOverview, (overview) => {
+  clearDebugPreloadTask();
+  if (!overview) {
+    scheduleDebugPanelPreload();
+  }
+});
+
 onBeforeUnmount(() => {
   clearDebugPreloadTask();
 });
@@ -206,67 +284,71 @@ onBeforeUnmount(() => {
 <template>
   <div
     class="document-page h-full overflow-hidden"
-    :class="{ 'document-page--dark': isDark }"
+    :class="{
+      'document-page--dark': isDark,
+      'document-page--overview': isOverview,
+    }"
   >
-    <ElTabs v-model="activeView" class="document-tabs h-full">
-      <ElTabPane name="detail" lazy>
-        <template #label>
-          <div class="document-tab-label">
-            <span class="document-tab-label__title">接口详情</span>
+    <!-- 分组概览页：路由名以 __overview__ 结尾时渲染，展示该分组下全部接口 -->
+    <div v-if="isOverview" class="document-view">
+      <Suspense>
+        <template #default>
+          <GroupOverview />
+        </template>
+        <template #fallback>
+          <Loading />
+        </template>
+      </Suspense>
+    </div>
+
+    <!-- 接口详情：常驻挂载，切换在线调试时通过 v-show 隐藏以保留状态 -->
+    <div v-show="!isOverview && activeView === 'detail'" class="document-view">
+      <Suspense>
+        <template #default>
+          <DocumentPanel
+            ref="documentRef"
+            @test="handleTest"
+            @preload-test="preloadDebugPanelOnIntent"
+            :show-test="activeView === 'debug'"
+          />
+        </template>
+        <template #fallback>
+          <Loading />
+        </template>
+      </Suspense>
+    </div>
+
+    <!-- 在线调试：首次进入调试后才挂载（依赖 debugReady） -->
+    <div v-show="!isOverview && activeView === 'debug'" class="document-view">
+      <Suspense>
+        <template #default>
+          <ApiTestPanel
+            v-if="debugReady && info"
+            :method="method"
+            :path="path"
+            :parameters="parameters"
+            :responses="responses"
+            :request-body="requestBody"
+            :security="security"
+            :request-body-type="requestBodyType"
+            :request-body-variant-state="requestBodyVariantState"
+            @cancel="handleClose"
+          />
+          <div
+            v-else-if="apiStore.isInitConfig"
+            class="document-empty flex h-full items-center justify-center"
+          >
+            <ElEmpty description="未获取到当前接口信息，请先进入详情页" />
+          </div>
+          <div v-else class="h-full">
+            <Loading />
           </div>
         </template>
-
-        <Suspense>
-          <template #default>
-            <DocumentPanel
-              ref="documentRef"
-              @test="handleTest"
-              :show-test="activeView === 'debug'"
-            />
-          </template>
-          <template #fallback>
-            <Loading />
-          </template>
-        </Suspense>
-      </ElTabPane>
-
-      <ElTabPane name="debug" lazy>
-        <template #label>
-          <div class="document-tab-label">
-            <span class="document-tab-label__title">在线调试</span>
-          </div>
+        <template #fallback>
+          <Loading />
         </template>
-
-        <Suspense>
-          <template #default>
-            <ApiTestPanel
-              v-if="debugReady && info"
-              :method="method"
-              :path="path"
-              :parameters="parameters"
-              :responses="responses"
-              :request-body="requestBody"
-              :security="security"
-              :request-body-type="requestBodyType"
-              :request-body-variant-state="requestBodyVariantState"
-              @cancel="handleClose"
-            />
-            <div
-              v-else-if="apiStore.isInitConfig"
-              class="document-empty flex h-full items-center justify-center"
-            >
-              <ElEmpty description="未获取到当前接口信息，请先进入详情页" />
-            </div>
-            <div v-else class="h-full">
-              <Loading />
-            </div>
-          </template>
-          <template #fallback>
-            <Loading />
-          </template>
-        </Suspense>
-      </ElTabPane>
-    </ElTabs>
+      </Suspense>
+    </div>
   </div>
 </template>
 
@@ -276,122 +358,27 @@ onBeforeUnmount(() => {
   --doc-radius-lg: calc(var(--radius) * 1.18);
   --doc-radius-md: calc(var(--radius) * 0.94);
   --doc-radius-sm: calc(var(--radius) * 0.72);
-  --doc-page-bg: var(--el-bg-color);
+  --doc-page-bg: #f8fafc;
+  --doc-overview-bg: var(--el-fill-color-light);
   --el-border-radius-base: calc(var(--radius) * 0.75);
   --el-border-radius-small: calc(var(--radius) * 0.62);
 
-  padding: 20px;
+  padding: 0;
   background: var(--doc-page-bg);
 }
 
 .document-page--dark {
-  --doc-page-bg: color-mix(
-    in srgb,
-    var(--el-bg-color) 90%,
-    var(--el-fill-color-light) 10%
-  );
+  --doc-page-bg: var(--el-bg-color);
 }
 
-.document-tabs {
-  :deep(.el-tabs__header) {
-    margin: 0 0 12px;
-    overflow: hidden;
-    background: var(--doc-page-bg);
-    border: 1px solid
-      color-mix(in srgb, var(--el-border-color) 92%, transparent);
-    border-radius: var(--doc-radius-lg);
-    box-shadow: 0 8px 18px
-      color-mix(in srgb, var(--el-text-color-primary) 4%, transparent);
-  }
-
-  :deep(.el-tabs__nav-wrap) {
-    padding: 4px;
-    border-radius: var(--doc-radius-md);
-  }
-
-  :deep(.el-tabs__nav-wrap::after) {
-    display: none;
-  }
-
-  :deep(.el-tabs__nav) {
-    gap: 6px;
-  }
-
-  :deep(.el-tabs__active-bar) {
-    display: none;
-  }
-
-  :deep(.el-tabs__item) {
-    height: auto;
-    padding: 0;
-  }
-
-  :deep(.el-tabs__content) {
-    height: calc(100% - 60px);
-    overflow: hidden;
-  }
-
-  :deep(.el-tab-pane) {
-    height: 100%;
-    overflow: hidden;
-  }
-
-  :deep(.is-active .document-tab-label) {
-    color: var(--el-color-primary);
-    background: color-mix(
-      in srgb,
-      var(--el-bg-color) 82%,
-      var(--el-color-primary-light-9) 18%
-    );
-    border-color: color-mix(in srgb, var(--el-color-primary) 45%, transparent);
-    box-shadow:
-      inset 0 0 0 1px
-        color-mix(in srgb, var(--el-color-primary) 28%, transparent),
-      0 10px 22px color-mix(in srgb, var(--el-color-primary) 20%, transparent);
-    transform: translateY(-1px);
-  }
-
-  :deep(.is-active .document-tab-label__title) {
-    font-weight: 800;
-  }
-
-  :deep(.el-tabs__item:not(.is-active) .document-tab-label:hover) {
-    color: var(--el-text-color-primary);
-    background: color-mix(
-      in srgb,
-      var(--el-bg-color) 90%,
-      var(--el-fill-color-light) 10%
-    );
-    border-color: color-mix(
-      in srgb,
-      var(--el-text-color-primary) 16%,
-      transparent
-    );
-  }
+.document-page--overview {
+  padding: 0;
+  background: var(--doc-overview-bg);
 }
 
-.document-tab-label {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 108px;
-  padding: 8px 14px;
-  color: var(--el-text-color-secondary);
-  background: color-mix(
-    in srgb,
-    var(--el-bg-color) 92%,
-    var(--el-fill-color-light) 8%
-  );
-  border: 1px solid transparent;
-  border-radius: var(--doc-radius-sm);
-  transition: all 0.18s ease;
-}
-
-.document-tab-label__title {
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1.2;
+.document-view {
+  height: 100%;
+  overflow: hidden;
 }
 
 .document-empty {

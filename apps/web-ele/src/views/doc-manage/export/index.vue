@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { Paragraph as DocxParagraph, Table as DocxTable } from 'docx';
+
 import type { Component } from 'vue';
 
 import type { ServiceItem } from '#/store/aggregation';
@@ -23,17 +25,6 @@ import {
   SvgDoubleArrowUpIcon,
 } from '@vben/icons';
 
-import {
-  Document as DocxDocument,
-  HeadingLevel as DocxHeadingLevel,
-  Packer as DocxPacker,
-  Paragraph as DocxParagraph,
-  Table as DocxTable,
-  TableCell as DocxTableCell,
-  TableRow as DocxTableRow,
-  TextRun as DocxTextRun,
-  WidthType as DocxWidthType,
-} from 'docx';
 import {
   ElAlert,
   ElButton,
@@ -65,11 +56,20 @@ import {
   compareTagLike,
   compareTagNames,
 } from '#/utils/openapi-sort';
+import { resolveServiceGroupDocumentUrl } from '#/utils/openapi-url';
 
 defineOptions({ name: 'DocManageExport' });
 
 type ExportFormat = 'docx' | 'html' | 'markdown' | 'openapi.json' | 'pdf';
+type DocxModule = typeof import('docx');
 type ScopeMode = 'all' | 'custom';
+
+let docxModulePromise: null | Promise<DocxModule> = null;
+
+const loadDocxModule = () => {
+  docxModulePromise ||= import('docx');
+  return docxModulePromise;
+};
 
 interface GroupDocItem {
   code: string;
@@ -138,12 +138,17 @@ interface ExportFormatOption {
 const HTTP_METHODS = new Set(['delete', 'get', 'patch', 'post', 'put']);
 const PREVIEW_AUTO_DELAY = 120;
 const PREVIEW_AUTO_DELAY_LARGE = 260;
+const PREVIEW_INITIAL_DELAY = 600;
+const PREVIEW_INITIAL_IDLE_TIMEOUT = 1500;
 const PREVIEW_LARGE_DATA_THRESHOLD = 200;
+const PREVIEW_OPERATION_LIMIT = 20;
 const PREVIEW_RENDER_YIELD_THRESHOLD = 120;
 const PREVIEW_VIRTUAL_BLOCK_CHUNK_SIZE = 24;
 const PREVIEW_VIRTUAL_BLOCK_MIN_COUNT = 24;
 const PREVIEW_CHUNK_PREFETCH_COUNT = 1;
 const PREVIEW_CHUNK_ROOT_MARGIN = '1100px 0px';
+const EXPORT_TABLE_LONG_TEXT_SEGMENT_LENGTH = 32;
+const DOCX_TABLE_GRID_WIDTH = 9000;
 const md = new MarkdownIt({
   html: true,
   linkify: true,
@@ -190,6 +195,7 @@ const operations = shallowRef<OperationItem[]>([]);
 const aggregationGatewayOpenApi = shallowRef<null | OpenAPISpec>(null);
 const aggregationServiceDocs = shallowRef<ServiceExportDocItem[]>([]);
 let previewAutoTimer: null | number = null;
+let previewAutoIdleHandle: null | number = null;
 let previewGenerationToken = 0;
 let previewChunkObserver: IntersectionObserver | null = null;
 let previewChunkMeasureFrame: null | number = null;
@@ -376,7 +382,15 @@ const selectedCountByNodeKey = computed(() => {
 
   return counts;
 });
-const previewNoticeText = computed(() => '');
+const previewNoticeText = computed(() => {
+  const selectedCount =
+    scopeMode.value === 'all'
+      ? operations.value.length
+      : selectedOperationItems.value.length;
+  return selectedCount > PREVIEW_OPERATION_LIMIT
+    ? `实时预览仅展示前 ${PREVIEW_OPERATION_LIMIT} 个接口，导出文件仍包含全部 ${selectedCount} 个接口。`
+    : '';
+});
 const activeExportOption = computed<ExportFormatOption>(() => {
   return (
     exportFormatOptions.find((item) => item.format === exportFormat.value) ||
@@ -894,12 +908,29 @@ function stringifyJson(value: unknown) {
   }
 }
 
+/**
+ * 为表格中的长连续文本插入软换行点，避免示例值撑宽整张表格。
+ * @param value 原始单元格文本。
+ * @returns 插入软换行点后的单元格文本。
+ */
+function addExportTableSoftBreaks(value: string) {
+  return value.replaceAll(
+    new RegExp(
+      `([\\w+/=:.\\-]{${EXPORT_TABLE_LONG_TEXT_SEGMENT_LENGTH}})(?=[\\w+/=:.\\-])`,
+      'g',
+    ),
+    '$1\u200B',
+  );
+}
+
 function toMarkdownCell(value: any) {
   const text = `${value ?? ''}`.trim();
   if (!text) {
     return '-';
   }
-  return text.replaceAll('|', String.raw`\|`).replaceAll('\n', '<br/>');
+  return addExportTableSoftBreaks(
+    text.replaceAll('|', String.raw`\|`).replaceAll('\n', '<br/>'),
+  );
 }
 
 function mergeDescriptionWithEnum(description: string, schema?: any) {
@@ -1283,6 +1314,33 @@ function getStringExampleByFormat(format?: string) {
   }
 }
 
+/**
+ * 从 requestBody content 条目读取示例；example 为 null 时视为未提供。
+ */
+function resolveRequestBodyContentExample(
+  body: any,
+  doc: OpenAPISpec,
+): unknown {
+  if (!body || typeof body !== 'object') {
+    return undefined;
+  }
+
+  if (body.example !== undefined && body.example !== null) {
+    return resolveExampleValue(body.example, doc);
+  }
+
+  if (body.examples && typeof body.examples === 'object') {
+    for (const entry of Object.values(body.examples) as any[]) {
+      const value = resolveExampleValue(entry, doc);
+      if (value !== undefined && value !== null) {
+        return value;
+      }
+    }
+  }
+
+  return undefined;
+}
+
 function generateSchemaExample(
   schema: any,
   doc: OpenAPISpec,
@@ -1301,27 +1359,29 @@ function generateSchemaExample(
     return normalized;
   }
 
-  if (normalized.example !== undefined) {
+  // 显式 example/default 为 null 时视为「未提供示例」，继续按结构生成，避免 JSON 示例整块为 null
+  if (normalized.example !== undefined && normalized.example !== null) {
     return normalizeExampleValue(normalized.example);
   }
 
   if (
     Array.isArray(normalized.examples) &&
     normalized.examples.length > 0 &&
-    normalized.examples[0] !== undefined
+    normalized.examples[0] !== undefined &&
+    normalized.examples[0] !== null
   ) {
     return normalizeExampleValue(normalized.examples[0]);
   }
 
-  if (normalized.default !== undefined) {
+  if (normalized.default !== undefined && normalized.default !== null) {
     return normalizeExampleValue(normalized.default);
   }
 
-  if (normalized.const !== undefined) {
+  if (normalized.const !== undefined && normalized.const !== null) {
     return normalizeExampleValue(normalized.const);
   }
 
-  if (normalized._const !== undefined) {
+  if (normalized._const !== undefined && normalized._const !== null) {
     return normalizeExampleValue(normalized._const);
   }
 
@@ -1975,13 +2035,18 @@ async function loadGroupDocsForService(
 ) {
   const urls = config.urls || [];
   const docs: GroupDocItem[] = [];
+  const docPath =
+    aggregationGatewayOpenApi.value?.['x-nextdoc4j-aggregation']?.docPath;
 
-  const servicePrefix = service.url.replace('/v3/api-docs', '');
   for (const item of urls) {
     const code = parseGroupCode(item.url);
     if (code === 'all') continue;
 
-    const fullUrl = `${servicePrefix}${item.url}`;
+    const fullUrl = resolveServiceGroupDocumentUrl(
+      service.url,
+      item.url,
+      docPath,
+    );
     const openApi = await aggregationStore.getServiceGroupDoc(service, fullUrl);
     const tagMeta = resolveGroupTagMeta(openApi, item.name?.trim());
     docs.push({
@@ -2881,7 +2946,7 @@ function isGroupIndeterminate(items: OperationItem[], nodeKey?: string) {
 }
 
 function getPreviewOperations(selectedOps: OperationItem[]) {
-  return selectedOps;
+  return selectedOps.slice(0, PREVIEW_OPERATION_LIMIT);
 }
 
 function waitForNextFrame() {
@@ -3016,7 +3081,13 @@ function buildMarkdownDocument(doc: OpenAPISpec, selectedOps: OperationItem[]) {
           includeExamples: groups.length > 1,
         });
         if (groups.length <= 1) {
-          appendJsonExampleBlock(lines, generateSchemaExample(schema, doc));
+          // 优先 content 级示例；null/缺失时回退 schema 结构生成
+          const contentExample = resolveRequestBodyContentExample(body, doc);
+          const exampleValue =
+            contentExample !== undefined && contentExample !== null
+              ? contentExample
+              : generateSchemaExample(schema, doc);
+          appendJsonExampleBlock(lines, exampleValue);
         }
         appendSchemaCompositionSections(lines, schema, doc, {
           coveredTitles: groups.map((group) => group.title),
@@ -3131,10 +3202,11 @@ function buildExportHtml(markdownContent: string, title: string) {
   <title>${title}</title>
   <style>
     body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; max-width: 980px; margin: 0 auto; padding: 24px; line-height: 1.7; }
-    table { width: 100%; border-collapse: collapse; margin: 12px 0; }
-    th, td { border: 1px solid #dcdfe6; padding: 8px; text-align: left; vertical-align: top; }
+    table { width: 100%; table-layout: fixed; border-collapse: collapse; margin: 12px 0; }
+    th, td { border: 1px solid #dcdfe6; padding: 8px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
     h1, h2, h3 { margin-top: 24px; }
     code { background: #f2f3f5; padding: 2px 4px; border-radius: 4px; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; }
   </style>
 </head>
 <body>${htmlBody}</body>
@@ -3276,50 +3348,102 @@ function isMarkdownTableRowLine(line: string) {
   return cells.length > 1;
 }
 
-function buildDocxTableFromRows(headerCells: string[], bodyRows: string[][]) {
+/**
+ * 计算 Word 表格列宽，优先兼容接口参数表和响应概要表。
+ * @param headerCells Markdown 表格表头单元格。
+ * @param columnCount 表格列数。
+ * @returns 每列百分比宽度。
+ */
+function resolveDocxTableColumnWidths(
+  headerCells: string[],
+  columnCount: number,
+) {
+  if (
+    columnCount === 5 &&
+    headerCells.includes('字段') &&
+    headerCells.includes('示例值')
+  ) {
+    return [18, 16, 8, 28, 30];
+  }
+
+  if (
+    columnCount === 3 &&
+    headerCells.includes('响应码') &&
+    headerCells.includes('类型')
+  ) {
+    return [16, 44, 40];
+  }
+
+  const width = Math.floor(100 / columnCount);
+  return Array.from({ length: columnCount }, (_, index) =>
+    index === columnCount - 1 ? 100 - width * (columnCount - 1) : width,
+  );
+}
+
+function buildDocxTableFromRows(
+  headerCells: string[],
+  bodyRows: string[][],
+  docx: DocxModule,
+) {
+  const { Paragraph, Table, TableCell, TableLayoutType, TableRow, TextRun } =
+    docx;
+  const { WidthType } = docx;
   const columnCount = Math.max(
     headerCells.length,
     ...bodyRows.map((row) => row.length),
   );
+  const columnWidths = resolveDocxTableColumnWidths(headerCells, columnCount);
 
   const buildRowCells = (cells: string[], header = false) =>
     Array.from({ length: columnCount }, (_, index) => {
-      const text = cells[index] || '-';
-      return new DocxTableCell({
+      const text = addExportTableSoftBreaks(cells[index] || '-');
+      return new TableCell({
         children: [
-          new DocxParagraph({
+          new Paragraph({
             children: [
-              new DocxTextRun({
+              new TextRun({
                 bold: header,
                 text,
               }),
             ],
           }),
         ],
+        width: {
+          size: columnWidths[index] || Math.floor(100 / columnCount),
+          type: WidthType.PERCENTAGE,
+        },
       });
     });
 
-  return new DocxTable({
+  return new Table({
+    columnWidths: columnWidths.map((width) =>
+      Math.round((DOCX_TABLE_GRID_WIDTH * width) / 100),
+    ),
+    layout: TableLayoutType.FIXED,
     rows: [
-      new DocxTableRow({
+      new TableRow({
         children: buildRowCells(headerCells, true),
         tableHeader: true,
       }),
       ...bodyRows.map(
         (row) =>
-          new DocxTableRow({
+          new TableRow({
             children: buildRowCells(row),
           }),
       ),
     ],
     width: {
       size: 100,
-      type: DocxWidthType.PERCENTAGE,
+      type: WidthType.PERCENTAGE,
     },
   });
 }
 
-function buildDocxChildrenFromMarkdown(markdownContent: string) {
+function buildDocxChildrenFromMarkdown(
+  markdownContent: string,
+  docx: DocxModule,
+) {
+  const { HeadingLevel, Paragraph, TextRun } = docx;
   const lines = markdownContent.split('\n').map((rawLine) => rawLine.trimEnd());
   const children: Array<DocxParagraph | DocxTable> = [];
 
@@ -3345,9 +3469,9 @@ function buildDocxChildrenFromMarkdown(markdownContent: string) {
 
       codeLines.forEach((codeLine) => {
         children.push(
-          new DocxParagraph({
+          new Paragraph({
             children: [
-              new DocxTextRun({
+              new TextRun({
                 font: 'Courier New',
                 text: codeLine || ' ',
               }),
@@ -3355,7 +3479,7 @@ function buildDocxChildrenFromMarkdown(markdownContent: string) {
           }),
         );
       });
-      children.push(new DocxParagraph({ text: '' }));
+      children.push(new Paragraph({ text: '' }));
       index = codeIndex;
       continue;
     }
@@ -3376,27 +3500,27 @@ function buildDocxChildrenFromMarkdown(markdownContent: string) {
         bodyRows.push(parseMarkdownTableCells(rowLine));
         rowIndex++;
       }
-      children.push(buildDocxTableFromRows(headerCells, bodyRows));
+      children.push(buildDocxTableFromRows(headerCells, bodyRows, docx));
       index = rowIndex - 1;
       continue;
     }
 
     const normalized = stripHtmlTags(line).trim();
     if (!normalized) {
-      children.push(new DocxParagraph({ text: '' }));
+      children.push(new Paragraph({ text: '' }));
       continue;
     }
 
     if (normalized === '---') {
-      children.push(new DocxParagraph({ text: '────────────────────────' }));
+      children.push(new Paragraph({ text: '────────────────────────' }));
       continue;
     }
 
     if (normalized.startsWith('# ')) {
       children.push(
-        new DocxParagraph({
+        new Paragraph({
           text: normalized.slice(2).trim(),
-          heading: DocxHeadingLevel.HEADING_1,
+          heading: HeadingLevel.HEADING_1,
         }),
       );
       continue;
@@ -3404,9 +3528,9 @@ function buildDocxChildrenFromMarkdown(markdownContent: string) {
 
     if (normalized.startsWith('## ')) {
       children.push(
-        new DocxParagraph({
+        new Paragraph({
           text: normalized.slice(3).trim(),
-          heading: DocxHeadingLevel.HEADING_2,
+          heading: HeadingLevel.HEADING_2,
         }),
       );
       continue;
@@ -3414,9 +3538,9 @@ function buildDocxChildrenFromMarkdown(markdownContent: string) {
 
     if (normalized.startsWith('### ')) {
       children.push(
-        new DocxParagraph({
+        new Paragraph({
           text: normalized.slice(4).trim(),
-          heading: DocxHeadingLevel.HEADING_3,
+          heading: HeadingLevel.HEADING_3,
         }),
       );
       continue;
@@ -3424,9 +3548,9 @@ function buildDocxChildrenFromMarkdown(markdownContent: string) {
 
     if (normalized.startsWith('#### ')) {
       children.push(
-        new DocxParagraph({
+        new Paragraph({
           text: normalized.slice(5).trim(),
-          heading: DocxHeadingLevel.HEADING_4,
+          heading: HeadingLevel.HEADING_4,
         }),
       );
       continue;
@@ -3434,9 +3558,9 @@ function buildDocxChildrenFromMarkdown(markdownContent: string) {
 
     if (normalized.startsWith('##### ')) {
       children.push(
-        new DocxParagraph({
+        new Paragraph({
           text: normalized.slice(6).trim(),
-          heading: DocxHeadingLevel.HEADING_5,
+          heading: HeadingLevel.HEADING_5,
         }),
       );
       continue;
@@ -3444,9 +3568,9 @@ function buildDocxChildrenFromMarkdown(markdownContent: string) {
 
     if (normalized.startsWith('###### ')) {
       children.push(
-        new DocxParagraph({
+        new Paragraph({
           text: normalized.slice(7).trim(),
-          heading: DocxHeadingLevel.HEADING_6,
+          heading: HeadingLevel.HEADING_6,
         }),
       );
       continue;
@@ -3454,7 +3578,7 @@ function buildDocxChildrenFromMarkdown(markdownContent: string) {
 
     if (normalized.startsWith('- ')) {
       children.push(
-        new DocxParagraph({
+        new Paragraph({
           text: normalized.slice(2).trim(),
           bullet: { level: 0 },
         }),
@@ -3462,7 +3586,7 @@ function buildDocxChildrenFromMarkdown(markdownContent: string) {
       continue;
     }
 
-    children.push(new DocxParagraph({ text: normalized }));
+    children.push(new Paragraph({ text: normalized }));
   }
 
   return children;
@@ -3756,17 +3880,18 @@ async function exportDocument() {
   try {
     switch (exportFormat.value) {
       case 'docx': {
-        const docxDocument = new DocxDocument({
+        const docx = await loadDocxModule();
+        const docxDocument = new docx.Document({
           title,
           sections: [
             {
-              children: buildDocxChildrenFromMarkdown(markdownContent),
+              children: buildDocxChildrenFromMarkdown(markdownContent, docx),
             },
           ],
         });
         const mimeType =
           'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-        const docxBlob = await DocxPacker.toBlob(docxDocument);
+        const docxBlob = await docx.Packer.toBlob(docxDocument);
         downloadFile(docxBlob, `${title}.docx`, mimeType);
         return true;
       }
@@ -3835,6 +3960,14 @@ async function confirmExportDocument() {
 }
 
 function scheduleAutoPreview() {
+  if (
+    previewAutoIdleHandle !== null &&
+    'cancelIdleCallback' in window &&
+    typeof window.cancelIdleCallback === 'function'
+  ) {
+    window.cancelIdleCallback(previewAutoIdleHandle);
+    previewAutoIdleHandle = null;
+  }
   if (previewAutoTimer) {
     window.clearTimeout(previewAutoTimer);
   }
@@ -3842,19 +3975,37 @@ function scheduleAutoPreview() {
     scopeMode.value === 'all'
       ? operations.value.length
       : selectedOperationItems.value.length;
+  const isInitialPreview =
+    previewHtml.value === '' && previewChunks.value.length === 0;
   previewGenerationToken += 1;
-  previewAutoTimer = window.setTimeout(
-    () => {
-      previewAutoTimer = null;
-      if (loading.value) {
-        return;
-      }
-      void generatePreview(true);
-    },
-    previewOperationCount > PREVIEW_LARGE_DATA_THRESHOLD
-      ? PREVIEW_AUTO_DELAY_LARGE
-      : PREVIEW_AUTO_DELAY,
-  );
+  const generate = () => {
+    previewAutoIdleHandle = null;
+    if (loading.value) {
+      return;
+    }
+    void generatePreview(true);
+  };
+  const scheduleGeneration = () => {
+    previewAutoTimer = null;
+    if (
+      isInitialPreview &&
+      'requestIdleCallback' in window &&
+      typeof window.requestIdleCallback === 'function'
+    ) {
+      previewAutoIdleHandle = window.requestIdleCallback(generate, {
+        timeout: PREVIEW_INITIAL_IDLE_TIMEOUT,
+      });
+      return;
+    }
+    generate();
+  };
+  let previewDelay = PREVIEW_AUTO_DELAY;
+  if (isInitialPreview) {
+    previewDelay = PREVIEW_INITIAL_DELAY;
+  } else if (previewOperationCount > PREVIEW_LARGE_DATA_THRESHOLD) {
+    previewDelay = PREVIEW_AUTO_DELAY_LARGE;
+  }
+  previewAutoTimer = window.setTimeout(scheduleGeneration, previewDelay);
 }
 
 watch(
@@ -3895,6 +4046,14 @@ watch(loading, (value) => {
 });
 
 onBeforeUnmount(() => {
+  if (
+    previewAutoIdleHandle !== null &&
+    'cancelIdleCallback' in window &&
+    typeof window.cancelIdleCallback === 'function'
+  ) {
+    window.cancelIdleCallback(previewAutoIdleHandle);
+    previewAutoIdleHandle = null;
+  }
   if (previewAutoTimer) {
     window.clearTimeout(previewAutoTimer);
     previewAutoTimer = null;
@@ -4511,13 +4670,102 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped lang="scss">
+@supports not (scrollbar-gutter: stable) {
+  .doc-export-page .scope-tree-panel {
+    overflow-y: scroll;
+  }
+}
+
+@supports (content-visibility: auto) {
+  .doc-preview-html:deep(.doc-preview-virtual-block) {
+    display: block;
+    contain-intrinsic-size: auto 1200px;
+    contain: content;
+    content-visibility: auto;
+  }
+}
+
+@media (max-width: 1080px) {
+  .doc-export-page.doc-export-page {
+    overflow: auto;
+  }
+
+  .doc-export-page .doc-export-layout {
+    flex-direction: column;
+    overflow: visible;
+  }
+
+  .doc-export-page .doc-export-col {
+    flex: 0 0 auto;
+    max-width: 100%;
+    height: auto;
+    min-height: 360px;
+  }
+
+  .doc-export-page .doc-preview-card {
+    min-height: 520px;
+  }
+}
+
+@media (max-width: 920px) {
+  .export-format-grid.export-format-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  :deep(.doc-export-dialog.doc-export-dialog .el-dialog__header) {
+    padding: 20px 20px 0;
+  }
+
+  :deep(.doc-export-dialog.doc-export-dialog .el-dialog__body) {
+    padding: 16px 20px 8px;
+  }
+
+  :deep(.doc-export-dialog.doc-export-dialog .el-dialog__footer) {
+    padding: 0 20px 20px;
+  }
+
+  .export-dialog-intro__title {
+    font-size: 18px;
+  }
+
+  .export-format-grid.export-format-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .export-format-card.export-format-card {
+    min-height: 168px;
+  }
+}
+
+@media (max-width: 520px) {
+  .export-format-grid.export-format-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .doc-export-page {
+  --doc-export-radius: calc(var(--radius) * 1.18);
+  --doc-export-radius-sm: calc(var(--radius) * 0.94);
+  --doc-export-radius-chip: var(--radius);
+  --doc-export-line: var(--el-border-color-lighter);
+  --doc-export-panel: var(--el-bg-color);
+  --doc-export-shadow-sm:
+    0 1px 2px color-mix(in srgb, var(--el-text-color-primary) 6%, transparent),
+    0 2px 8px color-mix(in srgb, var(--el-text-color-primary) 5%, transparent);
+  --doc-export-shadow-md:
+    0 4px 14px color-mix(in srgb, var(--el-text-color-primary) 8%, transparent),
+    0 10px 30px color-mix(in srgb, var(--el-text-color-primary) 7%, transparent);
+
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
   min-width: 0;
   height: 100%;
   min-height: 0;
+  padding-bottom: 20px;
+  background: var(--el-fill-color-light);
 
   :deep(.doc-range-card .el-card__body),
   :deep(.doc-preview-card .el-card__body) {
@@ -4560,6 +4808,47 @@ onBeforeUnmount(() => {
   min-height: 0;
 }
 
+/* 卡片观感与首页保持一致：更大的圆角、柔和边框与悬浮阴影 */
+.doc-range-card,
+.doc-other-card,
+.doc-preview-card {
+  background: var(--doc-export-panel);
+  border: 1px solid var(--doc-export-line);
+  border-radius: var(--doc-export-radius);
+  box-shadow: var(--doc-export-shadow-sm);
+  transition:
+    box-shadow 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.doc-range-card:hover,
+.doc-other-card:hover,
+.doc-preview-card:hover {
+  border-color: color-mix(in srgb, var(--el-color-primary) 25%, transparent);
+  box-shadow: var(--doc-export-shadow-md);
+}
+
+.doc-range-card :deep(.el-card__header),
+.doc-other-card :deep(.el-card__header),
+.doc-preview-card :deep(.el-card__header) {
+  border-bottom-color: var(--doc-export-line);
+}
+
+.doc-range-card :deep(.el-card__body),
+.doc-other-card :deep(.el-card__body),
+.doc-preview-card :deep(.el-card__body) {
+  background: linear-gradient(
+    180deg,
+    var(--doc-export-panel) 0%,
+    color-mix(
+        in srgb,
+        var(--el-fill-color-lighter) 32%,
+        var(--doc-export-panel)
+      )
+      100%
+  );
+}
+
 .doc-range-card,
 .doc-preview-card {
   display: flex;
@@ -4572,6 +4861,9 @@ onBeforeUnmount(() => {
 .doc-range-card {
   flex: 1;
   min-height: 0;
+
+  /* 与下方「导出其他」卡片保持间距，避免两卡紧贴 */
+  margin-bottom: 16px;
 }
 
 .doc-other-card {
@@ -4587,6 +4879,9 @@ onBeforeUnmount(() => {
 
 .doc-all-selected-tip {
   margin-top: 8px;
+  background: var(--doc-export-panel);
+  border-color: var(--doc-export-line);
+  border-radius: var(--doc-export-radius-sm);
 }
 
 :deep(.doc-export-dialog) {
@@ -4602,7 +4897,7 @@ onBeforeUnmount(() => {
     var(--el-bg-color) 100%
   );
   border: 1px solid var(--el-border-color);
-  border-radius: 28px;
+  border-radius: calc(var(--radius) * 1.18);
   box-shadow: 0 28px 80px rgb(15 23 42 / 18%);
 }
 
@@ -4627,9 +4922,9 @@ onBeforeUnmount(() => {
 }
 
 .export-dialog-panel {
-  --doc-export-card-radius: calc(var(--radius) * 2.75);
-  --doc-export-card-inner-radius: calc(var(--radius) * 2.25);
-  --doc-export-badge-radius: calc(var(--radius) * 2);
+  --doc-export-card-radius: calc(var(--radius) * 1.18);
+  --doc-export-card-inner-radius: calc(var(--radius) * 0.94);
+  --doc-export-badge-radius: calc(var(--radius) * 0.72);
 
   display: flex;
   flex-direction: column;
@@ -4646,7 +4941,7 @@ onBeforeUnmount(() => {
     var(--el-fill-color-light) 100%
   );
   border: 1px solid rgb(var(--el-color-primary-rgb) / 18%);
-  border-radius: 22px;
+  border-radius: var(--doc-export-card-radius);
 }
 
 .export-dialog-intro__title {
@@ -4780,12 +5075,9 @@ onBeforeUnmount(() => {
   min-height: 0;
   overflow: hidden auto;
   scrollbar-gutter: stable;
-}
-
-@supports not (scrollbar-gutter: stable) {
-  .scope-tree-panel {
-    overflow-y: scroll;
-  }
+  background: var(--doc-export-panel);
+  border-color: var(--doc-export-line);
+  border-radius: var(--doc-export-radius-sm);
 }
 
 .group-toggle-area {
@@ -4800,7 +5092,7 @@ onBeforeUnmount(() => {
   color: var(--el-text-color-secondary);
   cursor: pointer;
   user-select: none;
-  border-radius: 8px;
+  border-radius: var(--doc-export-radius-chip);
 }
 
 .group-toggle-area:hover,
@@ -4818,15 +5110,15 @@ onBeforeUnmount(() => {
 .group-header {
   padding: 4px 8px;
   background: var(--el-fill-color-light);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
+  border: 1px solid var(--doc-export-line);
+  border-radius: var(--doc-export-radius-sm);
 }
 
 .service-header {
   padding: 4px 8px;
   background: var(--el-fill-color-light);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
+  border: 1px solid var(--doc-export-line);
+  border-radius: var(--doc-export-radius-sm);
 }
 
 .group-header.group-node--checked,
@@ -4844,18 +5136,23 @@ onBeforeUnmount(() => {
   overflow-wrap: anywhere;
 }
 
+.doc-preview-html:deep(table) {
+  table-layout: fixed;
+}
+
+.doc-preview-html:deep(th),
+.doc-preview-html:deep(td),
+.doc-preview-html:deep(pre) {
+  overflow-wrap: anywhere;
+}
+
+.doc-preview-html:deep(pre) {
+  white-space: pre-wrap;
+}
+
 .doc-preview-html-content,
 .doc-preview-virtual-block {
   width: 100%;
-}
-
-@supports (content-visibility: auto) {
-  .doc-preview-html:deep(.doc-preview-virtual-block) {
-    display: block;
-    contain-intrinsic-size: auto 1200px;
-    contain: content;
-    content-visibility: auto;
-  }
 }
 
 .doc-preview-html:deep(p) {
@@ -4944,43 +5241,5 @@ onBeforeUnmount(() => {
 .group-submenu-motion-leave-from {
   max-height: 1000px;
   opacity: 1;
-}
-
-@media (max-width: 920px) {
-  .export-format-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 768px) {
-  :deep(.doc-export-dialog .el-dialog__header) {
-    padding: 20px 20px 0;
-  }
-
-  :deep(.doc-export-dialog .el-dialog__body) {
-    padding: 16px 20px 8px;
-  }
-
-  :deep(.doc-export-dialog .el-dialog__footer) {
-    padding: 0 20px 20px;
-  }
-
-  .export-dialog-intro__title {
-    font-size: 18px;
-  }
-
-  .export-format-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .export-format-card {
-    min-height: 168px;
-  }
-}
-
-@media (max-width: 520px) {
-  .export-format-grid {
-    grid-template-columns: 1fr;
-  }
 }
 </style>

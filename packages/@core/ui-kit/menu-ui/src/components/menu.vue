@@ -49,8 +49,10 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const emit = defineEmits<{
-  close: [string, string[]];
-  open: [string, string[]];
+  // 第三个布尔参数 fromClick 标记本次开合是否由用户点击触发，
+  // 用于区分「用户点击分组」与「程序自动展开（initMenu/hover）」，默认 false。
+  close: [string, string[], boolean?];
+  open: [string, string[], boolean?];
   select: [string, string[]];
 }>();
 
@@ -62,11 +64,15 @@ const sliceIndex = ref(-1);
 const openedMenus = ref<MenuProvider['openedMenus']>(
   props.defaultOpeneds && !props.collapse ? [...props.defaultOpeneds] : [],
 );
+// 用户主动收起的分组在当前路由分支内保持收起，避免激活路由立即将其重新展开。
+const manuallyClosedMenus = new Set<string>();
 const activePath = ref<MenuProvider['activePath']>(props.defaultActive);
 const items = ref<MenuProvider['items']>({});
 const subMenus = ref<MenuProvider['subMenus']>({});
 const mouseInChild = ref(false);
 const itemPathsKey = computed(() => Object.keys(items.value).join('|'));
+// 用户主动开合菜单后，旧路由的同步结果不能覆盖本次操作。
+let userAdjustedMenus = false;
 
 const isMenuPopup = computed<MenuProvider['isMenuPopup']>(() => {
   return (
@@ -98,10 +104,30 @@ watch(
 );
 
 watch(
+  () => props.defaultOpeneds,
+  (value) => {
+    if (!props.collapse && !userAdjustedMenus) {
+      openedMenus.value = value
+        ? value.filter((path) => !manuallyClosedMenus.has(path))
+        : [];
+    }
+  },
+);
+
+// 上一次注册项变化时，激活项是否已在菜单中注册
+let activeItemRegistered = false;
+watch(
   itemPathsKey,
   () => {
     nextTick(() => {
-      initMenu();
+      // 仅在「激活项随菜单项变化新出现」（如动态菜单数据加载完成、深链/刷新预挂载激活分组）时
+      // 才自动展开到激活项。子菜单懒挂载只会注册被展开分组的子项，激活项注册状态不变，
+      // 此时不应重新展开——否则手风琴模式下会把用户刚展开的同级分组立即收起。
+      const registered = !!(activePath.value && items.value[activePath.value]);
+      if (registered && !activeItemRegistered && !userAdjustedMenus) {
+        initMenu();
+      }
+      activeItemRegistered = registered;
     });
   },
   { flush: 'post' },
@@ -110,6 +136,12 @@ watch(
 watch(
   () => props.defaultActive,
   (currentActive = '') => {
+    userAdjustedMenus = false;
+    manuallyClosedMenus.forEach((path) => {
+      if (currentActive !== path && !currentActive.startsWith(`${path}/`)) {
+        manuallyClosedMenus.delete(path);
+      }
+    });
     if (!items.value[currentActive]) {
       activePath.value = '';
     }
@@ -276,12 +308,14 @@ function handleMenuItemClick(data: MenuItemClicked) {
 }
 
 function handleSubMenuClick({ parentPaths, path }: MenuItemRegistered) {
+  userAdjustedMenus = true;
   const isOpened = openedMenus.value.includes(path);
 
+  // 用户点击分组标题：开合事件标记 fromClick=true，供上层区分自动展开。
   if (isOpened) {
-    closeMenu(path, parentPaths);
+    closeMenu(path, parentPaths, true);
   } else {
-    openMenu(path, parentPaths);
+    openMenu(path, parentPaths, true);
   }
 }
 
@@ -295,21 +329,35 @@ function close(path: string) {
 
 /**
  * 关闭、折叠菜单
+ * @param path 菜单路径
+ * @param parentPaths 父级路径
+ * @param fromClick 是否由用户点击触发（区分程序自动收起）
  */
-function closeMenu(path: string, parentPaths: string[]) {
+function closeMenu(path: string, parentPaths: string[], fromClick = false) {
+  if (fromClick) {
+    manuallyClosedMenus.add(path);
+  }
   if (props.accordion) {
     openedMenus.value = subMenus.value[path]?.parentPaths ?? [];
   }
 
   close(path);
 
-  emit('close', path, parentPaths);
+  emit('close', path, parentPaths, fromClick);
 }
 
 /**
  * 点击展开菜单
+ * @param path 菜单路径
+ * @param parentPaths 父级路径
+ * @param fromClick 是否由用户点击触发（区分 initMenu/hover 等程序自动展开）
  */
-function openMenu(path: string, parentPaths: string[]) {
+function openMenu(path: string, parentPaths: string[], fromClick = false) {
+  if (fromClick) {
+    manuallyClosedMenus.delete(path);
+  } else if (manuallyClosedMenus.has(path)) {
+    return;
+  }
   if (openedMenus.value.includes(path)) {
     return;
   }
@@ -324,7 +372,7 @@ function openMenu(path: string, parentPaths: string[]) {
     );
   }
   openedMenus.value.push(path);
-  emit('open', path, parentPaths);
+  emit('open', path, parentPaths, fromClick);
 }
 
 function addMenuItem(item: MenuItemRegistered) {

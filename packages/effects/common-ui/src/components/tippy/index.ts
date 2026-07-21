@@ -34,7 +34,8 @@ export type TippyProps = Partial<
 export function initTippy(app: App<Element>, options?: DefaultProps) {
   setDefaultProps({
     allowHTML: true,
-    delay: [500, 200],
+    delay: [500, 0],
+    duration: [200, 100],
     theme: isDark.value ? '' : 'light',
     ...options,
   });

@@ -98,7 +98,8 @@ onMounted(() => {
   <div>
     <Modal
       :fullscreen-button="false"
-      class="w-[760px]"
+      class="h-[min(80vh,632px)] w-[760px]"
+      content-class="overflow-hidden"
       header-class="py-2 border-b"
     >
       <template #title>
@@ -108,7 +109,7 @@ onMounted(() => {
             ref="searchInputRef"
             v-model="keyword"
             :placeholder="$t('ui.widgets.search.searchNavigate')"
-            class="ring-none placeholder:text-muted-foreground w-[80%] rounded-md border border-none bg-transparent p-2 pl-0 text-sm font-normal outline-none ring-0 ring-offset-transparent focus-visible:ring-transparent"
+            class="ring-none placeholder:text-muted-foreground min-w-0 flex-1 rounded-md border border-none bg-transparent p-2 pl-0 text-sm font-normal outline-none ring-0 ring-offset-transparent focus-visible:ring-transparent"
           />
         </div>
       </template>

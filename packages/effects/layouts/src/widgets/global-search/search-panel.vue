@@ -12,7 +12,7 @@ import { isString } from '@vben/utils';
 import { VbenIcon, VbenScrollbar } from '@vben-core/shadcn-ui';
 import { isHttpUrl } from '@vben-core/shared/utils';
 
-import { onKeyStroke, useLocalStorage, useThrottleFn } from '@vueuse/core';
+import { onKeyStroke, useDebounceFn, useLocalStorage } from '@vueuse/core';
 
 import { methodType } from '../../../../../../apps/web-ele/src/constants/methods';
 import { useAggregationStore } from '../../../../../../apps/web-ele/src/store/aggregation';
@@ -40,7 +40,10 @@ const services = computed(() => aggregationStore.services);
 
 type SearchCategory = 'api' | 'entity' | 'markdown' | 'system';
 type SearchFilter = 'all' | SearchCategory;
+type SearchMode = 'default' | 'full' | 'path';
 type SearchSource = 'all' | 'group' | 'none';
+const SEARCH_DEBOUNCE_DELAY = 160;
+const SEARCH_RESULT_LIMIT = 80;
 const HTTP_METHODS = new Set([
   'delete',
   'get',
@@ -85,6 +88,14 @@ interface SearchItemIndex {
   normalizedRequestLine: string;
   normalizedRoutePath: string;
   normalizedSearchText: string;
+}
+
+interface SearchQuery {
+  compactKey: string;
+  key: string;
+  lowerKey: string;
+  mode: SearchMode;
+  normalizedPathKey: string;
 }
 
 interface SearchHistoryItem {
@@ -149,102 +160,40 @@ const filterOptions = computed<Array<{ label: string; value: SearchFilter }>>(
   ],
 );
 
-const handleSearch = useThrottleFn(search, 200);
+const handleSearch = useDebounceFn(search, SEARCH_DEBOUNCE_DELAY);
 
 // 搜索函数，用于根据搜索关键词查找匹配的菜单项
 function search(searchKey: string) {
-  // 去除搜索关键词的前后空格
-  searchKey = searchKey.trim();
+  if (searchKey !== (props.keyword ?? '')) {
+    return;
+  }
+
+  const query = resolveSearchQuery(searchKey);
 
   // 如果搜索关键词为空，清空搜索结果并返回
-  if (!searchKey) {
+  if (!query.key) {
     searchResults.value = [];
     return;
   }
 
-  // 使用搜索关键词创建正则表达式
-  const reg = createSearchReg(searchKey);
   const currentServiceUrl = currentService.value?.url;
-
-  const lowerKey = searchKey.toLowerCase();
-  const compactKey = normalizeLooseText(lowerKey);
-  const normalizedPathKey = normalizePathLike(lowerKey);
-  const isPathQuery = isPathLikeKeyword(lowerKey);
   const scored = searchItems.value
     .map((item) => {
       const index = item.searchIndex || createSearchItemIndex(item);
       let score = 0;
 
-      if (isPathQuery) {
-        if (index.normalizedRequestLine.includes(normalizedPathKey)) {
-          score += 240;
-        }
-        if (index.normalizedApiPath.includes(normalizedPathKey)) {
-          score += 200;
-        }
-        if (index.normalizedRoutePath.includes(normalizedPathKey)) {
-          score += 120;
-        }
-        if (index.normalizedSearchText.includes(normalizedPathKey)) {
-          score += 80;
+      if (query.mode === 'path') {
+        if (item.category !== 'api') {
+          return { item, score };
         }
 
-        // 路径检索只保留 API 结果，避免实体/系统项噪声
-        if (item.category !== 'api') {
-          score = 0;
-        }
+        score += getPathMatchScore(index, query);
       } else {
-        score += getTextMatchScore(index.lowerTitle, lowerKey, reg, {
-          equal: 140,
-          fuzzy: 60,
-          includes: 90,
-          prefix: 120,
-        });
-        score += getTextMatchScore(index.lowerBreadcrumb, lowerKey, reg, {
-          fuzzy: 18,
-          includes: 30,
-        });
-        score += getTextMatchScore(index.lowerPath, lowerKey, reg, {
-          fuzzy: 12,
-          includes: 20,
-        });
-        score += getTextMatchScore(index.lowerApiPath, lowerKey, reg, {
-          fuzzy: 40,
-          includes: 80,
-        });
-        score += getTextMatchScore(index.lowerDescription, lowerKey, reg, {
-          fuzzy: 28,
-          includes: 45,
-        });
-        score += getTextMatchScore(index.lowerSearchText, lowerKey, reg, {
-          fuzzy: 38,
-          includes: 55,
-        });
-        score += getTextMatchScore(index.lowerMethod, lowerKey, reg, {
-          includes: 25,
-        });
-        score += getTextMatchScore(index.lowerOperationId, lowerKey, reg, {
-          fuzzy: 20,
-          includes: 35,
-        });
-        score += getCompactMatchScore(
-          index.compactTitle,
-          compactKey,
-          lowerKey,
-          45,
-        );
-        score += getCompactMatchScore(
-          index.compactApiPath,
-          compactKey,
-          lowerKey,
-          35,
-        );
-        score += getCompactMatchScore(
-          index.compactSearchText,
-          compactKey,
-          lowerKey,
-          28,
-        );
+        score += getDefaultMatchScore(index, query);
+
+        if (query.mode === 'full') {
+          score += getFullTextMatchScore(index, query);
+        }
       }
 
       // 聚合模式下优先展示当前服务命中项，减少跨服务同名干扰
@@ -280,7 +229,7 @@ function search(searchKey: string) {
 
   searchResults.value = deduplicateApiResults(
     scored.map((entry) => entry.item),
-  );
+  ).slice(0, SEARCH_RESULT_LIMIT);
 }
 
 // When the keyboard up and down keys move to an invisible place
@@ -414,48 +363,36 @@ function clearSearchHistory() {
   }
 }
 
-// 存储所有需要转义的特殊字符
-const code = new Set([
-  '$',
-  '(',
-  ')',
-  '*',
-  '+',
-  '.',
-  '?',
-  '[',
-  '\\',
-  ']',
-  '^',
-  '{',
-  '|',
-  '}',
-]);
+/**
+ * 解析搜索关键词和触发模式。
+ * @param value 用户输入的原始搜索内容。
+ * @returns 标准化后的搜索模式、关键词和派生匹配文本。
+ */
+function resolveSearchQuery(value: string): SearchQuery {
+  const rawKey = value.trim();
+  let mode: SearchMode = 'default';
+  if (rawKey.startsWith('#')) {
+    mode = 'full';
+  } else if (rawKey.startsWith('/')) {
+    mode = 'path';
+  }
+  const key = mode === 'default' ? rawKey : rawKey.slice(1).trim();
+  const lowerKey = key.toLowerCase();
 
-// 转换函数，用于转义特殊字符
-function transform(c: string) {
-  // 如果字符在特殊字符列表中，返回转义后的字符
-  // 如果不在，返回字符本身
-  return code.has(c) ? `\\${c}` : c;
-}
-
-// 创建搜索正则表达式
-function createSearchReg(key: string) {
-  // 将输入的字符串拆分为单个字符
-  // 对每个字符进行转义
-  // 然后用'.*'连接所有字符，创建正则表达式
-  const keys = [...key].map((item) => transform(item)).join('.*');
-  // 返回创建的正则表达式
-  return new RegExp(`.*${keys}.*`);
+  return {
+    compactKey: normalizeLooseText(lowerKey),
+    key,
+    lowerKey,
+    mode,
+    normalizedPathKey: normalizePathLike(lowerKey),
+  };
 }
 
 function getTextMatchScore(
   value: string,
   lowerKey: string,
-  reg: RegExp,
   weights: {
     equal?: number;
-    fuzzy?: number;
     includes?: number;
     prefix?: number;
   },
@@ -475,9 +412,101 @@ function getTextMatchScore(
   const contains = value.includes(lowerKey);
   if (weights.includes && contains) {
     score += weights.includes;
-  } else if (weights.fuzzy && reg.test(value)) {
-    score += weights.fuzzy;
   }
+
+  return score;
+}
+
+/**
+ * 计算默认搜索分数，仅匹配接口核心信息。
+ * @param index 当前搜索项的预处理索引。
+ * @param query 标准化后的搜索条件。
+ * @returns 当前搜索项的默认搜索命中分数。
+ */
+function getDefaultMatchScore(index: SearchItemIndex, query: SearchQuery) {
+  let score = 0;
+
+  score += getTextMatchScore(index.lowerTitle, query.lowerKey, {
+    equal: 160,
+    includes: 100,
+    prefix: 130,
+  });
+  score += getTextMatchScore(index.lowerApiPath, query.lowerKey, {
+    includes: 85,
+  });
+  score += getTextMatchScore(index.lowerOperationId, query.lowerKey, {
+    equal: 110,
+    includes: 55,
+    prefix: 80,
+  });
+  score += getTextMatchScore(index.lowerBreadcrumb, query.lowerKey, {
+    includes: 28,
+  });
+  score += getTextMatchScore(index.lowerDescription, query.lowerKey, {
+    includes: 20,
+  });
+  score += getTextMatchScore(index.lowerMethod, query.lowerKey, {
+    includes: 25,
+  });
+  score += getTextMatchScore(index.lowerPath, query.lowerKey, {
+    includes: 12,
+  });
+  score += getCompactMatchScore(
+    index.compactTitle,
+    query.compactKey,
+    query.lowerKey,
+    45,
+  );
+  score += getCompactMatchScore(
+    index.compactApiPath,
+    query.compactKey,
+    query.lowerKey,
+    35,
+  );
+
+  return score;
+}
+
+/**
+ * 计算路径模式搜索分数，仅匹配接口路径和请求行。
+ * @param index 当前搜索项的预处理索引。
+ * @param query 标准化后的搜索条件。
+ * @returns 当前接口路径的搜索命中分数。
+ */
+function getPathMatchScore(index: SearchItemIndex, query: SearchQuery) {
+  let score = 0;
+
+  if (index.normalizedRequestLine.includes(query.normalizedPathKey)) {
+    score += 240;
+  }
+  if (index.normalizedApiPath.includes(query.normalizedPathKey)) {
+    score += 200;
+  }
+  if (index.normalizedRoutePath.includes(query.normalizedPathKey)) {
+    score += 80;
+  }
+
+  return score;
+}
+
+/**
+ * 计算全文模式搜索分数，匹配默认搜索之外的扩展索引。
+ * @param index 当前搜索项的预处理索引。
+ * @param query 标准化后的搜索条件。
+ * @returns 当前搜索项的全文搜索命中分数。
+ */
+function getFullTextMatchScore(index: SearchItemIndex, query: SearchQuery) {
+  let score = 0;
+
+  score += getTextMatchScore(index.lowerSearchText, query.lowerKey, {
+    includes: 55,
+  });
+  score += getCompactMatchScore(
+    index.compactSearchText,
+    query.compactKey,
+    query.lowerKey,
+    28,
+  );
 
   return score;
 }
@@ -925,7 +954,8 @@ function escapeHtml(value: string) {
 }
 
 function highlightText(value: string) {
-  const keyword = props.keyword?.trim();
+  const query = resolveSearchQuery(props.keyword ?? '');
+  const keyword = query.key;
   const raw = value || '';
   if (!keyword) {
     return escapeHtml(raw);
@@ -956,7 +986,7 @@ function highlightText(value: string) {
   }
 
   if (!hasMatch) {
-    if (isPathLikeKeyword(keyword)) {
+    if (query.mode === 'path') {
       return highlightPathSegments(raw, keyword);
     }
     return escapeHtml(raw);
@@ -1002,10 +1032,6 @@ function highlightPathSegments(raw: string, keyword: string) {
   }
   output += escapeHtml(raw.slice(lastIndex));
   return output;
-}
-
-function isPathLikeKeyword(keyword: string) {
-  return keyword.includes('/');
 }
 
 function normalizePathLike(value: string) {
@@ -1191,9 +1217,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div
-    class="flex h-[70vh] max-h-[520px] min-h-[340px] min-w-0 flex-col overflow-hidden px-2"
-  >
+  <div class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden px-2">
     <div class="bg-background sticky top-0 z-10 shrink-0 py-1">
       <div v-if="sourceItems.length > 0" class="mb-2 flex flex-wrap gap-2 px-1">
         <button
@@ -1227,7 +1251,7 @@ onMounted(() => {
     </div>
 
     <VbenScrollbar class="min-h-0 flex-1">
-      <div class="w-full pb-2">
+      <div class="search-results-content w-full pb-2">
         <!-- 无搜索结果 -->
         <div
           v-if="isSearching && displayItems.length === 0"
@@ -1363,6 +1387,10 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.search-results-content {
+  padding-right: 20px;
+}
+
 .search-hit {
   padding: 0 2px;
   background: color-mix(in oklab, var(--el-color-warning-light-7), #fff 45%);

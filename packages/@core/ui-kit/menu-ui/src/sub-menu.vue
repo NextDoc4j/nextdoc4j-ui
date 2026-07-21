@@ -134,12 +134,14 @@ const leafCount = computed(() => {
       />
     </template>
     <template #title>
-      <span>{{ menu.name }}</span>
-      <span
-        class="bg-primary/10 text-primary border-primary/30 ml-6 inline-block rounded-xl border px-2 text-xs"
-        v-if="menu.parents?.includes('/document')"
-      >
-        {{ leafCount }}
+      <span class="flex min-w-0 items-center gap-2">
+        <span class="min-w-0 flex-1 truncate">{{ menu.name }}</span>
+        <span
+          v-if="menu.parents?.includes('/document')"
+          class="bg-primary/10 text-primary border-primary/30 inline-flex min-w-7 shrink-0 items-center justify-center rounded-xl border px-2 text-xs"
+        >
+          {{ leafCount }}
+        </span>
       </span>
     </template>
     <template v-for="childItem in menu.children || []" :key="childItem.path">

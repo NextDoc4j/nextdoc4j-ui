@@ -19,6 +19,7 @@ export interface ApiTestRequestCache {
   bodyContent?: string;
   bodyDrafts?: Partial<Record<'json' | 'raw' | 'xml', string>>;
   bodyType?: string;
+  cacheVersion?: number;
   cookies: ApiTestParamCacheItem[];
   formDataParams: ApiTestParamCacheItem[];
   headers: ApiTestParamCacheItem[];
@@ -32,6 +33,8 @@ export const useApiTestCacheStore = defineStore(
   'api-test-cache',
   () => {
     const debugCacheEnabled = ref(true);
+    // 分组概览开关：控制点击左侧分组时是否渲染右侧分组概览页，默认开启
+    const groupOverviewEnabled = ref(true);
     const requestCache = ref<Record<string, ApiTestRequestCache>>({});
 
     const getRequestCache = (cacheKey: string) => {
@@ -56,6 +59,7 @@ export const useApiTestCacheStore = defineStore(
 
     return {
       debugCacheEnabled,
+      groupOverviewEnabled,
       requestCache,
       getRequestCache,
       saveRequestCache,

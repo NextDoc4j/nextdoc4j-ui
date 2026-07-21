@@ -62,8 +62,9 @@ const itemCount = computed(() => {
   return 0;
 });
 
+// 元素数量标签（展开与折叠态共用）：数组用 elements、对象用 entries
 const countLabel = computed(() => {
-  if (!isExpanded.value || itemCount.value === 0) {
+  if (itemCount.value === 0) {
     return '';
   }
   const count = itemCount.value;
@@ -119,96 +120,6 @@ function formatNumber(num: number): string {
   );
   return decimal ? `${formatted}.${decimal}` : formatted;
 }
-
-// 最外层展示格式化
-function formatValueForPreview(val: unknown, isNested = false) {
-  if (val === null) {
-    return { text: 'null', class: 'value-null' };
-  }
-  if (val === undefined) {
-    return { text: 'undefined', class: 'value-undefined' };
-  }
-  if (typeof val === 'string') {
-    return { text: `"${val}"`, class: 'value-string' };
-  }
-  if (typeof val === 'boolean') {
-    return { text: String(val), class: 'value-boolean' };
-  }
-  if (typeof val === 'number') {
-    return {
-      text: formatNumber(val),
-      class: 'value-number',
-      isHtml: true,
-    };
-  }
-
-  // 如果是数组结构则判断是否为嵌套，并填充为 {...} 模式
-  if (Array.isArray(val)) {
-    if (isNested && val.length > 0) {
-      const displayCount = Math.min(val.length, 4);
-      const items = Array.from({ length: displayCount }).fill('{…}');
-      const suffix = val.length > 4 ? `, … ${val.length - 4} more` : '';
-      return {
-        text: `[${items.join(', ')}${suffix}]`,
-        class: 'value-array',
-      };
-    }
-    return { text: '[…]', class: 'value-array' };
-  }
-  if (typeof val === 'object') {
-    return { text: '{…}', class: 'value-object' };
-  }
-  return { text: String(val), class: '' };
-}
-
-const arrayCollapsedPreview = computed(() => {
-  if (valueType.value !== 'array' || itemCount.value === 0) {
-    return [];
-  }
-
-  const count = itemCount.value;
-  const displayCount = Math.min(count, 4);
-  const items = Array.from({ length: displayCount })
-    .fill(null)
-    .map(() => ({ text: '{…}', class: 'value-object' }));
-
-  if (count > 4) {
-    items.push({
-      text: `… ${count - 4} more`,
-      class: 'preview-more',
-      isMore: true,
-    } as any);
-  }
-  return items;
-});
-
-const objectCollapsedPreview = computed(() => {
-  if (valueType.value !== 'object') {
-    return [];
-  }
-
-  const obj = props.value as Record<string, unknown>;
-  const keys = Object.keys(obj);
-
-  if (keys.length === 0) {
-    return [];
-  }
-
-  const items = keys.slice(0, 4).map((key) => ({
-    key,
-    value: formatValueForPreview(obj[key], true),
-    isMore: null,
-  }));
-
-  if (keys.length > 4) {
-    items.push({
-      key: '',
-      value: { text: `… ${keys.length - 4} more`, class: 'preview-more' },
-      isMore: true,
-    } as any);
-  }
-  return items;
-});
 
 // 基本数据格式化
 const formattedValue = computed(() => {
@@ -651,8 +562,10 @@ watch(
   { immediate: true },
 );
 
+// 复杂非空节点（展开的 - 按钮 / 折叠的 + 按钮）都带独立按钮，
+// 由按钮承担展开/折叠交互，故不再对整行加 hover 背景
 const showCollapseButton = computed(() => {
-  return isComplex.value && isExpanded.value && itemCount.value > 0;
+  return isComplex.value && itemCount.value > 0;
 });
 
 function toggleExpand() {
@@ -723,8 +636,10 @@ onBeforeUnmount(() => {
           <span class="preview-colon">: </span>
         </div>
 
-        <span class="bracket" @click="toggleExpand">{{ openBracket }}</span>
+        <!-- 开括号（三态共用） -->
+        <span class="bracket" @click="toggleExpand" v-text="openBracket"></span>
 
+        <!-- 展开态且非空：折叠/复制按钮 + 数量 -->
         <template v-if="isExpanded && itemCount > 0">
           <button
             class="json-btn-collapse collapse-btn"
@@ -737,72 +652,34 @@ onBeforeUnmount(() => {
           <span class="count-label">{{ countLabel }}</span>
         </template>
 
-        <template v-if="!isExpanded">
-          <template v-if="valueType === 'array'">
-            <span class="preview-container" @click="toggleExpand">
-              <template
-                v-for="(item, index) in arrayCollapsedPreview"
-                :key="index"
-              >
-                <span :class="item.class">{{ item.text }}</span>
-                <span
-                  v-if="index < arrayCollapsedPreview.length - 1"
-                  class="preview-separator"
-                  >,
-                </span>
-              </template>
-            </span>
-          </template>
-
-          <template v-else-if="valueType === 'object'">
-            <span class="preview-container" @click="toggleExpand">
-              <template v-if="objectCollapsedPreview.length === 0">
-                <span class="preview-empty">empty</span>
-              </template>
-              <template v-else>
-                <template
-                  v-for="(item, index) in objectCollapsedPreview"
-                  :key="index"
-                >
-                  <template v-if="!item.isMore">
-                    <span class="key-name">{{ item.key }}</span>
-                    <span class="preview-colon">: </span>
-                    <span
-                      v-if="item.value.isHtml"
-                      :class="item.value.class"
-                      v-html="item.value.text"
-                    ></span>
-                    <span v-else :class="item.value.class">{{
-                      item.value.text
-                    }}</span>
-                  </template>
-                  <template v-else>
-                    <span :class="item.value.class">{{ item.value.text }}</span>
-                  </template>
-                  <span
-                    v-if="index < objectCollapsedPreview.length - 1"
-                    class="preview-separator"
-                    >,
-                  </span>
-                </template>
-              </template>
-            </span>
-          </template>
-
-          <span class="bracket" @click="toggleExpand">{{ closeBracket }}</span>
+        <!-- 折叠态且非空：展开按钮 [+] + 省略号 + 闭括号 + 数量 -->
+        <template v-if="!isExpanded && itemCount > 0">
+          <button
+            class="json-btn-expand collapse-btn"
+            @click="toggleExpand"
+          ></button>
+          <span class="collapsed-ellipsis" @click="toggleExpand">...</span>
+          <span class="bracket" @click="toggleExpand" v-text="closeBracket">
+          </span>
+          <span class="count-label">{{ countLabel }}</span>
           <span v-if="!isLastItem && depth > 0" class="comma">,</span>
         </template>
 
-        <span
-          v-if="fieldDescription && (isExpanded || itemCount === 0)"
-          class="field-description"
-        >
+        <!-- 空节点：闭括号紧随开括号 -->
+        <template v-if="itemCount === 0">
+          <span class="bracket" @click="toggleExpand" v-text="closeBracket">
+          </span>
+          <span v-if="!isLastItem && depth > 0" class="comma">,</span>
+        </template>
+
+        <!-- 描述注释：展开、折叠、空态只要有描述都展示 -->
+        <span v-if="fieldDescription" class="field-description">
           <span class="comment-prefix">//</span>
           <span class="comment-content">{{ fieldDescription }}</span>
         </span>
       </div>
 
-      <div v-if="isExpanded" class="node-content">
+      <div v-if="isExpanded && itemCount > 0" class="node-content">
         <div class="vertical-line"></div>
         <template v-if="childrenVisible">
           <section
@@ -871,11 +748,18 @@ onBeforeUnmount(() => {
           <span>{{ keyName }}</span>
           <span>:&nbsp;</span>
         </span>
-        <span :class="valueClass" v-html="formattedValue"></span>
-        <span v-if="!isLastItem" class="comma">,</span>
-        <span v-if="fieldDescription" class="field-description">
-          <span class="comment-prefix">//</span>
-          <span class="comment-content">{{ fieldDescription }}</span>
+        <span class="primitive-content">
+          <span
+            v-if="valueType === 'number'"
+            :class="valueClass"
+            v-html="formattedValue"
+          ></span>
+          <span v-else :class="valueClass">{{ formattedValue }}</span>
+          <span v-if="!isLastItem" class="comma">,</span>
+          <span v-if="fieldDescription" class="field-description">
+            <span class="comment-prefix">//</span>
+            <span class="comment-content">{{ fieldDescription }}</span>
+          </span>
         </span>
       </div>
     </template>
@@ -929,6 +813,12 @@ onBeforeUnmount(() => {
 .node-primitive {
   display: flex;
   align-items: center;
+}
+
+.primitive-content {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
 }
 
 .key-wrapper {
@@ -1027,34 +917,16 @@ onBeforeUnmount(() => {
   background: #edf3ff;
 }
 
-.preview-container {
-  cursor: pointer;
-  user-select: none;
-}
-
-.preview-separator,
 .preview-colon {
   user-select: none;
 }
 
-.theme-dark .preview-separator,
 .theme-dark .preview-colon {
   color: #d4d4d4;
 }
 
-.theme-light .preview-separator,
 .theme-light .preview-colon {
   color: #24292e;
-}
-
-.theme-dark .preview-empty,
-.theme-dark .preview-more {
-  color: #858585;
-}
-
-.theme-light .preview-empty,
-.theme-light .preview-more {
-  color: #6a737d;
 }
 
 .comma {
@@ -1139,6 +1011,21 @@ onBeforeUnmount(() => {
   color: #24292e;
 }
 
+/* 折叠态省略号：可点击展开 */
+.collapsed-ellipsis {
+  padding: 0 2px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.theme-dark .collapsed-ellipsis {
+  color: #858585;
+}
+
+.theme-light .collapsed-ellipsis {
+  color: #6a737d;
+}
+
 .theme-dark .value-string {
   color: #ce9178;
 }
@@ -1185,6 +1072,10 @@ onBeforeUnmount(() => {
 
 .json-btn-collapse::before {
   content: '\2013';
+}
+
+.json-btn-expand::before {
+  content: '\FF0B';
 }
 
 .json-btn-copy::before {

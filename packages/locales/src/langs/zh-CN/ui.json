@@ -83,7 +83,8 @@
     "clearNotifications": "清空",
     "search": {
       "title": "搜索",
-      "searchNavigate": "搜索导航菜单",
+      "searchNavigate": "搜索接口，/前缀搜路径，#前缀搜全文",
+      "prefixHint": "/ 搜路径 · # 搜全文",
       "select": "选择",
       "navigate": "导航",
       "close": "关闭",

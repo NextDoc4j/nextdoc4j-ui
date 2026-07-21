@@ -3,6 +3,10 @@
   animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+.side-content[data-state='closed'] {
+  animation-duration: 0.1s;
+}
+
 .side-content[data-side='top'] {
   animation-name: slide-up;
 }

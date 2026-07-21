@@ -12,8 +12,11 @@ import type {
 } from '#/typings/openApi';
 
 import {
+  SvgFileDownIcon,
+  SvgGlobalConfigIcon,
   SvgMenuApiIcon,
   SvgMenuDocumentIcon,
+  SvgMenuDocumentManageIcon,
   SvgMenuEntityIcon,
   SvgMenuSafetyIcon,
 } from '@vben/icons';
@@ -21,9 +24,10 @@ import { updatePreferences } from '@vben/preferences';
 
 import { getOpenAPIConfig } from '#/api/core/openApi';
 import { baseRequestClient } from '#/api/request';
-import { useApiStore } from '#/store';
+import { useApiStore, useApiTestCacheStore } from '#/store';
 import { useAggregationStore } from '#/store/aggregation';
 import { compareOperationLike, compareTagNames } from '#/utils/openapi-sort';
+import { resolveServiceGroupDocumentUrl } from '#/utils/openapi-url';
 
 interface TagGroups {
   [tag: string]: Record<string, PathMenuItem[]>;
@@ -58,6 +62,98 @@ const createAuthorizeRoute = (): RouteRecordStringComponent<string> => ({
   name: '全局认证',
   path: '/authorize',
   component: 'views/authorize/index.vue',
+});
+
+/**
+ * 生成「文档管理」菜单。全局认证作为其子项，仅在文档存在安全配置时挂载；
+ * 全局配置与文档下载为固定子项。doc 用于判断当前文档是否包含安全方案。
+ */
+const createDocManageRoute = (
+  doc?: OpenAPISpec,
+): RouteRecordStringComponent<string> => {
+  const children: RouteRecordStringComponent<string>[] = [
+    {
+      meta: {
+        title: '全局配置',
+        icon: SvgGlobalConfigIcon,
+      },
+      name: '全局配置',
+      path: '/doc-manage/global-params',
+      component: 'views/doc-manage/global-params/index.vue',
+    },
+    {
+      meta: {
+        title: '文档下载',
+        icon: SvgFileDownIcon,
+      },
+      name: '文档下载',
+      path: '/doc-manage/export',
+      component: 'views/doc-manage/export/index.vue',
+    },
+  ];
+
+  if (hasGlobalSecurityConfig(doc)) {
+    children.unshift(createAuthorizeRoute());
+  }
+
+  return {
+    meta: {
+      icon: SvgMenuDocumentManageIcon,
+      order: 1,
+      title: '文档管理',
+    },
+    name: '文档管理',
+    path: '/doc-manage',
+    redirect: '/doc-manage/global-params',
+    component: 'BasicLayout',
+    children,
+  };
+};
+
+/** 分组概览页路由名/路径中的标记，用于在概览组件中识别概览路由 */
+const GROUP_OVERVIEW_MARKER = '__overview__';
+
+const isGroupOverviewEnabled = () =>
+  useApiTestCacheStore().groupOverviewEnabled;
+
+const createGroupOverviewMeta = (title: string, groupPath: string) => ({
+  menuGroupTarget: `${groupPath}/${GROUP_OVERVIEW_MARKER}`,
+  menuGroupTargetEnabled: isGroupOverviewEnabled,
+  title,
+});
+
+const createGroupOverviewRedirect = (
+  groupPath: string,
+  fallbackPath: string,
+) => {
+  const overviewPath = `${groupPath}/${GROUP_OVERVIEW_MARKER}`;
+  return () => (isGroupOverviewEnabled() ? overviewPath : fallbackPath);
+};
+
+/**
+ * 生成接口分组的「概览」子路由，作为分组下第一个可点击的叶子节点。
+ * 点击分组时自动跳转到此概览页，但不在左侧菜单和顶部标签中显示。
+ * @param namePrefix 以 `*` 拼接的分组前缀（如 `all*用户管理`），概览组件据此读取分组下全部接口
+ * @param groupPath 分组路由路径（如 `/document/all/用户管理`）
+ * @returns 分组概览子路由配置
+ */
+const createGroupOverviewRoute = (
+  namePrefix: string,
+  groupPath: string,
+): RouteRecordStringComponent<string> => ({
+  meta: {
+    keepAlive: true,
+    title: '概览',
+    activePath: groupPath,
+    // 概览页不在左侧菜单和顶部标签中显示
+    hideInMenu: true,
+    hideInTab: true,
+  },
+  name: `${namePrefix}*${GROUP_OVERVIEW_MARKER}`,
+  path: `${groupPath}/${GROUP_OVERVIEW_MARKER}`,
+  // 复用 document/index.vue：其内部检测路由名中的 __overview__ 标记后渲染分组概览，
+  // 与接口详情共用同一渲染出口，避免概览作为独立子路由无出口渲染。
+  component: '/views/document/index.vue',
 });
 
 const SCHEMA_REF_PREFIX = '#/components/schemas/';
@@ -240,9 +336,7 @@ export const fetchAggregationRoutesImpl: () => Promise<
   const gatewayFallbackRoutes: RouteRecordStringComponent<string>[] = [
     ...markDownMenus,
   ];
-  if (hasGlobalSecurityConfig(gatewayOpenApi)) {
-    gatewayFallbackRoutes.unshift(createAuthorizeRoute());
-  }
+  gatewayFallbackRoutes.unshift(createDocManageRoute(gatewayOpenApi));
 
   if (gatewayOpenApi?.info?.title) {
     updatePreferences({
@@ -334,15 +428,16 @@ export const fetchAggregationRoutesImpl: () => Promise<
       });
 
       if (filterUrls.length > 0) {
-        // 获取服务前缀（如 "/file" from "/file/v3/api-docs"）
-        const servicePrefix = selectedService.url.replace('/v3/api-docs', '');
+        const docPath = gatewayOpenApi?.['x-nextdoc4j-aggregation']?.docPath;
 
         // 使用缓存并行请求所有分组的文档
         const dataList = await Promise.all(
           filterUrls.map(({ url }) => {
-            // url 格式: "/v3/api-docs/user"
-            // 需要拼接为: "/file/v3/api-docs/user"
-            const fullUrl = `${servicePrefix}${url}`;
+            const fullUrl = resolveServiceGroupDocumentUrl(
+              selectedService.url,
+              url,
+              docPath,
+            );
             return aggregationStore.getServiceGroupDoc(
               selectedService,
               fullUrl,
@@ -362,10 +457,11 @@ export const fetchAggregationRoutesImpl: () => Promise<
           allPath[tag] = tagGroups;
 
           Object.entries(tagGroups).forEach(([key, groupedApis]) => {
+            const groupPath = `/document/${tag}/${key}`;
             const children = groupedApis?.map((api) => {
               return {
                 name: `${tag}*${key}*${api.operationId}`,
-                path: `/document/${tag}/${key}/${api.operationId}`,
+                path: `${groupPath}/${api.operationId}`,
                 meta: {
                   title: api.summary,
                   method: api.method,
@@ -381,24 +477,33 @@ export const fetchAggregationRoutesImpl: () => Promise<
             accessRoutes.push({
               component: '/views/document/index.vue',
               name: `${tag}-${key}`,
-              path: `/document/${tag}/${key}`,
-              meta: {
-                title: key,
-              },
-              children,
+              path: groupPath,
+              meta: createGroupOverviewMeta(key, groupPath),
+              redirect: createGroupOverviewRedirect(
+                groupPath,
+                children?.[0]?.path ?? '/empty',
+              ),
+              children: [
+                createGroupOverviewRoute(`${tag}*${key}`, groupPath),
+                ...(children ?? []),
+              ],
             });
           });
 
+          const tagPath = `/document/${tag}`;
           access.push({
             name: tag,
-            path: `/document/${tag}`,
+            path: tagPath,
             component: '/views/document/index.vue',
-            meta: {
-              title: filterUrls?.[index]?.name ?? '默认分组',
-            },
-            children: accessRoutes,
-            redirect:
-              accessRoutes.length > 0 ? accessRoutes[0]?.path : '/empty',
+            meta: createGroupOverviewMeta(
+              filterUrls?.[index]?.name ?? '默认分组',
+              tagPath,
+            ),
+            children: [createGroupOverviewRoute(tag, tagPath), ...accessRoutes],
+            redirect: createGroupOverviewRedirect(
+              tagPath,
+              accessRoutes[0]?.path ?? '/empty',
+            ),
           });
 
           // 实体分组
@@ -472,9 +577,7 @@ export const fetchAggregationRoutesImpl: () => Promise<
       ...markDownMenus,
     ];
 
-    if (hasGlobalSecurityConfig(gatewayOpenApi)) {
-      routes.unshift(createAuthorizeRoute());
-    }
+    routes.unshift(createDocManageRoute(gatewayOpenApi));
 
     resolve(routes);
   });
@@ -551,10 +654,11 @@ const fetchSingleAppRoutes: (
           const accessRoutes: RouteRecordStringComponent[] = [];
           allPath[tag] = tagGroups;
           Object.entries(tagGroups).forEach(([key, groupedApis]) => {
+            const groupPath = `/document/${tag}/${key}`;
             const children = groupedApis?.map((api) => {
               return {
                 name: `${tag}*${key}*${api.operationId}`,
-                path: `/document/${tag}/${key}/${api.operationId}`,
+                path: `${groupPath}/${api.operationId}`,
                 meta: {
                   title: api.summary,
                   method: api.method,
@@ -570,24 +674,33 @@ const fetchSingleAppRoutes: (
             accessRoutes.push({
               component: '/views/document/index.vue',
               name: `${tag}-${key}`,
-              path: `/document/${tag}/${key}`,
-              meta: {
-                title: key,
-              },
-              children,
+              path: groupPath,
+              meta: createGroupOverviewMeta(key, groupPath),
+              redirect: createGroupOverviewRedirect(
+                groupPath,
+                children?.[0]?.path ?? '/empty',
+              ),
+              children: [
+                createGroupOverviewRoute(`${tag}*${key}`, groupPath),
+                ...(children ?? []),
+              ],
             });
           });
 
+          const tagPath = `/document/${tag}`;
           access.push({
             name: tag,
-            path: `/document/${tag}`,
+            path: tagPath,
             component: '/views/document/index.vue',
-            meta: {
-              title: filterUrls?.[index]?.name ?? '默认分组',
-            },
-            children: accessRoutes,
-            redirect:
-              accessRoutes.length > 0 ? accessRoutes[0]?.path : '/empty',
+            meta: createGroupOverviewMeta(
+              filterUrls?.[index]?.name ?? '默认分组',
+              tagPath,
+            ),
+            children: [createGroupOverviewRoute(tag, tagPath), ...accessRoutes],
+            redirect: createGroupOverviewRedirect(
+              tagPath,
+              accessRoutes[0]?.path ?? '/empty',
+            ),
           });
           const entityGroup: RouteRecordStringComponent<string> = {
             component: '/views/entity/index.vue',
@@ -662,9 +775,7 @@ const fetchSingleAppRoutes: (
       },
       ...markDownMenus,
     ];
-    if (hasGlobalSecurityConfig(data)) {
-      routes.unshift(createAuthorizeRoute());
-    }
+    routes.unshift(createDocManageRoute(data));
 
     resolve(routes);
   });
@@ -781,10 +892,11 @@ const initGroupRoute = (paths: Paths, spec?: OpenAPISpec) => {
   allPath.all = tagGroups;
 
   Object.entries(tagGroups).forEach(([key, groupedApis]) => {
+    const groupPath = `/document/all/${key}`;
     const children = groupedApis?.map((api) => {
       return {
         name: `all*${key}*${api.operationId}`,
-        path: `/document/all/${key}/${api.operationId}`,
+        path: `${groupPath}/${api.operationId}`,
         meta: {
           title: api.summary,
           method: api.method,
@@ -799,23 +911,33 @@ const initGroupRoute = (paths: Paths, spec?: OpenAPISpec) => {
     accessRoutes.push({
       component: '/views/document/index.vue',
       name: `all*${key}`,
-      meta: {
-        title: key,
-      },
-      path: `/document/all/${key}`,
-      children,
+      meta: createGroupOverviewMeta(key, groupPath),
+      path: groupPath,
+      redirect: createGroupOverviewRedirect(
+        groupPath,
+        children?.[0]?.path ?? '/empty',
+      ),
+      children: [
+        createGroupOverviewRoute(`all*${key}`, groupPath),
+        ...(children ?? []),
+      ],
     });
   });
+  const allGroupPath = '/document/all';
   const access: RouteRecordStringComponent<string>[] = [
     {
       name: 'all',
-      path: '/document/all',
+      path: allGroupPath,
       component: '/views/document/index.vue',
-      meta: {
-        title: '所有接口',
-      },
-      redirect: accessRoutes.length > 0 ? accessRoutes[0]?.path : '/empty',
-      children: accessRoutes,
+      meta: createGroupOverviewMeta('所有接口', allGroupPath),
+      redirect: createGroupOverviewRedirect(
+        allGroupPath,
+        accessRoutes[0]?.path ?? '/empty',
+      ),
+      children: [
+        createGroupOverviewRoute('all', allGroupPath),
+        ...accessRoutes,
+      ],
     },
   ];
 

@@ -1,329 +1,262 @@
 <script setup lang="ts">
-import type { GlobalParamItem } from '#/store';
-
-import { computed, ref, watch } from 'vue';
+import { watch } from 'vue';
+import { useRouter } from 'vue-router';
 
 import {
-  ElAlert,
   ElButton,
   ElCard,
   ElForm,
   ElFormItem,
-  ElInput,
   ElMessage,
-  ElOption,
-  ElSelect,
   ElSpace,
   ElSwitch,
-  ElTable,
-  ElTableColumn,
-  ElTabPane,
-  ElTabs,
+  ElTooltip,
 } from 'element-plus';
 import { storeToRefs } from 'pinia';
 
-import { useApiTestCacheStore, useDocManageStore } from '#/store';
-import { useAggregationStore } from '#/store/aggregation';
+import GlobalParamsConfig from '#/components/global-params-config.vue';
+import { useApiTestCacheStore } from '#/store';
 
 defineOptions({ name: 'DocManageGlobalParams' });
 
-const docManageStore = useDocManageStore();
 const apiTestCacheStore = useApiTestCacheStore();
-const aggregationStore = useAggregationStore();
+const router = useRouter();
 
-const { debugCacheEnabled } = storeToRefs(apiTestCacheStore);
-const { currentService, isAggregation, services } =
-  storeToRefs(aggregationStore);
+const { debugCacheEnabled, groupOverviewEnabled } =
+  storeToRefs(apiTestCacheStore);
 
-const activeScope = ref(docManageStore.ALL_SCOPE_KEY);
-const queryParams = ref<GlobalParamItem[]>([]);
-const headerParams = ref<GlobalParamItem[]>([]);
-const commonHeaderNameOptions = [
-  'Accept',
-  'Accept-Charset',
-  'Accept-Encoding',
-  'Accept-Language',
-  'Access-Control-Request-Headers',
-  'Access-Control-Request-Method',
-  'If-Range',
-  'If-Unmodified-Since',
-  'Keep-Alive',
-  'Max-Forwards',
-  'Origin',
-  'Pragma',
-];
-
-const scopeOptions = computed(() => {
-  const options = [
-    {
-      label: '全部文档（全局）',
-      value: docManageStore.ALL_SCOPE_KEY,
-    },
-  ];
-
-  if (isAggregation.value) {
-    services.value.forEach((service) => {
-      options.push({
-        label: `服务：${service.name}`,
-        value: docManageStore.toScopeKey(service.url),
-      });
-    });
-  }
-
-  return options;
-});
-
-const currentServiceScopeKey = computed(() => {
-  return docManageStore.toScopeKey(currentService.value?.url);
-});
-
-const mergedActiveQueryCount = computed(() => {
-  return docManageStore
-    .getMergedQueryParams(currentService.value?.url)
-    .filter((item) => item.enabled && item.name).length;
-});
-
-const mergedActiveHeaderCount = computed(() => {
-  return docManageStore
-    .getMergedHeaderParams(currentService.value?.url)
-    .filter((item) => item.enabled && item.name).length;
-});
-
-const createParamRow = (): GlobalParamItem => ({
-  id: Math.random().toString(36).slice(2, 10),
-  enabled: true,
-  name: '',
-  value: '',
-  description: '',
-});
-
-const loadScope = (scopeKey: string) => {
-  const data = docManageStore.getScopeParams(scopeKey);
-  queryParams.value = data.queryParams;
-  headerParams.value = data.headerParams;
-};
-
-watch(
-  scopeOptions,
-  (options) => {
-    if (!options.some((item) => item.value === activeScope.value)) {
-      activeScope.value = docManageStore.ALL_SCOPE_KEY;
-    }
-  },
-  { immediate: true },
-);
-
-watch(
-  activeScope,
-  (scopeKey) => {
-    loadScope(scopeKey);
-  },
-  { immediate: true },
-);
-
-const persistCurrentScope = () => {
-  docManageStore.setScopeParams(activeScope.value, {
-    queryParams: queryParams.value,
-    headerParams: headerParams.value,
-  });
-};
-
-watch(
-  [queryParams, headerParams],
-  () => {
-    persistCurrentScope();
-  },
-  { deep: true },
-);
-
-const resetScope = () => {
-  queryParams.value = [];
-  headerParams.value = [];
-};
-
-const addQueryParam = () => {
-  queryParams.value.push(createParamRow());
-};
-
-const addHeaderParam = () => {
-  headerParams.value.push(createParamRow());
-};
-
-const removeQueryParam = (id: string) => {
-  queryParams.value = queryParams.value.filter((item) => item.id !== id);
-};
-
-const removeHeaderParam = (id: string) => {
-  headerParams.value = headerParams.value.filter((item) => item.id !== id);
-};
-
-const applyCurrentServiceTemplate = () => {
-  if (!currentService.value?.url) {
-    ElMessage.warning('当前不是聚合模式或未选择服务');
-    return;
-  }
-
-  activeScope.value = currentServiceScopeKey.value;
-};
+const debugCacheDescription =
+  '开启后会缓存在线调试的请求数据（刷新页面后仍保留）。关闭后回到当前默认行为，不读取也不写入调试缓存。';
+const groupOverviewDescription =
+  '开启后，点击左侧菜单的接口分组会在右侧展示该分组下全部接口的概览页；关闭后点击分组仅展开或收起子菜单，需点击具体接口才进入对应详情。';
 
 const clearAllDebugRequestCache = () => {
   apiTestCacheStore.clearAllRequestCache();
   ElMessage.success('已清理全部调试缓存');
 };
+
+watch(groupOverviewEnabled, (enabled) => {
+  if (enabled) {
+    return;
+  }
+  const routeName = router.currentRoute.value.name;
+  const activePath = router.currentRoute.value.meta.activePath as
+    | string
+    | undefined;
+  if (
+    typeof routeName === 'string' &&
+    routeName.endsWith('__overview__') &&
+    activePath
+  ) {
+    void router.replace(activePath);
+  }
+});
 </script>
 
 <template>
-  <div class="h-full overflow-auto p-5">
-    <ElCard shadow="never" class="mb-4">
-      <template #header>
-        <div class="flex items-center justify-between">
-          <span class="font-medium">全局调试缓存</span>
-          <ElSpace>
-            <ElButton text type="danger" @click="clearAllDebugRequestCache">
-              清理全部缓存
-            </ElButton>
-          </ElSpace>
-        </div>
-      </template>
-
-      <ElAlert class="mb-4" type="info" show-icon :closable="false">
-        <template #default>
-          开启后会缓存在线调试的请求数据（刷新页面后仍保留）。关闭后回到当前默认行为，不读取也不写入调试缓存。
-        </template>
-      </ElAlert>
-
-      <ElForm label-width="110px">
-        <ElFormItem label="调试缓存开关">
-          <ElSwitch
-            v-model="debugCacheEnabled"
-            active-text="开启"
-            inactive-text="关闭"
-            inline-prompt
-          />
-        </ElFormItem>
-      </ElForm>
-    </ElCard>
-
-    <ElCard shadow="never">
-      <template #header>
-        <div class="flex items-center justify-between">
-          <span class="font-medium">全局参数配置</span>
-          <ElSpace>
-            <ElButton v-if="isAggregation" @click="applyCurrentServiceTemplate">
-              切换到当前服务作用域
-            </ElButton>
-            <ElButton @click="resetScope">清空当前作用域</ElButton>
-          </ElSpace>
-        </div>
-      </template>
-
-      <ElAlert class="mb-4" type="info" show-icon :closable="false">
-        <template #default>
-          调试请求会自动注入全局参数。若调试页填写了同名参数，调试页参数优先。
-          当前为实时生效，无需手动保存。 当前有效注入：Query
-          {{ mergedActiveQueryCount }} 项，Header
-          {{ mergedActiveHeaderCount }} 项。
-        </template>
-      </ElAlert>
-
-      <ElForm label-width="90px" class="mb-4 mt-2">
-        <ElFormItem label="作用域">
-          <ElSelect v-model="activeScope" style="width: 360px">
-            <ElOption
-              v-for="item in scopeOptions"
-              :key="item.value"
-              :label="item.label"
-              :value="item.value"
-            />
-          </ElSelect>
-        </ElFormItem>
-      </ElForm>
-
-      <ElTabs>
-        <ElTabPane label="全局请求头参数">
-          <ElButton class="mb-3" @click="addHeaderParam">
-            新增 Header 参数
-          </ElButton>
-          <ElTable :data="headerParams" border>
-            <ElTableColumn label="启用" width="80" align="center">
-              <template #default="{ row }">
-                <ElSwitch v-model="row.enabled" />
-              </template>
-            </ElTableColumn>
-            <ElTableColumn label="请求头" min-width="180">
-              <template #default="{ row }">
-                <ElSelect
-                  v-model="row.name"
-                  filterable
-                  allow-create
-                  default-first-option
-                  clearable
-                  placeholder="例如 Authorization"
+  <div class="doc-manage-config-page h-full overflow-auto">
+    <!-- 全局调试缓存 与 分组概览 两张卡片并列，各占一半宽度 -->
+    <div class="config-card-row mb-4">
+      <ElCard shadow="never" class="config-card">
+        <template #header>
+          <div class="flex items-center justify-between">
+            <div class="config-card__title">
+              <span class="font-medium">全局调试缓存</span>
+              <ElTooltip :content="debugCacheDescription" placement="top">
+                <button
+                  type="button"
+                  class="config-card__help"
+                  aria-label="查看全局调试缓存说明"
                 >
-                  <ElOption
-                    v-for="name in commonHeaderNameOptions"
-                    :key="name"
-                    :label="name"
-                    :value="name"
-                  />
-                </ElSelect>
-              </template>
-            </ElTableColumn>
-            <ElTableColumn label="值" min-width="260">
-              <template #default="{ row }">
-                <ElInput v-model="row.value" placeholder="Header 值" />
-              </template>
-            </ElTableColumn>
-            <ElTableColumn label="说明" min-width="220">
-              <template #default="{ row }">
-                <ElInput v-model="row.description" placeholder="可选说明" />
-              </template>
-            </ElTableColumn>
-            <ElTableColumn label="操作" width="100" fixed="right">
-              <template #default="{ row }">
-                <ElButton text type="danger" @click="removeHeaderParam(row.id)">
-                  删除
-                </ElButton>
-              </template>
-            </ElTableColumn>
-          </ElTable>
-        </ElTabPane>
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M12 16v-4" />
+                    <path d="M12 8h.01" />
+                  </svg>
+                </button>
+              </ElTooltip>
+            </div>
+            <ElSpace>
+              <ElButton text type="danger" @click="clearAllDebugRequestCache">
+                清理全部缓存
+              </ElButton>
+            </ElSpace>
+          </div>
+        </template>
 
-        <ElTabPane label="全局 Query 参数">
-          <ElButton class="mb-3" @click="addQueryParam">
-            新增 Query 参数
-          </ElButton>
-          <ElTable :data="queryParams" border>
-            <ElTableColumn label="启用" width="80" align="center">
-              <template #default="{ row }">
-                <ElSwitch v-model="row.enabled" />
-              </template>
-            </ElTableColumn>
-            <ElTableColumn label="参数名" min-width="180">
-              <template #default="{ row }">
-                <ElInput v-model.trim="row.name" placeholder="例如 tenantId" />
-              </template>
-            </ElTableColumn>
-            <ElTableColumn label="参数值" min-width="200">
-              <template #default="{ row }">
-                <ElInput v-model="row.value" placeholder="参数值" />
-              </template>
-            </ElTableColumn>
-            <ElTableColumn label="说明" min-width="220">
-              <template #default="{ row }">
-                <ElInput v-model="row.description" placeholder="可选说明" />
-              </template>
-            </ElTableColumn>
-            <ElTableColumn label="操作" width="100" fixed="right">
-              <template #default="{ row }">
-                <ElButton text type="danger" @click="removeQueryParam(row.id)">
-                  删除
-                </ElButton>
-              </template>
-            </ElTableColumn>
-          </ElTable>
-        </ElTabPane>
-      </ElTabs>
-    </ElCard>
+        <ElForm label-width="110px" label-position="left">
+          <ElFormItem label="调试缓存开关" class="config-switch-item">
+            <ElSwitch
+              v-model="debugCacheEnabled"
+              active-text="开启"
+              inactive-text="关闭"
+              inline-prompt
+            />
+          </ElFormItem>
+        </ElForm>
+      </ElCard>
+
+      <ElCard shadow="never" class="config-card">
+        <template #header>
+          <div class="config-card__title">
+            <span class="font-medium">分组概览</span>
+            <ElTooltip :content="groupOverviewDescription" placement="top">
+              <button
+                type="button"
+                class="config-card__help"
+                aria-label="查看分组概览说明"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M12 16v-4" />
+                  <path d="M12 8h.01" />
+                </svg>
+              </button>
+            </ElTooltip>
+          </div>
+        </template>
+
+        <ElForm label-width="110px" label-position="left">
+          <ElFormItem label="分组概览开关" class="config-switch-item">
+            <ElSwitch
+              v-model="groupOverviewEnabled"
+              active-text="开启"
+              inactive-text="关闭"
+              inline-prompt
+            />
+          </ElFormItem>
+        </ElForm>
+      </ElCard>
+    </div>
+
+    <GlobalParamsConfig />
   </div>
 </template>
+
+<style scoped>
+@media (max-width: 900px) {
+  .config-card-row {
+    flex-direction: column;
+  }
+}
+
+.doc-manage-config-page {
+  --doc-manage-radius: calc(var(--radius) * 1.18);
+  --doc-manage-radius-sm: calc(var(--radius) * 0.94);
+  --doc-manage-line: var(--el-border-color-lighter);
+  --doc-manage-panel: var(--el-bg-color);
+  --doc-manage-shadow-sm:
+    0 1px 2px color-mix(in srgb, var(--el-text-color-primary) 6%, transparent),
+    0 2px 8px color-mix(in srgb, var(--el-text-color-primary) 5%, transparent);
+  --doc-manage-shadow-md:
+    0 4px 14px color-mix(in srgb, var(--el-text-color-primary) 8%, transparent),
+    0 10px 30px color-mix(in srgb, var(--el-text-color-primary) 7%, transparent);
+
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  padding: 20px;
+  background: var(--el-fill-color-light);
+}
+
+/* 卡片观感与首页保持一致：更大的圆角、柔和边框与悬浮阴影 */
+.config-card {
+  background: var(--doc-manage-panel);
+  border: 1px solid var(--doc-manage-line);
+  border-radius: var(--doc-manage-radius);
+  box-shadow: var(--doc-manage-shadow-sm);
+  transition:
+    box-shadow 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.config-card:hover {
+  border-color: color-mix(in srgb, var(--el-color-primary) 25%, transparent);
+  box-shadow: var(--doc-manage-shadow-md);
+}
+
+.config-card :deep(.el-card__header) {
+  border-bottom-color: var(--doc-manage-line);
+}
+
+.config-card :deep(.el-card__body) {
+  background: linear-gradient(
+    180deg,
+    var(--doc-manage-panel) 0%,
+    color-mix(
+        in srgb,
+        var(--el-fill-color-lighter) 32%,
+        var(--doc-manage-panel)
+      )
+      100%
+  );
+}
+
+.config-card__title {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 14px;
+  color: var(--el-text-color-primary);
+}
+
+.config-card__help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--doc-manage-line);
+  border-radius: var(--doc-manage-radius-sm);
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.config-card__help:hover {
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+  border-color: color-mix(in srgb, var(--el-color-primary) 30%, transparent);
+}
+
+.config-card__help svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* 全局调试缓存 / 分组概览 两卡片并列，各占一半 */
+.config-card-row {
+  display: flex;
+  gap: 16px;
+}
+
+.config-card-row .config-card {
+  flex: 1;
+  min-width: 0;
+}
+
+.config-switch-item {
+  margin-bottom: 0;
+}
+</style>

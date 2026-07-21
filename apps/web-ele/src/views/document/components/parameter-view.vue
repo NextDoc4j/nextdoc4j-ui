@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import type { Parameter } from '#/typings/openApi';
 
-import { computed } from 'vue';
+import { computed, ref, watch } from 'vue';
 
+import SchemaView from '#/components/schema-view.vue';
 import { getEnumItems } from '#/utils/enumexpand';
 import { getSchemaTypeLabel, resolveSchema } from '#/utils/schema';
 
@@ -18,8 +19,98 @@ const schema = computed(() => {
   return props.parameter.schema ? resolveSchema(props.parameter.schema) : null;
 });
 
+/**
+ * query/path 参数 schema 是否为多分支 oneOf/anyOf，需复用 SchemaView 分支切换
+ */
+const hasCompositionVariants = computed(() => {
+  const source = schema.value;
+  if (!source || typeof source !== 'object') {
+    return false;
+  }
+  if (Array.isArray(source.oneOf) && source.oneOf.length > 1) {
+    return true;
+  }
+  if (Array.isArray(source.anyOf) && source.anyOf.length > 1) {
+    return true;
+  }
+  return false;
+});
+
+/** 当前选中的 oneOf/anyOf 分支下标（与嵌入的 SchemaView 根 tabs 同步） */
+const selectedVariantIndex = ref(0);
+
+watch(
+  () => props.parameter.name,
+  () => {
+    selectedVariantIndex.value = 0;
+  },
+);
+
+/**
+ * 多分支 composition 的选项列表
+ */
+const compositionOptions = computed(() => {
+  const source = schema.value;
+  if (!source || typeof source !== 'object') {
+    return [] as any[];
+  }
+  if (Array.isArray(source.oneOf) && source.oneOf.length > 1) {
+    return source.oneOf as any[];
+  }
+  if (Array.isArray(source.anyOf) && source.anyOf.length > 1) {
+    return source.anyOf as any[];
+  }
+  return [] as any[];
+});
+
+/**
+ * 当前展示用 schema：多分支时取选中分支，与 body SchemaView 类型/示例一致
+ */
+const displaySchema = computed(() => {
+  const options = compositionOptions.value;
+  if (options.length > 0) {
+    const idx = selectedVariantIndex.value;
+    const safe =
+      typeof idx === 'number' && idx >= 0 && idx < options.length ? idx : 0;
+    return options[safe] ?? options[0] ?? schema.value;
+  }
+  return schema.value;
+});
+
+/** SchemaView 根路径为 $ 的分支切换才驱动参数头类型/示例 */
+const handleVariantChange = (payload: { index: number; path: string }) => {
+  if (!payload.path || payload.path === '$') {
+    selectedVariantIndex.value = Number.isFinite(payload.index)
+      ? payload.index
+      : 0;
+  }
+};
+
+/**
+ * 从 schema / examples 取可用示例（null 视为未提供）
+ */
+const pickUsableExample = (source: any): unknown => {
+  if (!source || typeof source !== 'object') {
+    return undefined;
+  }
+  if (source.example !== undefined && source.example !== null) {
+    return source.example;
+  }
+  if (Array.isArray(source.examples) && source.examples.length > 0) {
+    const first = source.examples[0];
+    if (first === undefined || first === null) {
+      return undefined;
+    }
+    if (typeof first === 'object' && first !== null && 'value' in first) {
+      return (first as { value: unknown }).value ?? undefined;
+    }
+    return first;
+  }
+  return undefined;
+};
+
 const constraintTokens = computed(() => {
-  const source = schema.value || props.parameter;
+  const source = displaySchema.value || props.parameter;
   const parts: string[] = [];
 
   if (source.minLength !== undefined) {
@@ -58,22 +149,36 @@ const htmlDescription = computed(() => {
 });
 
 const enumItems = computed(() => {
-  const schemaSource = schema.value || props.parameter.schema;
+  const schemaSource = displaySchema.value || props.parameter.schema;
   if (!schemaSource) return [];
 
   return getEnumItems(schemaSource);
 });
 
 const typeLabel = computed(() => {
-  return getSchemaTypeLabel(schema.value);
+  // 多分支时用选中分支类型，避免 composition 根始终显示 any
+  return getSchemaTypeLabel(displaySchema.value);
 });
 
 const exampleValue = computed(() => {
-  return props.parameter.example ?? schema.value?.example;
+  // 参数级示例优先
+  if (
+    props.parameter.example !== undefined &&
+    props.parameter.example !== null
+  ) {
+    return props.parameter.example;
+  }
+  // 选中分支 / 展示 schema
+  const fromDisplay = pickUsableExample(displaySchema.value);
+  if (fromDisplay !== undefined) {
+    return fromDisplay;
+  }
+  // 回退原始 schema 根（非 null）
+  return pickUsableExample(schema.value);
 });
 
 const patternValue = computed(() => {
-  return schema.value?.pattern || '';
+  return displaySchema.value?.pattern || '';
 });
 
 const formatValue = (value: unknown) => {
@@ -94,11 +199,11 @@ const formatValue = (value: unknown) => {
           :class="{ 'parameter-item__name--required': parameter.required }"
         >
           {{ parameter.name }}
-          <sup v-if="parameter.required" class="parameter-item__required-star">
-            *
-          </sup>
         </div>
         <div class="parameter-item__type">{{ typeLabel }}</div>
+        <span v-if="parameter.required" class="parameter-item__required-tag">
+          必填
+        </span>
         <div v-if="plainDescription" class="parameter-item__summary">
           {{ plainDescription }}
         </div>
@@ -167,38 +272,59 @@ const formatValue = (value: unknown) => {
         </div>
       </div>
     </div>
+
+    <!-- 多分支 oneOf/anyOf：复用 SchemaView 根级分支切换；类型/示例随 variant-change 同步 -->
+    <div
+      v-if="hasCompositionVariants && schema"
+      class="parameter-item__composition"
+    >
+      <SchemaView
+        :data="schema"
+        mode="request"
+        @variant-change="handleVariantChange"
+      />
+    </div>
   </div>
 </template>
 
 <style scoped>
 .parameter-item {
-  --field-chip-radius: calc(var(--radius, 12px) * 0.82);
-  --field-chip-bg: var(--el-fill-color-light);
-  --field-chip-border: var(--el-border-color);
+  --field-chip-radius: 8px;
+  --field-chip-bg: var(--doc-field-chip-bg, var(--el-fill-color-light));
+  --field-chip-border: var(--doc-field-chip-border, var(--el-border-color));
   --field-chip-text: var(--el-text-color-primary);
   --field-chip-value-weight: 600;
   --field-required: var(--el-color-danger);
-  --field-leading-gutter: 26px;
 
-  padding: 10px 0;
-  border-bottom: 1px solid var(--el-border-color-lighter);
+  padding: 18px 0;
+  margin: 0;
+  border-bottom: 1px solid var(--field-chip-border);
+  transition: background-color 0.2s ease;
+}
+
+.parameter-item:hover {
+  background-color: var(
+    --doc-row-hover-bg,
+    color-mix(in srgb, var(--el-fill-color-light) 42%, transparent)
+  );
 }
 
 .parameter-item:last-child {
-  padding-bottom: 0;
   border-bottom: none;
 }
 
 .parameter-item__headline {
   min-width: 0;
-  padding-left: var(--field-leading-gutter);
+  padding: 0 20px;
 }
 
 .parameter-item__title-line {
+  /* 流式布局：与请求体/响应参数（SchemaView）保持一致，
+     字段名与类型 chip 同行按自然宽度排列，描述另起一行占满整行 */
   display: flex;
   flex-wrap: wrap;
   gap: 4px 10px;
-  align-items: baseline;
+  align-items: center;
   min-width: 0;
 }
 
@@ -206,7 +332,9 @@ const formatValue = (value: unknown) => {
   position: relative;
   display: inline-flex;
   flex: 0 1 auto;
-  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
   min-width: 0;
   max-width: 100%;
   font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
@@ -219,34 +347,58 @@ const formatValue = (value: unknown) => {
 }
 
 .parameter-item__name--required {
-  color: var(--field-required);
+  color: var(--el-text-color-primary);
 }
 
-.parameter-item__required-star {
-  position: absolute;
-  top: 0;
-  left: -10px;
+.parameter-item__required-tag {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  min-height: 18px;
+  padding: 0 6px;
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
   font-size: 10px;
-  font-style: normal;
   font-weight: 700;
-  line-height: 1;
+  line-height: 18px;
   color: var(--field-required);
-  transform: translate(0, -32%);
+  background: color-mix(
+    in srgb,
+    var(--el-color-danger-light-9) 88%,
+    transparent
+  );
+  border: 1px solid
+    color-mix(in srgb, var(--el-color-danger-light-7) 86%, transparent);
+  border-radius: 6px;
+}
+
+.parameter-item__composition {
+  padding: 0 20px 4px;
+  margin-top: 10px;
 }
 
 .parameter-item__type {
   display: inline-flex;
   flex: 0 1 auto;
-  align-items: baseline;
+  align-items: center;
+  width: fit-content;
   min-width: 0;
   max-width: 100%;
+  min-height: 24px;
+  padding: 2px 8px;
   font-family: 'JetBrains Mono', 'Fira Code', SFMono-Regular, monospace;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
   line-height: 1.5;
-  color: var(--el-text-color-secondary);
+  color: var(--el-color-primary);
   overflow-wrap: anywhere;
   white-space: normal;
+  background: var(--el-color-primary-light-9);
+  border-radius: 7px;
 }
 
 .parameter-item__summary,
@@ -254,25 +406,30 @@ const formatValue = (value: unknown) => {
   min-width: 0;
   font-size: 12px;
   line-height: 1.5;
-  color: var(--el-text-color-secondary);
+
+  /* 描述用 regular 色：与请求体/响应参数（SchemaView）一致，
+     浅色模式近黑、深色模式近白，比 secondary 灰色更清晰 */
+  color: var(--el-text-color-regular);
 }
 
 .parameter-item__summary {
-  flex: 1 1 240px;
+  /* 流式布局中占满整行，稳定换到字段名/类型下一行显示 */
+  flex: 0 0 100%;
   min-width: 0;
+  margin-top: 2px;
 }
 
 .parameter-item__description {
-  padding-left: var(--field-leading-gutter);
-  margin-top: 6px;
+  padding: 0 20px;
+  margin-top: 8px;
 }
 
 .parameter-item__details {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
   gap: 6px 8px;
-  padding-left: var(--field-leading-gutter);
-  margin-top: 8px;
+  padding: 0 20px;
+  margin-top: 10px;
 }
 
 .parameter-item__detail-row {
@@ -343,6 +500,10 @@ const formatValue = (value: unknown) => {
 }
 
 @media (max-width: 768px) {
+  .parameter-item__title-line {
+    gap: 6px 8px;
+  }
+
   .parameter-item__details {
     grid-template-columns: 1fr;
     row-gap: 4px;
@@ -352,14 +513,6 @@ const formatValue = (value: unknown) => {
     display: grid;
     grid-template-columns: 1fr;
     gap: 2px;
-  }
-
-  .parameter-item__title-line {
-    gap: 6px 8px;
-  }
-
-  .parameter-item__summary {
-    flex-basis: 240px;
   }
 
   .parameter-item__detail-label {

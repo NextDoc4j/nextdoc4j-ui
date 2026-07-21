@@ -441,7 +441,10 @@ export function hasRenderableSchema(schema: any) {
       schema.format ||
       schema.example !== undefined ||
       (Array.isArray(schema.examples) && schema.examples.length > 0) ||
-      schema.default !== undefined,
+      schema.default !== undefined  ||
+      (Array.isArray(schema.allOf) && schema.allOf.length > 0) ||
+      (Array.isArray(schema.oneOf) && schema.oneOf.length > 0) ||
+      (Array.isArray(schema.anyOf) && schema.anyOf.length > 0),
   );
 }
 
@@ -623,7 +626,8 @@ const generateExampleInternal = (
 
   if (
     normalized.default !== undefined &&
-    normalized.default !== DEFAULT_SENTINEL
+    normalized.default !== DEFAULT_SENTINEL &&
+    (normalized.default !== null || normalized.nullable === true)
   ) {
     return parseExampleValue(normalized.default);
   }

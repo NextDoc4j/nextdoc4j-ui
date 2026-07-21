@@ -116,10 +116,9 @@ class PreferenceManager {
   public updatePreferences(updates: DeepPartial<Preferences>) {
     const mergedState = merge({}, updates, markRaw(this.state));
 
-    Object.assign(this.state, mergedState);
-
     // 根据更新的键值执行相应的操作
-    this.handleUpdates(updates);
+    this.handleUpdates(updates, mergedState);
+    Object.assign(this.state, mergedState);
     this.savePreferences(this.state);
   }
 
@@ -137,19 +136,24 @@ class PreferenceManager {
    * 处理更新的键值
    * 根据更新的键值执行相应的操作。
    * @param {DeepPartial<Preferences>} updates - 部分更新的偏好设置
+   * @param {Preferences} currentState - 本次更新合并后的完整偏好设置
+   * @returns {void} 无返回值
    */
-  private handleUpdates(updates: DeepPartial<Preferences>) {
+  private handleUpdates(
+    updates: DeepPartial<Preferences>,
+    currentState: Preferences,
+  ) {
     const themeUpdates = updates.theme || {};
     const appUpdates = updates.app || {};
     if (themeUpdates && Object.keys(themeUpdates).length > 0) {
-      updateCSSVariables(this.state);
+      updateCSSVariables(currentState);
     }
 
     if (
       Reflect.has(appUpdates, 'colorGrayMode') ||
       Reflect.has(appUpdates, 'colorWeakMode')
     ) {
-      this.updateColorMode(this.state);
+      this.updateColorMode(currentState);
     }
   }
 
