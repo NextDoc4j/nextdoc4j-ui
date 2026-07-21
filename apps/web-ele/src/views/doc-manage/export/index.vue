@@ -1314,6 +1314,33 @@ function getStringExampleByFormat(format?: string) {
   }
 }
 
+/**
+ * 从 requestBody content 条目读取示例；example 为 null 时视为未提供。
+ */
+function resolveRequestBodyContentExample(
+  body: any,
+  doc: OpenAPISpec,
+): unknown {
+  if (!body || typeof body !== 'object') {
+    return undefined;
+  }
+
+  if (body.example !== undefined && body.example !== null) {
+    return resolveExampleValue(body.example, doc);
+  }
+
+  if (body.examples && typeof body.examples === 'object') {
+    for (const entry of Object.values(body.examples) as any[]) {
+      const value = resolveExampleValue(entry, doc);
+      if (value !== undefined && value !== null) {
+        return value;
+      }
+    }
+  }
+
+  return undefined;
+}
+
 function generateSchemaExample(
   schema: any,
   doc: OpenAPISpec,
@@ -1332,27 +1359,29 @@ function generateSchemaExample(
     return normalized;
   }
 
-  if (normalized.example !== undefined) {
+  // 显式 example/default 为 null 时视为「未提供示例」，继续按结构生成，避免 JSON 示例整块为 null
+  if (normalized.example !== undefined && normalized.example !== null) {
     return normalizeExampleValue(normalized.example);
   }
 
   if (
     Array.isArray(normalized.examples) &&
     normalized.examples.length > 0 &&
-    normalized.examples[0] !== undefined
+    normalized.examples[0] !== undefined &&
+    normalized.examples[0] !== null
   ) {
     return normalizeExampleValue(normalized.examples[0]);
   }
 
-  if (normalized.default !== undefined) {
+  if (normalized.default !== undefined && normalized.default !== null) {
     return normalizeExampleValue(normalized.default);
   }
 
-  if (normalized.const !== undefined) {
+  if (normalized.const !== undefined && normalized.const !== null) {
     return normalizeExampleValue(normalized.const);
   }
 
-  if (normalized._const !== undefined) {
+  if (normalized._const !== undefined && normalized._const !== null) {
     return normalizeExampleValue(normalized._const);
   }
 
@@ -3052,7 +3081,13 @@ function buildMarkdownDocument(doc: OpenAPISpec, selectedOps: OperationItem[]) {
           includeExamples: groups.length > 1,
         });
         if (groups.length <= 1) {
-          appendJsonExampleBlock(lines, generateSchemaExample(schema, doc));
+          // 优先 content 级示例；null/缺失时回退 schema 结构生成
+          const contentExample = resolveRequestBodyContentExample(body, doc);
+          const exampleValue =
+            contentExample !== undefined && contentExample !== null
+              ? contentExample
+              : generateSchemaExample(schema, doc);
+          appendJsonExampleBlock(lines, exampleValue);
         }
         appendSchemaCompositionSections(lines, schema, doc, {
           coveredTitles: groups.map((group) => group.title),
