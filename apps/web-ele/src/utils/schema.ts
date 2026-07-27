@@ -530,7 +530,7 @@ export function hasRenderableSchema(schema: any) {
       schema.format ||
       schema.example !== undefined ||
       (Array.isArray(schema.examples) && schema.examples.length > 0) ||
-      schema.default !== undefined  ||
+      schema.default !== undefined ||
       (Array.isArray(schema.allOf) && schema.allOf.length > 0) ||
       (Array.isArray(schema.oneOf) && schema.oneOf.length > 0) ||
       (Array.isArray(schema.anyOf) && schema.anyOf.length > 0),
@@ -983,7 +983,13 @@ export function generateExample(
     maxDepth: options.maxDepth ?? DEFAULT_MAX_DEPTH,
     mode: options.mode ?? 'entity',
   };
-  return generateExampleInternal(schema, normalizedOptions, new WeakSet(), 0, []);
+  return generateExampleInternal(
+    schema,
+    normalizedOptions,
+    new WeakSet(),
+    0,
+    [],
+  );
 }
 
 // 处理请求和响应的 schema
