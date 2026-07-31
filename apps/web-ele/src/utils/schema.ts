@@ -1,5 +1,7 @@
 import type { Schema } from '#/typings/openApi';
 
+import { toRaw } from 'vue';
+
 import { useApiStore } from '#/store';
 
 export type SchemaViewMode = 'entity' | 'request' | 'response';
@@ -129,6 +131,64 @@ const getSchemaMap = () => {
   }
 };
 
+/** 读取 schema 关联的 components 名称（$ref / 循环标记 / adapt 时写入的 ref-name） */
+const getSchemaRefName = (schema: any): string => {
+  if (!schema || typeof schema !== 'object') {
+    return '';
+  }
+  return (
+    parseSchemaRefName(schema.$ref) ||
+    schema['x-nextdoc4j-ref-name'] ||
+    (schema['x-nextdoc4j-circular-ref'] ? schema.title || '' : '') ||
+    ''
+  );
+};
+
+/**
+ * 按对象身份查找 components 中的 schema 名（兼容 Pinia reactive 代理）。
+ * 用于 raw 组件根节点在 adapt / 示例生成时补记 x-nextdoc4j-ref-name。
+ */
+const findComponentNameByIdentity = (target: any): string => {
+  if (!target || typeof target !== 'object') {
+    return '';
+  }
+  const schemaMap = getSchemaMap();
+  const rawTarget = toRaw(target);
+  for (const [name, value] of Object.entries(schemaMap)) {
+    if (value === target || toRaw(value) === rawTarget) {
+      return name;
+    }
+  }
+  return '';
+};
+
+/**
+ * 解析组件名供 adapt 打标 / 示例生成收敛自引用：
+ * 1) 已有 $ref / 标记；2) 与 components 同引用；3) 实体页注入的 name 字段。
+ */
+const resolveComponentRefName = (inputSchema: any, workingSchema?: any) => {
+  const existing =
+    getSchemaRefName(inputSchema) || getSchemaRefName(workingSchema);
+  if (existing) {
+    return existing;
+  }
+  const byIdentity =
+    findComponentNameByIdentity(inputSchema) ||
+    findComponentNameByIdentity(workingSchema);
+  if (byIdentity) {
+    return byIdentity;
+  }
+  // 实体页：{ name: componentName, ...schema }，name 与 components 键一致时视为该类型
+  const entityName =
+    (typeof inputSchema?.name === 'string' && inputSchema.name) ||
+    (typeof workingSchema?.name === 'string' && workingSchema.name) ||
+    '';
+  if (entityName && getSchemaMap()[entityName]) {
+    return entityName;
+  }
+  return '';
+};
+
 const shouldIncludeByAccess = (
   schema: any,
   mode: SchemaViewMode = 'entity',
@@ -240,6 +300,13 @@ const adaptSchemaInternal = (
   if (typeof inputSchema !== 'object') {
     return inputSchema;
   }
+  // 已标记的循环引用在再次 adapt 时保持原样，避免 generateExample 递归时重新展开
+  if (inputSchema['x-nextdoc4j-circular-ref']) {
+    return {
+      ...inputSchema,
+      type: inputSchema.type || 'ref',
+    };
+  }
   if (depth > options.maxDepth) {
     return {
       description: 'schema depth exceeded',
@@ -257,6 +324,7 @@ const adaptSchemaInternal = (
         title: schema.title || refName,
         type: 'ref',
         'x-nextdoc4j-circular-ref': true,
+        'x-nextdoc4j-ref-name': refName,
       };
     }
 
@@ -275,6 +343,8 @@ const adaptSchemaInternal = (
       ...refSchema,
       ...localOverrides,
       title: localOverrides.title || refSchema.title || refName,
+      // 记录来源 $ref 名，供示例生成识别自引用树节点
+      'x-nextdoc4j-ref-name': refName,
     };
   }
 
@@ -420,6 +490,25 @@ const adaptSchemaInternal = (
   if (adapted.default === DEFAULT_SENTINEL) {
     delete adapted.default;
   }
+  // springdoc 等对非 string 字段常写入 default:""，不能作为真实默认值展示
+  if (
+    adapted.default === '' &&
+    adapted.type !== 'string' &&
+    adapted.type !== 'any'
+  ) {
+    delete adapted.default;
+  }
+
+  // raw 组件根 / 实体页 { name, ...schema } 补记 ref 名，避免 adapt 后再 generate 丢失自引用栈
+  if (!adapted['x-nextdoc4j-ref-name']) {
+    const componentName = resolveComponentRefName(inputSchema, schema);
+    if (componentName) {
+      adapted['x-nextdoc4j-ref-name'] = componentName;
+      if (!adapted.title) {
+        adapted.title = componentName;
+      }
+    }
+  }
 
   return adapted;
 };
@@ -441,7 +530,7 @@ export function hasRenderableSchema(schema: any) {
       schema.format ||
       schema.example !== undefined ||
       (Array.isArray(schema.examples) && schema.examples.length > 0) ||
-      schema.default !== undefined  ||
+      schema.default !== undefined ||
       (Array.isArray(schema.allOf) && schema.allOf.length > 0) ||
       (Array.isArray(schema.oneOf) && schema.oneOf.length > 0) ||
       (Array.isArray(schema.anyOf) && schema.anyOf.length > 0),
@@ -456,6 +545,16 @@ export function getSchemaTypeLabel(schema: any): string {
   const schemaType = inferSchemaType(schema) || 'any';
   if (schemaType === 'array') {
     return `array<${getSchemaTypeLabel(schema.items)}>`;
+  }
+
+  // 循环 $ref：展示组件类名（如 MenuTreeNode），避免 UI 出现 array<ref>
+  if (schemaType === 'ref' || schema['x-nextdoc4j-circular-ref']) {
+    return (
+      schema['x-nextdoc4j-ref-name'] ||
+      schema.title ||
+      parseSchemaRefName(schema.$ref) ||
+      'ref'
+    );
   }
 
   if (schemaType === 'any') {
@@ -588,11 +687,46 @@ const stringExampleByFormat = (format?: string) => {
   }
 };
 
+/** 示例生成时解析 schema 类型名（含 adapt 打标 / 实体页 name / 同引用） */
+const resolveExampleRefName = (schema: any): string => {
+  return resolveComponentRefName(schema);
+};
+
+/** 统计当前示例生成栈中同一 schema 名出现次数 */
+const countActiveRef = (activeRefs: string[], refName: string) => {
+  if (!refName) {
+    return 0;
+  }
+  return activeRefs.reduce(
+    (count, name) => count + (name === refName ? 1 : 0),
+    0,
+  );
+};
+
+/**
+ * springdoc 等会给 array/object/number 写入 default:""，不能当作真实示例。
+ * string 的空串 default 仍可用；显式 example / 非空 default 优先走上游分支。
+ */
+const isUsableDefaultValue = (schema: any, value: unknown): boolean => {
+  if (value === undefined || value === DEFAULT_SENTINEL) {
+    return false;
+  }
+  if (value === null) {
+    return schema?.nullable === true;
+  }
+  if (value === '') {
+    const schemaType = inferSchemaType(schema);
+    return schemaType === 'string';
+  }
+  return true;
+};
+
 const generateExampleInternal = (
   schema: any,
   options: Required<GenerateExampleOptions>,
   seenObjects: WeakSet<object>,
   depth: number,
+  activeRefs: string[] = [],
 ): any => {
   if (schema === null || schema === undefined) {
     return null;
@@ -604,6 +738,32 @@ const generateExampleInternal = (
     return schema;
   }
 
+  const refName = resolveExampleRefName(schema);
+  // 自引用树：同类型最多展开两层（根 + 一层 children），再深层收束
+  if (refName && countActiveRef(activeRefs, refName) >= 2) {
+    return {};
+  }
+
+  // 循环 $ref：从 components 再生成一层叶子（入栈由 resolveExampleRefName 负责）
+  if (
+    refName &&
+    (schema['x-nextdoc4j-circular-ref'] || schema.type === 'ref')
+  ) {
+    const refSchema = getSchemaMap()[refName];
+    if (!refSchema) {
+      return {};
+    }
+    return generateExampleInternal(
+      refSchema,
+      options,
+      seenObjects,
+      depth,
+      activeRefs,
+    );
+  }
+
+  const nextActiveRefs = refName ? [...activeRefs, refName] : activeRefs;
+
   const normalized = adaptSchemaForView(schema, {
     mode: options.mode,
     maxDepth: options.maxDepth,
@@ -611,6 +771,13 @@ const generateExampleInternal = (
   if (!normalized || typeof normalized !== 'object') {
     return null;
   }
+
+  // adapt 展开 $ref 后补记 ref 名，保证后续 children 自引用可识别
+  const adaptedRefName = getSchemaRefName(normalized);
+  const effectiveActiveRefs =
+    adaptedRefName && countActiveRef(nextActiveRefs, adaptedRefName) === 0
+      ? [...nextActiveRefs, adaptedRefName]
+      : nextActiveRefs;
 
   if (normalized.example !== undefined) {
     return parseExampleValue(normalized.example);
@@ -624,11 +791,7 @@ const generateExampleInternal = (
     return parseExampleValue(normalized.examples[0]);
   }
 
-  if (
-    normalized.default !== undefined &&
-    normalized.default !== DEFAULT_SENTINEL &&
-    (normalized.default !== null || normalized.nullable === true)
-  ) {
+  if (isUsableDefaultValue(normalized, normalized.default)) {
     return parseExampleValue(normalized.default);
   }
 
@@ -646,6 +809,7 @@ const generateExampleInternal = (
       options,
       seenObjects,
       depth + 1,
+      effectiveActiveRefs,
     );
   }
 
@@ -655,6 +819,7 @@ const generateExampleInternal = (
       options,
       seenObjects,
       depth + 1,
+      effectiveActiveRefs,
     );
   }
 
@@ -668,6 +833,7 @@ const generateExampleInternal = (
         options,
         seenObjects,
         depth + 1,
+        effectiveActiveRefs,
       );
       if (isPlainObject(value)) {
         Object.assign(mergedObject, value);
@@ -683,6 +849,7 @@ const generateExampleInternal = (
       options,
       seenObjects,
       depth + 1,
+      effectiveActiveRefs,
     );
   }
 
@@ -697,16 +864,31 @@ const generateExampleInternal = (
         normalized.prefixItems.length > 0
       ) {
         return normalized.prefixItems.map((item: any) =>
-          generateExampleInternal(item, options, seenObjects, depth + 1),
+          generateExampleInternal(
+            item,
+            options,
+            seenObjects,
+            depth + 1,
+            effectiveActiveRefs,
+          ),
         );
       }
       if (normalized.items) {
+        const itemRefName = getSchemaRefName(normalized.items);
+        // 同类型已在栈中两层时，自引用 children 直接给空数组（不再生成 [null]/{}）
+        if (
+          itemRefName &&
+          countActiveRef(effectiveActiveRefs, itemRefName) >= 2
+        ) {
+          return [];
+        }
         return [
           generateExampleInternal(
             normalized.items,
             options,
             seenObjects,
             depth + 1,
+            effectiveActiveRefs,
           ),
         ];
       }
@@ -742,6 +924,7 @@ const generateExampleInternal = (
           options,
           seenObjects,
           depth + 1,
+          effectiveActiveRefs,
         );
       });
 
@@ -755,12 +938,17 @@ const generateExampleInternal = (
             options,
             seenObjects,
             depth + 1,
+            effectiveActiveRefs,
           );
         }
       }
 
       seenObjects.delete(normalized);
       return result;
+    }
+    case 'ref': {
+      // 未在上方展开的循环引用占位
+      return {};
     }
     case 'string': {
       return stringExampleByFormat(normalized.format);
@@ -775,6 +963,7 @@ const generateExampleInternal = (
           options,
           seenObjects,
           depth + 1,
+          effectiveActiveRefs,
         );
       }
       return null;
@@ -794,7 +983,13 @@ export function generateExample(
     maxDepth: options.maxDepth ?? DEFAULT_MAX_DEPTH,
     mode: options.mode ?? 'entity',
   };
-  return generateExampleInternal(schema, normalizedOptions, new WeakSet(), 0);
+  return generateExampleInternal(
+    schema,
+    normalizedOptions,
+    new WeakSet(),
+    0,
+    [],
+  );
 }
 
 // 处理请求和响应的 schema
